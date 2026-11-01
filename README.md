@@ -28,7 +28,9 @@ Bot d'automatisation pour Aleryos, destiné aux **tests de protection anti-bot r
 docker compose up --build
 ```
 
-Puis ouvrir http://127.0.0.1:8000. Le port n'est publié que sur la machine du conteneur (pour y accéder à distance : tunnel SSH, ou remplacer par `"8000:8000"` en protégeant l'interface, voir ci-dessous).
+Puis ouvrir `http://<adresse-du-serveur>:7654`. Le port se change dans `docker-compose.yml` (`"7654:8000"` : port du serveur à gauche, port du conteneur à droite).
+
+**Attention** : l'interface reçoit le mot de passe du jeu et n'est accessible qu'en HTTP. Ne l'exposez pas sur internet sans protection (réglages `ui_user` / `ui_password` ci-dessous, et idéalement un reverse proxy HTTPS).
 
 ## Réglages
 

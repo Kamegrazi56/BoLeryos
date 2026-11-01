@@ -6,7 +6,7 @@ services:
   boleryos:
     build: https://github.com/Kamegrazi56/BoLeryos.git#claude/bot-login-setup
     ports:
-      - "127.0.0.1:8000:8000"
+      - "7654:8000"
     shm_size: "1gb"
     security_opt:
       - no-new-privileges:true
