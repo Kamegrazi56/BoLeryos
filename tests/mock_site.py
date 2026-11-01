@@ -44,12 +44,35 @@ PAGE = """<!doctype html>
 </body></html>"""
 
 
-SERVERS_PAGE = """<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Univers</title></head>
-<body><h1>Choisissez votre univers</h1>
-<div class="card"><h2>Kael</h2><span>Ouverture programmée</span><button>Ajouter à mon agenda</button></div>
-<div class="card"><h2>Asterion</h2><span>Ouvert</span>
-  <button onclick="location.href='/servers/asterion'">Reprendre la partie</button></div>
-</body></html>"""  # structure supposée d'après une capture d'écran : à confirmer avec l'export réel
+# Page « Choisissez votre univers », reconstituée d'après un export réel (pseudo remplacé).
+# Points repris du vrai site : un <article> par univers, le titre (h2) dans une colonne et le bouton
+# « Reprendre la partie » dans une autre ; un texte masqué « Compte existant — Reprendre la partie »
+# présent dans les DEUX cartes (qui ne doit pas être pris pour un bouton) ; Kael verrouillé.
+SERVERS_PAGE = """<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Aleryos</title></head>
+<body><nav><button>Mon compte</button><button aria-label="Déconnexion"></button></nav>
+<main><header><div><h1>Choisissez votre univers</h1><p>Sélectionnez une instance active.</p></div></header>
+<div class="space-y-2.5">
+<article class="relative min-h-[150px]"><div class="relative flex min-h-[inherit]">
+  <div class="min-w-0 lg:flex-1 opacity-60">
+    <div class="flex flex-wrap items-center"><h2>Kael</h2><div class="ml-auto"><span>Ouvert</span></div></div>
+    <div class="mt-2 flex"><div class="grid"><div><div>Inscrits</div><div>342</div></div></div><button type="button">Caractéristiques</button></div>
+    <div class="mt-2 flex items-center"><span style="position:absolute;left:-9999px">Compte existant — Reprendre la partie</span></div>
+  </div>
+  <div class="flex shrink-0 flex-col"><p>Votre pseudo : Joueur</p></div>
+  <div class="flex w-full items-center"><div class="min-w-0 flex-1"><p>Ouverture officielle le 07/11/2026 09:00.</p><p>Votre empire est prêt, mais l'accès au jeu reste verrouillé.</p></div>
+    <button id="calendar-button-1" type="button"><span>Ajouter à mon agenda</span></button></div>
+</div></article>
+<article class="relative min-h-[150px]"><div class="relative flex min-h-[inherit]">
+  <div class="min-w-0 lg:flex-1">
+    <div class="flex flex-wrap items-center"><h2>Asterion</h2><div class="ml-auto"><span>Ouvert</span></div></div>
+    <div class="mt-2 flex"><div class="grid"><div><div>Inscrits</div><div>1 111</div></div></div><button type="button">Caractéristiques</button></div>
+    <div class="mt-2 flex items-center"><span style="position:absolute;left:-9999px">Compte existant — Reprendre la partie</span></div>
+    <details class="group mt-2"><summary><span>Rattrapage galactique</span><span>Disponible</span></summary><p>Les nouveaux joueurs progressent plus vite.</p></details>
+  </div>
+  <div class="flex shrink-0 flex-col"><p>Votre pseudo : Joueur</p>
+    <button type="button" onclick="location.href='/servers/asterion'">Reprendre la partie</button></div>
+</div></article>
+</div></main><footer><p>© 2026 Aleryos</p></footer></body></html>"""
 
 
 def create_mock_site() -> FastAPI:

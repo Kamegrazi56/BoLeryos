@@ -1,4 +1,5 @@
 import asyncio
+import types
 from dataclasses import replace
 
 import pytest
@@ -22,12 +23,14 @@ class FakePage:
 
 @pytest.fixture
 def sleeps(monkeypatch):
+    """Enregistre les pauses demandées par app.human, sans toucher à asyncio.sleep des autres threads
+    (le serveur du faux site, encore actif en arrière-plan, l'utilise aussi)."""
     recorded = []
 
     async def fake_sleep(seconds):
         recorded.append(seconds)
 
-    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(human, "asyncio", types.SimpleNamespace(sleep=fake_sleep))
     return recorded
 
 

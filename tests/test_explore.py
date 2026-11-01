@@ -149,6 +149,8 @@ def test_universes_are_listed_and_entered_after_login(client, mock_url):
     assert client.post("/api/login", json=GOOD).json()["state"] == "logged_in"
     page = _bot(client)._page
     client.portal.call(page.goto, mock_url + "servers")
+    # Seul Asterion est proposé : pas Kael (verrouillé, bouton « Ajouter à mon agenda »), et le texte masqué
+    # « Compte existant — Reprendre la partie » des deux cartes n'est pas pris pour un bouton.
     assert _until(lambda: client.get("/api/universes").json() == [{"index": 0, "name": "Asterion"}])
     client.post("/api/universe", json={"index": 0})
     assert _until(lambda: "/servers/asterion" in client.get("/api/status").json()["page"])
