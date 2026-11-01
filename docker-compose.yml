@@ -1,10 +1,12 @@
 # Fichier à coller tel quel dans Portainer (Stacks > Add stack > Web editor).
-# L'image est construite directement depuis GitHub : aucune variable à déclarer.
+# L'image est construite et publiée automatiquement par GitHub (voir .github/workflows) :
+# Portainer n'a rien à construire et aucune variable n'est à déclarer.
 # Les réglages techniques (URL de connexion, etc.) se modifient dans app/config.py.
 # L'identifiant et le mot de passe du jeu se saisissent dans l'interface web.
 services:
   boleryos:
-    build: https://github.com/Kamegrazi56/BoLeryos.git#claude/bot-login-setup
+    image: ghcr.io/kamegrazi56/boleryos:latest
+    pull_policy: always
     ports:
       - "7654:8000"
     shm_size: "1gb"

@@ -20,7 +20,11 @@ Bot d'automatisation pour Aleryos, destiné aux **tests de protection anti-bot r
 
 ## Lancer
 
-**Avec Portainer (Web editor)** : Stacks > Add stack > Web editor, coller le contenu de `docker-compose.yml`, puis Deploy. L'image est construite directement depuis GitHub, sans variable à déclarer.
+**Avec Portainer (Web editor)** : Stacks > Add stack > Web editor, coller le contenu de `docker-compose.yml`, puis Deploy. Aucune variable à déclarer.
+
+L'image `ghcr.io/kamegrazi56/boleryos:latest` est construite et publiée automatiquement par GitHub Actions (`.github/workflows/docker-publish.yml`) à chaque mise à jour du code. Pour mettre à jour le bot : attendre la fin du workflow dans l'onglet Actions du dépôt, puis redéployer la stack dans Portainer (`pull_policy: always` télécharge la dernière image).
+
+Première publication : le paquet est créé en privé. Sur GitHub, aller dans le profil > Packages > `boleryos` > Package settings > Change visibility > Public, pour que Portainer puisse le télécharger sans identifiants.
 
 **Avec Docker en ligne de commande** :
 
