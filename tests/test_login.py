@@ -83,10 +83,13 @@ def test_vision_websocket_streams_screenshot_and_logs(client):
 def test_home_page_is_visible_without_logging_in(client):
     """Sans connexion, la vue en direct montre déjà la page d'accueil du site."""
     with client.websocket_connect("/ws/vision") as ws:
-        state, frame = receive_until(ws, lambda s, f: f is not None)
+        # L'image arrive dès le premier affichage, avant la fin du chargement : on attend aussi le journal.
+        state, frame = receive_until(
+            ws,
+            lambda s, f: f is not None and any("Page d'accueil chargée" in e["msg"] for e in s["logs"]),
+        )
     assert state["state"] == "idle"
     assert frame[:2] == b"\xff\xd8"
-    assert any("Page d'accueil chargée" in entry["msg"] for entry in state["logs"])
 
 
 def test_frames_are_pushed_quickly_when_the_page_changes(client):
