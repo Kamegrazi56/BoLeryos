@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import re
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -41,6 +42,20 @@ CURSOR_SCRIPT = """
   addEventListener('mousemove', (e) => { dot.style.left = e.clientX + 'px'; dot.style.top = e.clientY + 'px'; }, true);
 })();
 """
+
+
+# Touches que le contrôle manuel peut envoyer au navigateur (liste fermée : rien d'autre n'est accepté).
+_KEY_RE = re.compile(
+    r"^(?:(?:Control|Alt|Shift|Meta)\+)*"
+    r"(?:[A-Za-z0-9]|Enter|Backspace|Tab|Escape|Delete|Home|End|PageUp|PageDown|Arrow(?:Up|Down|Left|Right)|F\d{1,2})$"
+)
+_MOUSE_BUTTONS = {"left", "middle", "right"}
+VIEWPORT_WIDTH = 1440
+VIEWPORT_MIN_HEIGHT, VIEWPORT_MAX_HEIGHT = 600, 1100
+
+
+def _num(value, lo: float, hi: float) -> float:
+    return max(lo, min(hi, float(value)))
 
 
 class State(str, Enum):
@@ -74,6 +89,9 @@ class BotSession:
         self._message = "Non connecté."
         self._logs: deque[dict[str, str]] = deque(maxlen=200)
         self._dirty = False  # une tentative de connexion a déjà eu lieu dans ce contexte
+        self._manual = False  # contrôle manuel (clics/clavier de l'utilisateur) activé
+        self._viewport = {"width": VIEWPORT_WIDTH, "height": 900}
+        self._last_typing_log = 0.0
         # Flux d'images
         self._capture_task: asyncio.Task | None = None
         self._start_task: asyncio.Task | None = None
@@ -92,7 +110,12 @@ class BotSession:
         return list(self._logs)[-limit:]
 
     def status(self) -> dict[str, str]:
-        return {"state": self._state.value, "message": self._message, "page": self._page_label()}
+        return {
+            "state": self._state.value,
+            "message": self._message,
+            "page": self._page_label(),
+            "manual": self._manual,
+        }
 
     def _page_label(self) -> str:
         """Origine + chemin de la page courante (sans query ni fragment, qui peuvent porter des jetons)."""
@@ -111,6 +134,9 @@ class BotSession:
 
     def viewer_left(self) -> None:
         self._viewers = max(0, self._viewers - 1)
+        if self._viewers == 0 and self._manual:  # personne ne regarde : on rend la main au bot
+            self._manual = False
+            self.log("Contrôle manuel désactivé (plus aucun écran ouvert).")
 
     def frame(self) -> tuple[int, str | None]:
         """Dernière image (JPEG en base64) et son numéro ; le numéro change quand l'image change."""
@@ -171,7 +197,7 @@ class BotSession:
             except Exception:  # noqa: BLE001
                 pass
         self._context = await self._browser.new_context(
-            viewport={"width": 1440, "height": 900}, locale="fr-FR"
+            viewport=dict(self._viewport), locale="fr-FR"
         )
         if self._settings.show_cursor:
             await self._context.add_init_script(CURSOR_SCRIPT)
@@ -195,6 +221,8 @@ class BotSession:
     async def login(self, identifier: str, password: str) -> dict[str, str]:
         if self._lock.locked():
             return {**self.status(), "message": "Une connexion est déjà en cours."}
+        if self._manual:
+            return {**self.status(), "message": "Désactivez le contrôle manuel pour lancer la connexion automatique."}
         async with self._lock:
             self._set(State.LOGGING_IN, "Connexion en cours…")
             self.log(f"Connexion demandée pour {_mask(identifier)}.")
@@ -308,6 +336,88 @@ class BotSession:
             self.log(f"Texte visible autour du formulaire : {text}", "warn")
         except Exception:  # noqa: BLE001
             pass
+
+    # --------------------------------------------------- contrôle manuel (clics, clavier)
+    async def handle_input(self, msg: dict) -> None:
+        """Applique un message de l'interface : contrôle, taille d'affichage, souris ou clavier.
+
+        Les frappes ne sont jamais écrites dans le journal (elles peuvent contenir un mot de passe).
+        """
+        kind = msg.get("t")
+        try:
+            if kind == "control":
+                await self._set_manual(bool(msg.get("enabled")))
+            elif kind == "viewport":
+                await self._set_viewport(_num(msg["width"], 1, 10_000), _num(msg["height"], 1, 10_000))
+            elif kind in {"move", "down", "up", "wheel", "type", "press"}:
+                await self._manual_input(kind, msg)
+        except (KeyError, TypeError, ValueError):
+            return  # message mal formé : ignoré
+        except Exception:  # noqa: BLE001 - page en cours de navigation, etc.
+            return
+
+    async def _set_manual(self, enabled: bool) -> None:
+        if enabled == self._manual:
+            return
+        if enabled and self._lock.locked():
+            self.log("Contrôle manuel refusé : une connexion automatique est en cours.", "warn")
+            return
+        self._manual = enabled
+        self.log("Contrôle manuel activé : le bot n'agit plus." if enabled else "Contrôle manuel désactivé.")
+
+    async def _set_viewport(self, width: float, height: float) -> None:
+        """Adapte la hauteur du navigateur au format de l'écran d'affichage (largeur fixe).
+
+        La taille est mémorisée même si le navigateur n'est pas encore démarré ou si une connexion
+        est en cours : elle s'appliquera au prochain contexte.
+        """
+        new = {
+            "width": VIEWPORT_WIDTH,
+            "height": int(_num(round(VIEWPORT_WIDTH * height / width), VIEWPORT_MIN_HEIGHT, VIEWPORT_MAX_HEIGHT)),
+        }
+        if abs(new["height"] - self._viewport["height"]) <= 4:
+            return
+        self._viewport = new
+        page = self._page
+        if page is not None and not page.is_closed() and not self._lock.locked():
+            await page.set_viewport_size(dict(new))
+
+    async def _manual_input(self, kind: str, msg: dict) -> None:
+        page = self._page
+        if not self._manual or self._lock.locked() or page is None or page.is_closed():
+            return
+        size = page.viewport_size or self._viewport
+        if kind in {"move", "down", "up", "wheel"}:
+            x = _num(msg["x"], 0, 1) * size["width"]
+            y = _num(msg["y"], 0, 1) * size["height"]
+            await page.mouse.move(x, y)
+            if kind in {"down", "up"}:
+                button = msg.get("button", "left")
+                if button not in _MOUSE_BUTTONS:
+                    return
+                if kind == "down":
+                    self.log(f"Clic manuel en ({x:.0f}, {y:.0f}).")
+                    await page.mouse.down(button=button)
+                else:
+                    await page.mouse.up(button=button)
+            elif kind == "wheel":
+                await page.mouse.wheel(_num(msg.get("dx", 0), -2000, 2000), _num(msg.get("dy", 0), -2000, 2000))
+        elif kind == "type":
+            text = str(msg["text"])[:500]
+            if not text:
+                return
+            if len(text) == 1:
+                await page.keyboard.type(text)
+            else:
+                await page.keyboard.insert_text(text)
+            now = time.monotonic()
+            if now - self._last_typing_log > 3:  # un seul message à la fois, sans le contenu
+                self._last_typing_log = now
+                self.log("Saisie manuelle au clavier.")
+        elif kind == "press":
+            key = str(msg["key"])
+            if _KEY_RE.match(key):
+                await page.keyboard.press(key)
 
     # --------------------------------------------------------------- nettoyage
     async def _teardown(self) -> None:

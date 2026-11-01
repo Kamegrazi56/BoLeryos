@@ -12,6 +12,16 @@ Bot d'automatisation pour Aleryos, destiné aux **tests de protection anti-bot r
 | `/vision` | Vue en direct du navigateur du bot et journal de tout ce qu'il fait. Le navigateur affiche le site même sans connexion. |
 | `/actions` | Choix des actions à automatiser (vide pour l'instant : à construire après exploration du jeu connecté). |
 
+### Contrôle manuel
+
+Une case « Contrôle manuel » (au-dessus de l'écran) rend la vue cliquable comme une page web : clics, molette, clavier et collage de texte sont rejoués sur le navigateur du bot.
+
+- Désactivé par défaut. Tant qu'il est activé, le bot n'agit pas (la connexion automatique est refusée) ; il se désactive tout seul quand le dernier écran est fermé.
+- Les frappes ne sont jamais écrites dans le journal.
+- Non géré : menus déroulants natifs du navigateur, clic droit, fenêtres de fichiers.
+- La zone d'affichage occupe toute la page, et la hauteur du navigateur du bot s'adapte au format de l'écran (largeur fixe de 1440 px).
+- Toute personne qui accède à l'interface peut agir sur le compte du jeu : protégez-la (`ui_user` / `ui_password`).
+
 ## Données du joueur
 
 - Aucun identifiant ni mot de passe dans l'image Docker, `docker-compose.yml`, les variables d'environnement ou un volume.

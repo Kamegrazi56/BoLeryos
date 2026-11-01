@@ -11,24 +11,26 @@
   <header class="top">
     <strong>BOLERYOS</strong>
     <nav>
+      <a href="/">Connexion</a>
       <a href="/vision" class="active">Vision</a>
       <a href="/actions">Actions</a>
     </nav>
     <span id="badge" class="badge idle">Non connecté</span>
     <button id="logout" class="secondary" type="button">Se déconnecter</button>
   </header>
-  <main>
-    <div class="vision">
-      <section class="card">
-        <div id="screen" class="screen"><span>En attente de la connexion…</span></div>
-        <p class="hint">Page : <span id="page">-</span> · <span id="message"></span></p>
-      </section>
-      <section class="card">
-        <h1 style="font-size:16px">Journal du bot</h1>
-        <div id="log" class="log"></div>
-      </section>
-    </div>
-  </main>
+  <div class="app-grid vision">
+    <section class="card stage">
+      <div class="toolbar">
+        <span>Page : <span id="page">-</span> · <span id="message"></span></span>
+        <label class="switch"><input type="checkbox" id="manual"> Contrôle manuel</label>
+      </div>
+      <div id="screen" class="screen" tabindex="0"><span>Démarrage du navigateur du bot…</span></div>
+    </section>
+    <aside class="card side">
+      <h1>Journal du bot</h1>
+      <div id="log" class="log"></div>
+    </aside>
+  </div>
   <script src="/static/vision.js"></script>
 </body>
 </html>

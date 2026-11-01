@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import json
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -117,9 +118,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await ws.accept()
         bot.viewer_joined()
         bot.start_in_background()  # le navigateur affiche le site même sans connexion
+
+        async def reader() -> None:
+            """Reçoit les ordres de l'interface (contrôle manuel, taille d'affichage, souris, clavier)."""
+            while True:
+                raw = await ws.receive_text()
+                if len(raw) > 4000:
+                    continue
+                try:
+                    msg = json.loads(raw)
+                except ValueError:
+                    continue
+                if isinstance(msg, dict):
+                    await bot.handle_input(msg)
+
+        reader_task = asyncio.create_task(reader())
         last_frame = -1
         try:
-            while True:
+            while not reader_task.done():  # la tâche se termine quand le client part
                 frame_id, image = bot.frame()
                 payload = {**bot.status(), "logs": bot.logs()}
                 if frame_id != last_frame:  # l'image n'est envoyée que si elle a changé
@@ -130,6 +146,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except (WebSocketDisconnect, RuntimeError):
             pass
         finally:
+            reader_task.cancel()
+            await asyncio.gather(reader_task, return_exceptions=True)
             bot.viewer_left()
 
     # --- Pages ---------------------------------------------------------------
