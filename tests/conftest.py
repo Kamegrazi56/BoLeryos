@@ -4,12 +4,14 @@ import threading
 import time
 from dataclasses import replace
 
+import httpx
 import pytest
 import uvicorn
 from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
+from tests.mock_game import create_mock_game
 from tests.mock_site import create_mock_site
 
 # Chromium déjà présent dans l'environnement de développement ; sinon Playwright utilise le sien.
@@ -51,6 +53,8 @@ def settings(mock_url):
         chromium_path=chromium,
         screenshot_interval=0.1,
         human_mode=False,  # pas de délais artificiels dans les tests (voir test_human.py)
+        data_dir=None,
+        min_cycle_minutes=0.01,
     )
 
 
@@ -66,3 +70,52 @@ def make_client(settings):
         return TestClient(create_app(replace(settings, **overrides)))
 
     return factory
+
+
+class GameHandle:
+    """Pilote le faux jeu depuis les tests (réinitialisation, actions reçues)."""
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+
+    def reset(self, **patch) -> None:
+        httpx.post(self.url + "/api/_reset", json=patch, timeout=5).raise_for_status()
+
+    def complete(self) -> None:
+        httpx.post(self.url + "/api/_complete", timeout=5).raise_for_status()
+
+    def actions(self) -> list[dict]:
+        return httpx.get(self.url + "/api/_actions", timeout=5).json()
+
+
+@pytest.fixture(scope="session")
+def game_server():
+    port = _free_port()
+    server = uvicorn.Server(uvicorn.Config(create_mock_game(), host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    for _ in range(100):
+        if server.started:
+            break
+        time.sleep(0.05)
+    yield GameHandle(f"http://127.0.0.1:{port}")
+    server.should_exit = True
+    thread.join(timeout=5)
+
+
+@pytest.fixture
+def game(game_server):
+    game_server.reset()
+    return game_server
+
+
+@pytest.fixture
+def game_client(settings, game):
+    """Bot déjà « connecté » et placé sur une page du faux jeu."""
+    from app.bot import State
+
+    with TestClient(create_app(replace(settings, login_url=game.url + "/game/asterion/buildings"))) as c:
+        bot = c.app.state.bot
+        c.portal.call(bot.ensure_started)
+        bot._set(State.LOGGED_IN, "test")
+        yield c

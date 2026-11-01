@@ -1,6 +1,6 @@
 # Plan de développement de BoLeryos
 
-*Dernière mise à jour : 2026-11-01 (fonctionnalités demandées intégrées). Ce document fait foi : on le met à jour à chaque phase, et on ne repose pas une question dont la réponse y figure.*
+*Dernière mise à jour : 2026-11-01 (phases 1 à 5 codées ; F2 et F5 en attente). Ce document fait foi : on le met à jour à chaque phase, et on ne repose pas une question dont la réponse y figure.*
 
 ## 1. Objectif
 
@@ -60,12 +60,12 @@ Cadre : test de protections anti-bot **avec l'éditeur** (GEEKOS NEXUS), sur un 
 
 | Phase | Contenu | Critères d'acceptation | Ce qu'il me faut de vous |
 |---|---|---|---|
-| **0. Socle** *(fait)* | Connexion, vue en direct, contrôle manuel, choix d'univers, export de structure, déploiement Portainer. | 37 tests verts, image publiée. | — |
-| **1. Lire l'état du jeu** (lecture seule) | Lire bâtiments (Industrie, Installations), recherches, ressources, énergie et **liste des planètes** ; comprendre `k/M/G/Md` ; tableau « État » dans l'interface. | Tests sur pages reconstituées d'après l'export ; le tableau correspond à l'écran du jeu. | Vérifier le tableau sur votre compte (une fois). |
-| **2. Planificateur** *(F1)* | Cadre des actions automatiques : intervalle aléatoire, arrêt propre, **plages horaires d'activité**, verrou avec le contrôle manuel, journal, page Actions, export/import des réglages JSON. Action factice. | Le bot n'agit pas hors plage ; réglages rechargeables. | — |
-| **3. Constructions, à blanc** *(F3)* | Tableau « niveau demandé » par bâtiment (valeur globale + exceptions par planète). Boucle sur les 13 planètes. Décisions journalisées, aucun clic. | Décisions cohérentes avec l'état affiché, sur plusieurs cycles et plusieurs planètes. | Relire le journal à blanc. |
-| **4. Constructions, réel** *(F3)* | Clic « Améliorer » avec délais humains, vérifications avant/après (niveau suivant), plafond par jour, arrêt d'urgence. | Une amélioration réelle réussie, confirmée par le niveau. | **Votre accord explicite.** |
-| **5. Recherches** *(F4)* | Même mécanique (à blanc puis réel) avec « Rechercher » ; niveau demandé par technologie ; choix de la planète qui finance. | Une recherche réelle réussie. | Accord explicite pour le réel. |
+| **0. Socle** *(fait)* | Connexion, vue en direct, contrôle manuel, choix d'univers, export de structure, déploiement Portainer. | Tests verts, image publiée. | — |
+| **1. Lire l'état du jeu** *(codé, à valider sur votre compte)* (lecture seule) | Lire bâtiments (Industrie, Installations), recherches, ressources, énergie et **liste des planètes** ; comprendre `k/M/G/Md` ; tableau « État » dans l'interface. | Tests sur pages reconstituées d'après l'export ; le tableau correspond à l'écran du jeu. | Vérifier le tableau sur votre compte (une fois). |
+| **2. Planificateur** *(F1, codé)* | Cadre des actions automatiques : intervalle aléatoire, arrêt propre, **plages horaires d'activité**, verrou avec le contrôle manuel, journal, page Actions, export/import des réglages JSON. Action factice. | Le bot n'agit pas hors plage ; réglages rechargeables. | — |
+| **3. Constructions, à blanc** *(F3, codé)* | Tableau « niveau demandé » par bâtiment (valeur globale + exceptions par planète). Boucle sur les 13 planètes. Décisions journalisées, aucun clic. | Décisions cohérentes avec l'état affiché, sur plusieurs cycles et plusieurs planètes. | Relire le journal à blanc. |
+| **4. Constructions, réel** *(F3, codé, désactivé par défaut)* | Clic « Améliorer » avec délais humains, vérifications avant/après (niveau suivant), plafond par jour, arrêt d'urgence. | Une amélioration réelle réussie, confirmée par le niveau. | **Votre accord explicite.** |
+| **5. Recherches** *(F4, codé)* | Même mécanique (à blanc puis réel) avec « Rechercher » ; niveau demandé par technologie ; choix de la planète qui finance. | Une recherche réelle réussie. | Accord explicite pour le réel. |
 | **6. Protection de l'interface + connexion automatique** *(F2)* | Mot de passe de l'interface défini à la première utilisation ; identifiants et univers enregistrés (voir D1) ; reconnexion automatique ; si un contrôle anti-bot apparaît, le bot l'indique et attend l'humain. | Redémarrage du conteneur : le bot se reconnecte et choisit l'univers sans intervention (si aucun contrôle anti-bot). | Choix du mode de stockage (D1) et d'un volume `/data`. |
 | **7. Files de construction** | Lire les constructions en cours et leur fin ; capture d'une amélioration de **bâtiment** (appel WebSocket). | Jamais deux fois la même amélioration. | Une amélioration lancée à la main pendant l'enregistrement. |
 | **8. Expéditions** *(F5)* | Captures → à blanc → réel. Mode spatial/terrestre, modèles et quantités, durée 1-6 h, choix de la Brèche, plafonds. | Une expédition réelle lancée et retrouvée au retour. | **Captures** : Galaxie avec une Brèche sélectionnée ; Opérations → Flotte → Exploration (composition, durée, bouton Lancer) ; idem Piliers → Exploration ; une petite expédition de 1 h lancée à la main pendant l'enregistrement ; Opérations avec une mission en cours ; Journal → Explorations ; les modèles de vaisseaux. **Votre accord explicite** (pertes possibles). |
@@ -99,7 +99,7 @@ Cadre : test de protections anti-bot **avec l'éditeur** (GEEKOS NEXUS), sur un 
 
 ## 7. Qualité et sécurité
 
-- Tests : `pytest` (37 aujourd'hui), faux site local, **pages reconstituées d'après vos exports** (pseudo et valeurs remplacés). Aucune tentative de connexion n'est envoyée au vrai site par les tests.
+- Tests : `pytest`, faux site local, **pages reconstituées d'après vos exports** (pseudo et valeurs remplacés). Aucune tentative de connexion n'est envoyée au vrai site par les tests.
 - Les sélecteurs reposent sur les **textes et rôles** (« Améliorer », nom du bâtiment), pas sur les classes CSS (ce sont des classes utilitaires susceptibles de changer).
 - Le journal ne contient jamais de mot de passe, de jeton ni de frappe clavier. L'export de structure masque valeurs, jetons, cookies, e-mails et identifiants ; il n'est jamais commité (`.gitignore`).
 - L'interface reçoit le mot de passe du jeu : elle doit être protégée avant toute exposition hors de votre réseau (phase 8).
@@ -109,6 +109,12 @@ Cadre : test de protections anti-bot **avec l'éditeur** (GEEKOS NEXUS), sur un 
 1. L'action `enqueue_research` envoie depuis le client le **coût, l'heure de début, l'heure de fin et la durée** : le serveur doit les recalculer et ne pas s'y fier (non vérifié côté serveur, et non testé).
 2. Le jeton d'authentification est conservé dans le stockage local du navigateur (`aleryos-central-auth-token`) et réutilisé par l'API et le WebSocket.
 3. Les actions de jeu passent par un WebSocket qui reçoit ce jeton ; l'API REST attend en plus un en-tête de version de contrat client (`x-aleryos-client-contract`).
+
+## 8 bis. Vérifié et non vérifié (phases 1 à 5)
+
+- **Vérifié** (tests sur un faux jeu reconstitué d'après l'export) : lecture des cartes, ressources, énergie et planètes ; nombres `k/M/G/Md` ; plages horaires (dont plages de nuit) ; décisions ; mode à blanc sans aucun clic ; lancements réels confirmés par le débit des ressources ; plafond quotidien ; arrêts de sécurité ; réglages (mode réel jamais restauré, jamais d'identifiants) ; page Actions.
+- **Non vérifié sur le vrai jeu** : changement de planète (clic dans la fenêtre « Planètes »), navigation vers la page Industrie (aucun bouton connu : navigation interne puis rechargement en secours), apparition éventuelle d'une fenêtre de confirmation après « Améliorer », file de construction (une par planète ou par joueur), rafraîchissement du niveau après lancement.
+- **Procédure de validation :** « Lire l'état du jeu » → comparer avec l'écran → laisser tourner **à blanc** → relire le journal → seulement ensuite le mode réel, avec un plafond bas (par exemple 1 à 3 par jour) pour le premier essai.
 
 ## 9. Risques et inconnues
 

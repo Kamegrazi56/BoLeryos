@@ -10,6 +10,10 @@ RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
 COPY app ./app
 
+# Dossier des réglages d'automatisation (JSON non secret : objectifs, plages horaires, compteurs).
+# Jamais d'identifiants ici. Monté comme volume dans docker-compose.yml.
+RUN mkdir -p /data && chown pwuser:pwuser /data
+
 # Aucune donnée du joueur dans l'image ni dans l'environnement :
 # l'identifiant et le mot de passe sont saisis dans l'interface web.
 ENV CHROMIUM_NO_SANDBOX=true \

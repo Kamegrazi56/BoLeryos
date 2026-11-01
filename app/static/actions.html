@@ -11,24 +11,89 @@
   <header class="top">
     <strong>BOLERYOS</strong>
     <nav>
+      <a href="/">Connexion</a>
       <a href="/vision">Vision</a>
       <a href="/actions" class="active">Actions</a>
     </nav>
     <span id="badge" class="badge idle">Non connecté</span>
   </header>
-  <main>
-    <section class="card">
-      <h1>Actions à automatiser</h1>
-      <p id="empty" class="actions-empty">Aucune action n'est encore disponible. Elles seront ajoutées une par une, une fois le jeu exploré après connexion.</p>
-    </section>
-  </main>
-  <script>
-    const LABELS = { idle: "Non connecté", logging_in: "Connexion…", logged_in: "Connecté", error: "Échec" };
-    fetch("/api/status").then((r) => r.json()).then((s) => {
-      const badge = document.getElementById("badge");
-      badge.className = "badge " + s.state;
-      badge.textContent = LABELS[s.state] || s.state;
-    });
-  </script>
+  <div class="app-grid actions">
+    <div class="col">
+      <section class="card">
+        <h1>Fonctionnement</h1>
+        <p id="run-status" class="status-line">Chargement…</p>
+        <div class="row">
+          <button id="start" type="button">Démarrer l'automatisation</button>
+          <button id="stop" type="button" class="danger">Arrêt d'urgence</button>
+        </div>
+        <div class="row fields">
+          <label>Mode
+            <select id="mode"><option value="dry_run">À blanc (ne clique pas)</option><option value="live">Réel (clique et dépense)</option></select>
+          </label>
+          <label>Plafond par jour <input id="cap" type="number" min="1" max="500"></label>
+          <label>Cycle min (min) <input id="cycle-min" type="number" min="0.01" step="0.5"></label>
+          <label>Cycle max (min) <input id="cycle-max" type="number" min="0.01" step="0.5"></label>
+        </div>
+        <p class="hint">À blanc, le bot lit le jeu et écrit dans le journal ce qu'il <em>ferait</em>, sans cliquer. Le mode réel n'est jamais rétabli après un redémarrage.</p>
+        <p id="persist" class="hint"></p>
+      </section>
+
+      <section class="card">
+        <h1>Plages horaires</h1>
+        <label class="switch"><input type="checkbox" id="sched-enabled"> N'agir que dans ces plages</label>
+        <label class="field">Fuseau horaire <input id="tz" type="text" placeholder="Europe/Paris"></label>
+        <div id="windows"></div>
+        <button id="add-window" type="button" class="secondary small">Ajouter une plage</button>
+        <p class="hint">Une plage « 22:00 → 06:00 » passe minuit (les jours cochés sont ceux du début). Hors plage, le bot ne fait rien et s'arrête à la prochaine vérification.</p>
+      </section>
+
+      <section class="card">
+        <h1>Constructions (niveaux demandés)</h1>
+        <label class="switch"><input type="checkbox" id="cons-enabled"> Lancer des améliorations de bâtiments</label>
+        <div id="cons-targets" class="targets"></div>
+        <label class="field">Planètes concernées (noms séparés par des virgules ; vide = toutes)
+          <input id="cons-planets" type="text" placeholder="toutes">
+        </label>
+        <details><summary>Exceptions par planète (avancé)</summary>
+          <textarea id="cons-overrides" rows="4" spellcheck="false" placeholder='{"6-79-Egide": {"Mine de Fer": 50}}'></textarea>
+        </details>
+        <p class="hint">Le bot améliore un bâtiment tant que son niveau est inférieur au niveau demandé, si la planète a les ressources et si le bouton est actif. Une seule construction à la fois par planète. Si l'énergie est négative, les mines sont ignorées.</p>
+      </section>
+
+      <section class="card">
+        <h1>Recherches</h1>
+        <label class="switch"><input type="checkbox" id="res-enabled"> Lancer des recherches</label>
+        <div id="res-targets" class="targets"></div>
+        <label class="field">Planète qui finance (vide = celle qui a le plus de Fer)
+          <input id="res-planet" type="text" placeholder="automatique">
+        </label>
+      </section>
+
+      <section class="card">
+        <h1>Réglages</h1>
+        <div class="row">
+          <a class="button secondary small" href="/api/automation/export" download>Exporter</a>
+          <label class="button secondary small file">Importer<input id="import" type="file" accept="application/json" hidden></label>
+        </div>
+        <p id="save-msg" class="msg" role="status"></p>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="card">
+        <h1>État du jeu</h1>
+        <div class="row"><button id="read-state" type="button" class="secondary small">Lire l'état du jeu</button><span id="read-msg" class="hint"></span></div>
+        <p class="hint">Lecture seule : ouvre la liste des planètes puis les pages Industrie, Installations et Laboratoire pour montrer ce que le bot comprend. Comparez avec l'écran du jeu.</p>
+        <div id="state-out"></div>
+      </section>
+      <section class="card grow">
+        <h1>Journal</h1>
+        <div id="log" class="log"></div>
+      </section>
+    </div>
+  </div>
+  <datalist id="names-buildings"></datalist>
+  <datalist id="names-research"></datalist>
+  <script src="/static/actions.js"></script>
 </body>
 </html>

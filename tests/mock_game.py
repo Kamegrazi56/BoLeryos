@@ -1,0 +1,195 @@
+"""Faux jeu qui reproduit la structure observée sur Aleryos (export du 2026-11-01).
+
+Points repris du vrai site : bandeau du haut avec libellés masqués « Planètes/Capteurs/Chat/Favoris » puis le nom
+de la planète active, ses coordonnées et les ressources « valeur » puis « LIBELLÉ » ; une carte par bâtiment
+(pastille de niveau, titre h3 dans un bloc positionné, lignes ressource/montant, durée, bouton) ; page des
+recherches avec « Rechercher » / « Ressources insuffisantes » ; fenêtre « Planètes » listant nom, coordonnées et
+stocks ; navigation « Installations » / « Laboratoire » mais aucun bouton vers la page Industrie.
+Le serveur garde l'état (planète active, stocks, niveaux) pour que les rechargements de page soient réalistes.
+"""
+
+import copy
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+
+
+def _b(name, level, costs, duration, section="buildings"):
+    return {"name": name, "level": level, "costs": costs, "duration": duration, "section": section}
+
+
+def _buildings():
+    return [
+        _b("Mine de Fer", 40, {"Fer": 201.765e6, "Cristal": 50.441e6}, "1j 2h"),
+        _b("Extracteur de Cristal", 38, {"Fer": 71.739e6, "Cristal": 35.869e6}, "12h 22m"),
+        _b("Synthétiseur d'Éther", 34, {"Fer": 66.425e6, "Cristal": 22.142e6}, "2h 14m"),
+        _b("Centrale Énergétique", 27, {"Fer": 53.73e6, "Cristal": 21.492e6}, "5m 25s"),
+        _b("Hangar de Fer", 16, {"Fer": 501.763e6}, "12.75s"),
+        _b("Chantier Spatial", 10, {"Fer": 160.564e6, "Cristal": 80.282e6, "Éther": 20.071e6}, "12.15s", "facilities"),
+        _b("Centre de Recherche", 19, {"Fer": 156.8e3, "Cristal": 313.6e3, "Éther": 62.7e3}, "5.00s", "facilities"),
+        _b("Caserne", 18, {"Fer": 200.705e6, "Cristal": 200.705e6}, "1m 33s", "facilities"),
+    ]
+
+
+def initial_state():
+    stocks = [
+        {"Fer": 58.0e6, "Cristal": 22.36e6, "Éther": 19.8e6},
+        {"Fer": 4.121e9, "Cristal": 3.201e9, "Éther": 942.839e6},
+        {"Fer": 7.3e6, "Cristal": 27.1e6, "Éther": 21.9e6},
+    ]
+    planets = [
+        ("8-50-Concorde", "Z25 95 16", 11014), ("6-79-Egide", "M69 38 06", 8485), ("9-169-Strate", "R59 75 43", 4000),
+    ]
+    return {
+        "active": 0,
+        "close_on_select": True,
+        "no_debit": False,
+        "popup_after_click": False,
+        "actions": [],
+        "research_busy": False,
+        "planets": [
+            {"name": n, "coords": c, "energy": e, "stocks": copy.deepcopy(s), "busy": False, "buildings": _buildings()}
+            for (n, c, e), s in zip(planets, stocks)
+        ],
+        "tech": [
+            {"name": "Technologie laser", "level": 22, "costs": {"Fer": 2.686e9, "Cristal": 1.343e9}},
+            {"name": "Technologie ionique", "level": 19, "costs": {"Fer": 3.358e9, "Cristal": 1.007e9, "Éther": 335.756e6}},
+            {"name": "Technologie d’espionnage", "level": 24, "costs": {"Fer": 10.744e9, "Cristal": 53.721e9, "Éther": 10.744e9}},
+        ],
+    }
+
+
+PAGE = """<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Mock jeu</title>
+<style>.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+button{min-width:36px;min-height:28px;margin:2px}.card{border:1px solid #888;margin:6px;padding:6px;width:300px}
+.top{position:relative;height:40px}.abs{position:absolute;bottom:2px;left:4px}.badge{float:right}</style></head>
+<body><div id="cookies"><button type="button" id="refuse">TOUT REFUSER</button></div><div id="root"></div>
+<script>
+let state = null, overlayOpen = false;
+const sec = () => location.pathname.split('/').pop();
+const big = (v) => v >= 1e9 ? (v/1e9).toFixed(3).replace('.', ',') + ' G' : v >= 1e6 ? (v/1e6).toFixed(3).replace('.', ',') + ' M' : String(Math.round(v));
+const md = (v) => v >= 1e9 ? (v/1e9).toFixed(1).replace('.', ',') + ' Md' : (v/1e6).toFixed(1).replace('.', ',') + ' M';
+const cost = (v) => v >= 1e9 ? (v/1e9).toFixed(3) + 'G' : v >= 1e6 ? (v/1e6).toFixed(3) + 'M' : v >= 1e3 ? (v/1e3).toFixed(1) + 'k' : String(v);
+const int = (v) => String(v).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ' ');
+const afford = (p, it, busy) => !busy && Object.entries(it.costs).every(([k, v]) => p.stocks[k] >= v);
+function card(p, it, kind, busy) {
+  const ok = afford(p, it, busy);
+  const label = kind === 'tech' ? (ok ? 'Rechercher' : 'Ressources insuffisantes') : 'Améliorer';
+  const costs = Object.entries(it.costs).map(([k, v]) => `<div><span>${k}</span><span>${cost(v)}</span></div>`).join('');
+  const dur = kind === 'tech' ? '<div><span>Temps de recherche</span></div>' : `<div><span>Durée</span><span>${it.duration}</span></div>`;
+  return `<div class="card"><div class="top"><div class="badge"><span>${it.level}</span></div><div class="abs"><h3>${it.name}</h3></div></div>`
+    + `<div class="body">${costs}${dur}<button class="act" data-name="${it.name}" data-kind="${kind}" ${ok ? '' : 'disabled'}>${label}</button></div></div>`;
+}
+function render() {
+  if (!state) return;
+  const p = state.planets[state.active], s = sec();
+  const title = {buildings: 'Industrie', facilities: 'Installations', tech: 'Laboratoire'}[s] || 'Vue';
+  let cards = '';
+  if (s === 'tech') cards = state.tech.map((t) => card(p, t, 'tech', state.research_busy)).join('');
+  else cards = p.buildings.filter((b) => b.section === s).map((b) => card(p, b, 'build', p.busy)).join('');
+  const planets = state.planets.map((pl, i) => `<button class="pl" data-i="${i}"><span>${pl.name}</span><span>${pl.coords}</span>`
+    + `<span>${md(pl.stocks.Fer)}</span><span>${md(pl.stocks.Cristal)}</span><span>${md(pl.stocks['Éther'])}</span></button>`).join('');
+  document.getElementById('root').innerHTML =
+    '<div class="launcher"><button id="open-planets"><span class="sr-only">Planètes</span></button><button><span class="sr-only">Capteurs</span></button>'
+    + '<button><span class="sr-only">Chat</span></button><button><span class="sr-only">Favoris</span></button></div>'
+    + `<div class="planet"><span>${p.name}</span><span>${p.coords}</span></div>`
+    + `<div class="res"><div><span>${big(p.stocks.Fer)}</span><span>FER</span></div><div><span>${big(p.stocks.Cristal)}</span><span>CRISTAL</span></div>`
+    + `<div><span>${big(p.stocks['Éther'])}</span><span>ÉTHER</span></div><div><span>${int(p.energy)}</span><span>ÉNERGIE</span></div>`
+    + '<div><span>4 808</span><span>ASTRIUM</span></div><div><span>492</span><span>ÉCHOS</span></div></div>'
+    + `<main><h2>${title}</h2><div class="grid">${cards}</div></main>`
+    + '<nav><button class="nav" data-s="facilities"><span class="sr-only">Installations</span></button><button class="nav" data-s="tech"><span class="sr-only">Laboratoire</span></button>'
+    + '<button><span class="sr-only">Vue d’ensemble</span></button></nav>'
+    + `<div id="overlay" ${overlayOpen ? '' : 'hidden'}><button id="close-ov">Fermer</button><button>Arrêter la rotation</button>${planets}</div>`
+    + (state.popup ? '<div role="dialog"><button>Confirmer</button></div>' : '');
+  document.getElementById('open-planets').onclick = () => { overlayOpen = true; render(); };
+  document.getElementById('close-ov').onclick = () => { overlayOpen = false; render(); };
+  document.querySelectorAll('.nav').forEach((b) => b.onclick = () => { history.pushState({}, '', '/game/asterion/' + b.dataset.s); render(); });
+  document.querySelectorAll('.pl').forEach((b) => b.onclick = async () => {
+    await fetch('/api/select', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({index: +b.dataset.i})});
+    if (state.close_on_select) overlayOpen = false;
+    await load();
+  });
+  document.querySelectorAll('.act').forEach((b) => b.onclick = async () => {
+    await fetch('/api/upgrade', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({section: sec(), name: b.dataset.name, kind: b.dataset.kind})});
+    await load();
+  });
+}
+async function load() { state = await (await fetch('/api/state')).json(); render(); }
+window.addEventListener('popstate', render);
+document.getElementById('refuse').onclick = () => document.getElementById('cookies').remove();
+load();
+</script></body></html>"""
+
+
+def create_mock_game() -> FastAPI:
+    app = FastAPI()
+    app.state.game = initial_state()
+
+    @app.get("/game/asterion/{section}", response_class=HTMLResponse)
+    async def page(section: str):
+        return PAGE
+
+    @app.get("/api/state")
+    async def get_state():
+        g = app.state.game
+        return {**g, "planets": [{k: v for k, v in p.items()} for p in g["planets"]]}
+
+    @app.post("/api/select")
+    async def select(request: Request):
+        body = await request.json()
+        app.state.game["active"] = int(body["index"])
+        return {"ok": True}
+
+    @app.post("/api/upgrade")
+    async def upgrade(request: Request):
+        g, body = app.state.game, await request.json()
+        planet = g["planets"][g["active"]]
+        research = body.get("kind") == "tech"
+        items = g["tech"] if research else planet["buildings"]
+        item = next((i for i in items if i["name"] == body["name"]), None)
+        if item is None:
+            raise HTTPException(404)
+        busy = g["research_busy"] if research else planet["busy"]
+        if busy or not all(planet["stocks"][k] >= v for k, v in item["costs"].items()):
+            raise HTTPException(409, "indisponible")
+        if not g["no_debit"]:
+            for k, v in item["costs"].items():
+                planet["stocks"][k] -= v
+        item["level"] += 1
+        if research:
+            g["research_busy"] = True
+        else:
+            planet["busy"] = True
+        g["actions"].append({"kind": "research" if research else "building", "planet": planet["name"], "name": item["name"], "level_after": item["level"]})
+        if g["popup_after_click"]:
+            g["popup"] = True
+        return {"ok": True}
+
+    # --- crochets de test -------------------------------------------------------
+    @app.post("/api/_reset")
+    async def reset(request: Request):
+        app.state.game = initial_state()
+        patch = await request.json() if (await request.body()) else {}
+        g = app.state.game
+        for key in ("close_on_select", "no_debit", "popup_after_click"):
+            if key in patch:
+                g[key] = patch[key]
+        for index, energy in (patch.get("energy") or {}).items():
+            g["planets"][int(index)]["energy"] = energy
+        for index, stocks in (patch.get("stocks") or {}).items():
+            g["planets"][int(index)]["stocks"].update(stocks)
+        return {"ok": True}
+
+    @app.post("/api/_complete")
+    async def complete():
+        g = app.state.game
+        g["research_busy"] = False
+        for p in g["planets"]:
+            p["busy"] = False
+        return {"ok": True}
+
+    @app.get("/api/_actions")
+    async def actions():
+        return JSONResponse(app.state.game["actions"])
+
+    return app

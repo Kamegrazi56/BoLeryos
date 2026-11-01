@@ -24,6 +24,8 @@ from urllib.parse import urlsplit
 from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
 
 from . import human
+from .automation.runner import AutomationRunner
+from .automation.settings import SettingsStore
 from .config import Settings
 from .explore import SNAPSHOT_JS, Recorder, should_skip_host
 
@@ -91,7 +93,7 @@ class BotSession:
         self._page: Page | None = None
         self._state = State.IDLE
         self._message = "Non connecté."
-        self._logs: deque[dict[str, str]] = deque(maxlen=200)
+        self._logs: deque[dict[str, str]] = deque(maxlen=1000)
         self._dirty = False  # une tentative de connexion a déjà eu lieu dans ce contexte
         self._manual = False  # contrôle manuel (clics/clavier de l'utilisateur) activé
         self._viewport = {"width": VIEWPORT_WIDTH, "height": 900}
@@ -107,6 +109,10 @@ class BotSession:
         self._cdp = None  # session CDP de la page courante (flux d'images poussé par Chrome)
         self._screencasting = False
         self._tasks: set[asyncio.Task] = set()
+        # Automatisation (plages horaires, constructions, recherches) : réglages non secrets
+        self.automation = AutomationRunner(
+            self, SettingsStore(settings.data_dir, settings.min_cycle_minutes), settings.data_dir
+        )
         # Exploration de la structure du site (désactivée par défaut)
         self._recorder = Recorder()
         self._snapshot_task: asyncio.Task | None = None
@@ -127,6 +133,7 @@ class BotSession:
             "page": self._page_label(),
             "manual": self._manual,
             "explore": {"recording": self._recorder.enabled, **self._recorder.counts()},
+            "automation": self.automation.summary(),
         }
 
     def _page_label(self) -> str:
@@ -316,6 +323,7 @@ class BotSession:
             return {**self.status(), "message": "Une connexion est déjà en cours."}
         if self._manual:
             return {**self.status(), "message": "Désactivez le contrôle manuel pour lancer la connexion automatique."}
+        await self.automation.stop("nouvelle connexion")
         async with self._lock:
             self._set(State.LOGGING_IN, "Connexion en cours…")
             self.log(f"Connexion demandée pour {_mask(identifier)}.")
@@ -343,6 +351,7 @@ class BotSession:
             return self.status()
 
     async def logout(self) -> dict[str, str]:
+        await self.automation.stop("déconnexion")
         async with self._lock:
             if self._page is not None:
                 try:
@@ -477,7 +486,7 @@ class BotSession:
 
     async def _manual_input(self, kind: str, msg: dict) -> None:
         page = self._page
-        if not self._manual or self._lock.locked() or page is None or page.is_closed():
+        if not self._manual or self._lock.locked() or self.automation.cycle_running or page is None or page.is_closed():
             return
         size = page.viewport_size or self._viewport
         if kind in {"move", "down", "up", "wheel"}:
@@ -671,5 +680,6 @@ class BotSession:
         self._page = self._context = self._browser = self._pw = None
 
     async def shutdown(self) -> None:
+        await self.automation.stop("arrêt du bot")
         async with self._start_lock, self._lock:
             await self._teardown()

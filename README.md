@@ -40,6 +40,25 @@ Le panneau « Exploration de la structure du site » (désactivé par défaut) e
 - Jamais conservés : valeurs de cookies, d'en-têtes et de stockage, valeurs de paramètres d'URL, mots de passe et saisies, e-mails, jetons, identifiants. Des tests le vérifient.
 - Les textes visibles à l'écran (titres, boutons, pseudo) et les courts libellés peuvent contenir des informations de jeu : relisez le fichier avant de le partager. Ne le commitez pas dans un dépôt public.
 
+## Automatisation
+
+La page **Actions** pilote le planificateur. Tout est **à blanc par défaut** : le bot lit le jeu et écrit dans le journal ce qu'il *ferait*, sans cliquer. Le mode réel s'active à la main (confirmation) et n'est jamais rétabli après un redémarrage.
+
+| Fonction | Ce que fait le bot |
+|---|---|
+| **Plages horaires** | N'agit que dans les plages choisies (plusieurs plages, jours, fuseau ; plages de nuit possibles). Un cycle en cours s'arrête à la fin de la plage. |
+| **Constructions** | Pour chaque planète (toutes ou une liste), améliore les bâtiments dont le niveau est inférieur au niveau demandé, si la planète a les ressources et si le bouton est actif. Une seule construction à la fois par planète. Priorité au bâtiment qui pèse le moins sur le stock. Si l'énergie est négative, les mines sont ignorées. |
+| **Recherches** | Même principe avec « Rechercher », sur la planète désignée (ou celle qui a le plus de Fer). |
+| **Lecture de l'état** | Bouton « Lire l'état du jeu » : planètes, ressources, niveaux, coûts, durées, boutons actifs. Sert à vérifier que le bot comprend l'écran. |
+
+**Sécurités :** plafond de lancements par jour, arrêt d'urgence, contrôle manuel prioritaire, relecture de l'écran avant et après chaque clic (les ressources doivent être débitées), arrêt si deux lancements ne sont pas confirmés ou si une fenêtre inattendue s'ouvre, refus d'agir sur un nombre que le bot ne comprend pas, délais humains.
+
+**Réglages :** enregistrés dans le volume Docker `boleryos-data` (`/data/automation.json`, non secret) ; exportables et importables en JSON (un fichier importé ne peut jamais activer le mode réel).
+
+**Pas encore fait :** connexion automatique avec identifiants enregistrés (attend le choix D1 du plan) et expéditions (attendent des captures). Voir [`docs/PLAN.md`](docs/PLAN.md).
+
+**Non vérifié sur le vrai jeu :** la navigation entre les pages Industrie / Installations / Laboratoire et le changement de planète ont été testés sur un faux jeu reconstitué d'après votre export, pas sur Aleryos. Commencez par « Lire l'état du jeu », puis laissez tourner à blanc et relisez le journal avant d'activer le mode réel.
+
 ## Données du joueur
 
 - Aucun identifiant ni mot de passe dans l'image Docker, `docker-compose.yml`, les variables d'environnement ou un volume.
@@ -80,7 +99,7 @@ Ils se modifient directement dans `app/config.py` (aucune donnée de joueur) :
 | `login_timeout` | Attente maximale du résultat de la connexion, en secondes | `30` |
 | `email_selector`, `password_selector`, `submit_selector` | Sélecteurs du formulaire | relevés sur le site |
 
-Les mêmes réglages peuvent aussi être surchargés par variables d'environnement (`LOGIN_URL`, `UI_USER`, `UI_PASSWORD`, `LOGIN_TIMEOUT`, `EMAIL_SELECTOR`, `PASSWORD_SELECTOR`, `SUBMIT_SELECTOR`), mais ce n'est pas nécessaire.
+Les mêmes réglages peuvent aussi être surchargés par variables d'environnement (`DATA_DIR`, `MIN_CYCLE_MINUTES`, `LOGIN_URL`, `UI_USER`, `UI_PASSWORD`, `LOGIN_TIMEOUT`, `EMAIL_SELECTOR`, `PASSWORD_SELECTOR`, `SUBMIT_SELECTOR`), mais ce n'est pas nécessaire.
 
 Ne mettez jamais un mot de passe réel dans `app/config.py` si le dépôt est public.
 

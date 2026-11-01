@@ -68,3 +68,34 @@ a.button.secondary { background: transparent; color: var(--text); border: 1px so
   .log { height: 220px; flex: none; }
 }
 .actions-empty { color: var(--muted); }
+/* Page Actions */
+.app-grid.actions { grid-template-columns: minmax(0, 1fr) 460px; }
+.col { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; padding-right: 2px; }
+.col .card h1 { font-size: 16px; margin: 0 0 10px; }
+.col .card h2 { font-size: 13px; margin: 14px 0 6px; color: var(--muted); }
+.card.grow { flex: 1; min-height: 260px; display: flex; flex-direction: column; }
+.card.grow .log { flex: 1; min-height: 200px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.row.fields label { flex: 1 1 140px; }
+.field { display: block; margin-top: 10px; }
+input[type=number], input[type=time], select, textarea { padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 14px; width: 100%; }
+textarea { font-family: ui-monospace, monospace; margin-top: 6px; }
+button.danger { background: var(--err); color: #230a0a; }
+.status-line { margin: 0 0 6px; color: var(--muted); font-size: 13px; }
+.status-line strong { color: var(--text); }
+.status-line strong.live { color: var(--err); }
+.targets { margin: 10px 0; display: grid; gap: 6px; }
+.target-row { display: flex; align-items: center; gap: 8px; }
+.target-row .spacer { flex: 1; }
+.target-row input[type=number] { width: 90px; }
+.target-row.add input[type=text] { flex: 1; }
+.target-row.add input[type=number] { width: 90px; }
+.window-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+.window-row input[type=time] { width: 110px; }
+.day { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; color: var(--muted); }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+th, td { border-bottom: 1px solid var(--border); padding: 4px 6px; text-align: left; }
+th { color: var(--muted); font-weight: 600; }
+details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 10px; }
+label.file { cursor: pointer; }
+@media (max-width: 1100px) { .app-grid.actions { grid-template-columns: 1fr; } }

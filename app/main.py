@@ -17,6 +17,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, SecretStr
 
+from .automation.driver import GameUiError
+from .automation.runner import Interrupted
+from .automation.settings import SettingsError
 from .bot import BotSession
 from .config import Settings, load_settings
 
@@ -39,6 +42,12 @@ class LoginRequest(BaseModel):
     # Libellé « identifiant » : le formulaire du jeu attend une adresse e-mail.
     identifier: str = Field(min_length=1, max_length=254)
     password: SecretStr = Field(min_length=1, max_length=256)
+
+
+class AutomationSettingsRequest(BaseModel):
+    settings: dict
+    # À vrai uniquement quand l'utilisateur vient de confirmer le passage en mode réel dans l'interface.
+    confirm_live: bool = False
 
 
 class RecordingRequest(BaseModel):
@@ -157,9 +166,54 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _check_origin(request)
         return JSONResponse(await bot.enter_universe(body.index), headers=NO_STORE)
 
+    # --- Automatisation ---------------------------------------------------------
+    @app.get("/api/automation")
+    async def api_automation():
+        return JSONResponse(
+            {"settings": bot.automation.store.get(), "status": bot.automation.summary()}, headers=NO_STORE
+        )
+
+    @app.put("/api/automation/settings")
+    async def api_automation_settings(body: AutomationSettingsRequest, request: Request):
+        _check_origin(request)
+        try:
+            saved = bot.automation.store.update(body.settings, allow_live=body.confirm_live)
+        except SettingsError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        if saved["mode"] == "live" and body.confirm_live:
+            bot.log("Mode RÉEL confirmé : le bot cliquera sur « Améliorer » / « Rechercher » quand les règles le permettent.", "warn")
+        return JSONResponse({"settings": saved, "status": bot.automation.summary()}, headers=NO_STORE)
+
+    @app.post("/api/automation/start")
+    async def api_automation_start(request: Request):
+        _check_origin(request)
+        await bot.automation.start()
+        return JSONResponse(bot.automation.summary(), headers=NO_STORE)
+
+    @app.post("/api/automation/stop")
+    async def api_automation_stop(request: Request):
+        _check_origin(request)
+        await bot.automation.stop("arrêt demandé")
+        return JSONResponse(bot.automation.summary(), headers=NO_STORE)
+
+    @app.post("/api/automation/read-state")
+    async def api_automation_read_state(request: Request):
+        _check_origin(request)
+        try:
+            return JSONResponse(await bot.automation.read_state(), headers=NO_STORE)
+        except (GameUiError, Interrupted) as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
+
+    @app.get("/api/automation/export")
+    async def api_automation_export():
+        return JSONResponse(
+            bot.automation.store.get(),
+            headers={**NO_STORE, "Content-Disposition": 'attachment; filename="boleryos-reglages.json"'},
+        )
+
     @app.get("/api/status")
-    async def api_status():
-        return JSONResponse({**bot.status(), "logs": bot.logs()}, headers=NO_STORE)
+    async def api_status(limit: int = 50):
+        return JSONResponse({**bot.status(), "logs": bot.logs(max(1, min(limit, 1000)))}, headers=NO_STORE)
 
     @app.websocket("/ws/vision")
     async def ws_vision(ws: WebSocket):
