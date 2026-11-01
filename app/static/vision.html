@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BoLeryos | Vision</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <strong>BOLERYOS</strong>
+    <nav>
+      <a href="/vision" class="active">Vision</a>
+      <a href="/actions">Actions</a>
+    </nav>
+    <span id="badge" class="badge idle">Non connecté</span>
+    <button id="logout" class="secondary" type="button">Se déconnecter</button>
+  </header>
+  <main>
+    <div class="vision">
+      <section class="card">
+        <div id="screen" class="screen"><span>En attente de la connexion…</span></div>
+        <p class="hint">Page : <span id="page">-</span> · <span id="message"></span></p>
+      </section>
+      <section class="card">
+        <h1 style="font-size:16px">Journal du bot</h1>
+        <div id="log" class="log"></div>
+      </section>
+    </div>
+  </main>
+  <script src="/static/vision.js"></script>
+</body>
+</html>

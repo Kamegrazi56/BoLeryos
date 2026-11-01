@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BoLeryos | Connexion</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="login-wrap">
+    <div class="card">
+      <h1>Connexion au jeu</h1>
+      <form id="login-form" autocomplete="off">
+        <label for="identifier">Identifiant (adresse e-mail du compte)</label>
+        <input id="identifier" name="identifier" type="text" inputmode="email" autocomplete="off" spellcheck="false" required>
+        <label for="password">Mot de passe</label>
+        <input id="password" name="password" type="password" autocomplete="off" required>
+        <div style="margin-top:20px; display:flex; gap:10px; align-items:center">
+          <button id="submit" type="submit">Se connecter</button>
+          <span id="badge" class="badge idle">Non connecté</span>
+        </div>
+        <div id="msg" class="msg" role="status"></div>
+      </form>
+      <p class="hint">Vos identifiants ne sont pas stockés dans le conteneur : ils restent en mémoire le temps de la connexion, puis seule la session du navigateur est conservée jusqu'à la déconnexion.</p>
+    </div>
+  </main>
+  <script src="/static/login.js"></script>
+</body>
+</html>

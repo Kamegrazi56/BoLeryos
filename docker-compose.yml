@@ -1,0 +1,16 @@
+services:
+  boleryos:
+    build: .
+    # Interface accessible uniquement depuis cette machine.
+    ports:
+      - "127.0.0.1:8000:8000"
+    # Réglages techniques uniquement. Surtout pas d'identifiant ni de mot de passe du jeu ici.
+    environment:
+      LOGIN_URL: ${LOGIN_URL:-https://aleryos.com/fr}
+      UI_USER: ${UI_USER:-}
+      UI_PASSWORD: ${UI_PASSWORD:-}
+    shm_size: "1gb"
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    # Aucun volume : rien n'est écrit sur disque.
