@@ -42,13 +42,13 @@ Le panneau « Exploration de la structure du site » (désactivé par défaut) e
 
 ## Automatisation
 
-La page **Actions** pilote le planificateur. Tout est **à blanc par défaut** : le bot lit le jeu et écrit dans le journal ce qu'il *ferait*, sans cliquer. Le mode réel s'active à la main (confirmation) et n'est jamais rétabli après un redémarrage.
+La page **Actions** pilote le planificateur. Tout y est organisé en **onglets** (Fonctionnement, Plages horaires, Constructions, Recherches, État du jeu, Journal, Réglages) ; la barre du haut, toujours visible, affiche l'état et les boutons **Démarrer** et **Arrêt d'urgence**. Tout est **à blanc par défaut** : le bot lit le jeu et écrit dans le journal ce qu'il *ferait*, sans cliquer. Le mode réel s'active à la main (confirmation) et n'est jamais rétabli après un redémarrage.
 
 | Fonction | Ce que fait le bot |
 |---|---|
 | **Plages horaires** | N'agit que dans les plages choisies (plusieurs plages, jours, fuseau ; plages de nuit possibles). Un cycle en cours s'arrête à la fin de la plage. |
-| **Constructions** | Pour chaque planète (toutes ou une liste), améliore les bâtiments dont le niveau est inférieur au niveau demandé, si la planète a les ressources et si le bouton est actif. Une seule construction à la fois par planète. Priorité au bâtiment qui pèse le moins sur le stock. Si l'énergie est négative, les mines sont ignorées. |
-| **Recherches** | Même principe avec « Rechercher », sur la planète désignée (ou celle qui a le plus de Fer). |
+| **Constructions** | La **liste des 16 bâtiments** (Industrie et Infrastructures) est intégrée au bot : on saisit seulement le niveau demandé (vide = rien à lancer), avec le niveau actuel lu dans le jeu. Planètes concernées et exceptions par planète se choisissent dans des listes (alimentées par « Lire l'état du jeu »). Pour chaque planète (toutes ou une liste), améliore les bâtiments dont le niveau est inférieur au niveau demandé, si la planète a les ressources et si le bouton est actif. Une seule construction à la fois par planète. Priorité au bâtiment qui pèse le moins sur le stock. Si l'énergie est négative, les mines sont ignorées. |
+| **Recherches** | Les **23 recherches** du Laboratoire sont intégrées. Même principe avec « Rechercher », sur la planète désignée (ou celle qui a le plus de Fer). |
 | **Lecture de l'état** | Bouton « Lire l'état du jeu » : planètes, ressources, niveaux, coûts, durées, boutons actifs. Sert à vérifier que le bot comprend l'écran. |
 
 **Sécurités :** plafond de lancements par jour, arrêt d'urgence, contrôle manuel prioritaire, relecture de l'écran avant et après chaque clic (les ressources doivent être débitées), arrêt si deux lancements ne sont pas confirmés ou si une fenêtre inattendue s'ouvre, refus d'agir sur un nombre que le bot ne comprend pas, délais humains.

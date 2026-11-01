@@ -170,7 +170,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/automation")
     async def api_automation():
         return JSONResponse(
-            {"settings": bot.automation.store.get(), "status": bot.automation.summary()}, headers=NO_STORE
+            {
+                "settings": bot.automation.store.get(),
+                "status": bot.automation.summary(),
+                "catalog": bot.automation.catalog_view(),
+            },
+            headers=NO_STORE,
         )
 
     @app.put("/api/automation/settings")
@@ -182,7 +187,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(422, detail=exc.errors) from exc
         if saved["mode"] == "live" and body.confirm_live:
             bot.log("Mode RÉEL confirmé : le bot cliquera sur « Améliorer » / « Rechercher » quand les règles le permettent.", "warn")
-        return JSONResponse({"settings": saved, "status": bot.automation.summary()}, headers=NO_STORE)
+        return JSONResponse(
+            {"settings": saved, "status": bot.automation.summary(), "catalog": bot.automation.catalog_view()},
+            headers=NO_STORE,
+        )
 
     @app.post("/api/automation/start")
     async def api_automation_start(request: Request):

@@ -1,16 +1,20 @@
-// Page Actions : réglages de l'automatisation (enregistrés côté serveur), état du jeu et journal.
+// Page Actions : onglets, réglages de l'automatisation (enregistrés côté serveur), état du jeu et journal.
 const $ = (id) => document.getElementById(id);
-const DAYS = ["L", "M", "M", "J", "V", "S", "D"];
-let settings = null;
-let confirmedLive = false;
-let saveTimer = null;
-let building = false; // vrai pendant qu'on remplit le formulaire (évite d'enregistrer en boucle)
-
 const el = (tag, props = {}, ...children) => {
   const node = Object.assign(document.createElement(tag), props);
   node.append(...children);
   return node;
 };
+const DAYS = ["L", "M", "M", "J", "V", "S", "D"];
+const TABS = ["run", "schedule", "constructions", "research", "state", "log", "settings"];
+
+let model = null; // réglages en cours d'édition (source de vérité de l'interface)
+let catalog = { buildings: [], research: [], planets: [] };
+let confirmedLive = false;
+let saveTimer = null;
+let overridePlanet = "";
+let catalogKey = "";
+
 const fmt = (v) => {
   if (v === null || v === undefined) return "?";
   const a = Math.abs(v);
@@ -25,117 +29,44 @@ const dur = (s) => {
   return d ? `${d}j ${h}h` : h ? `${h}h ${m}m` : m ? `${m}m ${Math.round(s % 60)}s` : `${s.toFixed(0)}s`;
 };
 
-// ------------------------------------------------------------------ objectifs de niveaux
-function renderTargets(container, targets, catalogId) {
-  container.replaceChildren();
-  Object.entries(targets).forEach(([name, level]) => {
-    const input = el("input", { type: "number", min: 0, max: 999, value: level });
-    input.dataset.name = name;
-    input.addEventListener("change", scheduleSave);
-    const remove = el("button", { type: "button", className: "secondary small", textContent: "×", title: "Retirer" });
-    remove.addEventListener("click", () => { row.remove(); scheduleSave(); });
-    const row = el("div", { className: "target-row" }, el("span", { textContent: name }), el("span", { className: "spacer" }), input, remove);
-    container.append(row);
+// ---------------------------------------------------------------------------------- onglets
+function setTab(id) {
+  if (!TABS.includes(id)) id = "run";
+  TABS.forEach((t) => {
+    const active = t === id;
+    $("tab-" + t).setAttribute("aria-selected", String(active));
+    $("tab-" + t).tabIndex = active ? 0 : -1;
+    $("panel-" + t).hidden = !active;
   });
-  const name = el("input", { type: "text", placeholder: "Nom exact (ex. Mine de Fer)" });
-  name.setAttribute("list", catalogId);
-  const level = el("input", { type: "number", min: 0, max: 999, placeholder: "niveau" });
-  const add = el("button", { type: "button", className: "secondary small", textContent: "Ajouter" });
-  add.addEventListener("click", () => {
-    const n = name.value.trim();
-    if (!n || level.value === "") return;
-    const current = readTargets(container);
-    current[n] = Number(level.value);
-    renderTargets(container, current, catalogId);
-    scheduleSave();
-  });
-  container.append(el("div", { className: "target-row add" }, name, level, add));
+  try { localStorage.setItem("boleryos.actions.tab", id); } catch { /* stockage indisponible : sans effet */ }
+  if (location.hash !== "#" + id) history.replaceState(null, "", "#" + id);
+  if (id === "log") $("log").scrollTop = $("log").scrollHeight;
 }
-const readTargets = (container) =>
-  Object.fromEntries([...container.querySelectorAll("input[data-name]")].map((i) => [i.dataset.name, Number(i.value)]));
-
-// ------------------------------------------------------------------------ plages horaires
-function renderWindows(windows) {
-  const box = $("windows");
-  box.replaceChildren();
-  windows.forEach((w) => {
-    const start = el("input", { type: "time", value: w.start });
-    const end = el("input", { type: "time", value: w.end });
-    const days = DAYS.map((label, i) => {
-      const cb = el("input", { type: "checkbox", checked: w.days.includes(i) });
-      cb.dataset.day = i;
-      cb.addEventListener("change", scheduleSave);
-      return el("label", { className: "day" }, cb, label);
-    });
-    [start, end].forEach((i) => i.addEventListener("change", scheduleSave));
-    const remove = el("button", { type: "button", className: "secondary small", textContent: "×", title: "Retirer" });
-    const row = el("div", { className: "window-row" }, start, "→", end, ...days, remove);
-    remove.addEventListener("click", () => { row.remove(); scheduleSave(); });
-    box.append(row);
+TABS.forEach((t) => {
+  $("tab-" + t).addEventListener("click", () => setTab(t));
+  $("tab-" + t).addEventListener("keydown", (e) => {
+    const i = TABS.indexOf(t);
+    const next = e.key === "ArrowRight" ? TABS[(i + 1) % TABS.length] : e.key === "ArrowLeft" ? TABS[(i + TABS.length - 1) % TABS.length] : null;
+    if (next) { setTab(next); $("tab-" + next).focus(); }
   });
-}
-const readWindows = () =>
-  [...$("windows").querySelectorAll(".window-row")].map((row) => {
-    const [start, end] = row.querySelectorAll("input[type=time]");
-    return { start: start.value, end: end.value, days: [...row.querySelectorAll("input[data-day]")].filter((c) => c.checked).map((c) => Number(c.dataset.day)) };
-  });
-
-// ---------------------------------------------------------------------------- formulaire
-function fill(data) {
-  building = true;
-  settings = data;
-  $("mode").value = data.mode;
-  $("cap").value = data.daily_cap;
-  $("cycle-min").value = data.cycle.min_minutes;
-  $("cycle-max").value = data.cycle.max_minutes;
-  $("sched-enabled").checked = data.schedule.enabled;
-  $("tz").value = data.schedule.timezone;
-  renderWindows(data.schedule.windows);
-  $("cons-enabled").checked = data.constructions.enabled;
-  renderTargets($("cons-targets"), data.constructions.targets, "names-buildings");
-  $("cons-planets").value = data.constructions.planets.join(", ");
-  $("cons-overrides").value = Object.keys(data.constructions.overrides).length ? JSON.stringify(data.constructions.overrides, null, 2) : "";
-  $("res-enabled").checked = data.research.enabled;
-  renderTargets($("res-targets"), data.research.targets, "names-research");
-  $("res-planet").value = data.research.funding_planet;
-  for (const [kind, id] of [["buildings", "names-buildings"], ["research", "names-research"]]) {
-    $(id).replaceChildren(...data.catalog[kind].map((n) => el("option", { value: n })));
-  }
-  building = false;
+});
+function initialTab() {
+  const fromHash = location.hash.slice(1);
+  if (TABS.includes(fromHash)) return fromHash;
+  try { return localStorage.getItem("boleryos.actions.tab") || "run"; } catch { return "run"; }
 }
 
-function collect() {
-  let overrides = {};
-  const raw = $("cons-overrides").value.trim();
-  if (raw) overrides = JSON.parse(raw); // une erreur de syntaxe est signalée par save()
-  return {
-    mode: $("mode").value,
-    daily_cap: Number($("cap").value),
-    cycle: { min_minutes: Number($("cycle-min").value), max_minutes: Number($("cycle-max").value) },
-    schedule: { enabled: $("sched-enabled").checked, timezone: $("tz").value.trim() || "Europe/Paris", windows: readWindows() },
-    constructions: {
-      enabled: $("cons-enabled").checked,
-      targets: readTargets($("cons-targets")),
-      overrides,
-      planets: $("cons-planets").value.split(",").map((s) => s.trim()).filter(Boolean),
-    },
-    research: { enabled: $("res-enabled").checked, targets: readTargets($("res-targets")), funding_planet: $("res-planet").value.trim() },
-    catalog: settings ? settings.catalog : { buildings: [], research: [] },
-  };
-}
-
+// -------------------------------------------------------------------------- enregistrement
 function say(text, ok) {
   const msg = $("save-msg");
   msg.textContent = text;
   msg.className = "msg " + (ok ? "ok" : "error");
 }
-
 async function save() {
-  let body;
-  try {
-    body = collect();
-  } catch {
-    return say("Exceptions par planète : JSON invalide.", false);
+  const body = JSON.parse(JSON.stringify(model));
+  delete body.catalog; // entretenu par le bot
+  for (const [planet, goals] of Object.entries(body.constructions.overrides)) {
+    if (!Object.keys(goals).length) delete body.constructions.overrides[planet]; // exception vide : retirée
   }
   const res = await fetch("/api/automation/settings", {
     method: "PUT",
@@ -144,32 +75,177 @@ async function save() {
   });
   const data = await res.json();
   if (!res.ok) {
-    const detail = Array.isArray(data.detail) ? data.detail.join(" · ") : data.detail || "Réglages refusés.";
-    return say(detail, false);
+    return say(Array.isArray(data.detail) ? data.detail.join(" · ") : data.detail || "Réglages refusés.", false);
   }
-  settings = data.settings;
+  catalog = data.catalog;
   say("Réglages enregistrés.", true);
 }
 function scheduleSave() {
-  if (building) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(save, 500);
 }
 
-document.querySelectorAll("#cap, #cycle-min, #cycle-max, #sched-enabled, #tz, #cons-enabled, #cons-planets, #cons-overrides, #res-enabled, #res-planet")
-  .forEach((node) => node.addEventListener("change", scheduleSave));
+// ---------------------------------------------------------------- listes de niveaux demandés
+function currentLevel(entry) {
+  if (entry.level_min === null || entry.level_min === undefined) return "niveau actuel inconnu";
+  return entry.level_min === entry.level_max ? `actuel : ${entry.level_min}` : `actuel : ${entry.level_min} à ${entry.level_max}`;
+}
+/** Une ligne par élément du jeu (liste intégrée au bot) : nom, niveau actuel, champ « niveau demandé ». */
+function renderGoals(container, entries, targets, placeholders = {}) {
+  container.replaceChildren();
+  let group = null;
+  entries.forEach((entry) => {
+    if (entry.group !== group) {
+      group = entry.group;
+      container.append(el("h3", { textContent: group }));
+    }
+    const input = el("input", { type: "number", min: 0, max: 999, placeholder: placeholders[entry.name] ?? "—" });
+    input.value = targets[entry.name] ?? "";
+    input.dataset.goal = entry.name;
+    input.addEventListener("input", () => {
+      if (input.value === "") delete targets[entry.name];
+      else targets[entry.name] = Math.max(0, Math.min(999, Number(input.value)));
+      scheduleSave();
+    });
+    container.append(el("div", { className: "goal-row" },
+      el("span", { className: "goal-name", textContent: entry.name }),
+      el("span", { className: "goal-current", textContent: currentLevel(entry) }),
+      input,
+    ));
+  });
+}
+function refreshLevels() {
+  for (const [kind, ids] of [["buildings", ["cons-goals", "ov-goals"]], ["research", ["res-goals"]]]) {
+    const byName = Object.fromEntries(catalog[kind].map((e) => [e.name, e]));
+    ids.forEach((id) => $(id).querySelectorAll(".goal-row").forEach((row) => {
+      const entry = byName[row.querySelector("input").dataset.goal];
+      if (entry) row.querySelector(".goal-current").textContent = currentLevel(entry);
+    }));
+  }
+}
+
+// ------------------------------------------------------------------------------ planètes
+function renderPlanetControls() {
+  const planets = [...new Set([...catalog.planets, ...model.constructions.planets, ...Object.keys(model.constructions.overrides)])];
+  const box = $("cons-planets");
+  box.replaceChildren();
+  const all = el("input", { type: "checkbox", checked: model.constructions.planets.length === 0 });
+  all.addEventListener("change", () => {
+    model.constructions.planets = all.checked ? [] : [...planets];
+    renderPlanetControls();
+    scheduleSave();
+  });
+  box.append(el("label", { className: "switch" }, all, "Toutes les planètes"));
+  if (!planets.length) {
+    box.append(el("p", { className: "hint", textContent: "La liste des planètes apparaît après « Lire l'état du jeu » (onglet État du jeu)." }));
+  } else if (!all.checked) {
+    planets.forEach((name) => {
+      const cb = el("input", { type: "checkbox", checked: model.constructions.planets.includes(name) });
+      cb.addEventListener("change", () => {
+        const set = new Set(model.constructions.planets);
+        cb.checked ? set.add(name) : set.delete(name);
+        model.constructions.planets = [...set];
+        scheduleSave();
+      });
+      box.append(el("label", { className: "switch planet" }, cb, name));
+    });
+  }
+  // exceptions par planète
+  const sel = $("ov-planet");
+  sel.replaceChildren(el("option", { value: "", textContent: planets.length ? "Choisir une planète…" : "Aucune planète connue" }),
+    ...planets.map((n) => el("option", { value: n, textContent: n })));
+  if (!planets.includes(overridePlanet)) overridePlanet = "";
+  sel.value = overridePlanet;
+  renderOverrides();
+  // planète qui finance les recherches
+  const fund = $("res-planet");
+  const names = [...new Set([...catalog.planets, model.research.funding_planet].filter(Boolean))];
+  fund.replaceChildren(el("option", { value: "", textContent: "Automatique (la planète qui a le plus de Fer)" }),
+    ...names.map((n) => el("option", { value: n, textContent: n })));
+  fund.value = model.research.funding_planet;
+}
+function renderOverrides() {
+  const container = $("ov-goals");
+  if (!overridePlanet) return container.replaceChildren();
+  const current = (model.constructions.overrides[overridePlanet] ||= {});
+  renderGoals(container, catalog.buildings, current, model.constructions.targets);
+}
+$("ov-planet").addEventListener("change", () => { overridePlanet = $("ov-planet").value; renderOverrides(); });
+$("res-planet").addEventListener("change", () => { model.research.funding_planet = $("res-planet").value; scheduleSave(); });
+
+// ------------------------------------------------------------------------ plages horaires
+function renderTimezones() {
+  let zones = [];
+  try { zones = Intl.supportedValuesOf("timeZone"); } catch { zones = ["Europe/Paris", "Europe/London", "UTC"]; }
+  if (!zones.includes(model.schedule.timezone)) zones.unshift(model.schedule.timezone);
+  $("tz").replaceChildren(...zones.map((z) => el("option", { value: z, textContent: z })));
+  $("tz").value = model.schedule.timezone;
+}
+function renderWindows() {
+  const box = $("windows");
+  box.replaceChildren();
+  model.schedule.windows.forEach((w, index) => {
+    const start = el("input", { type: "time", value: w.start });
+    const end = el("input", { type: "time", value: w.end });
+    start.addEventListener("input", () => { w.start = start.value; scheduleSave(); });
+    end.addEventListener("input", () => { w.end = end.value; scheduleSave(); });
+    const days = DAYS.map((label, i) => {
+      const cb = el("input", { type: "checkbox", checked: w.days.includes(i) });
+      cb.addEventListener("change", () => {
+        w.days = DAYS.map((_, d) => d).filter((d) => (d === i ? cb.checked : w.days.includes(d)));
+        scheduleSave();
+      });
+      return el("label", { className: "day" }, cb, label);
+    });
+    const remove = el("button", { type: "button", className: "secondary small", textContent: "×", title: "Retirer cette plage" });
+    remove.addEventListener("click", () => { model.schedule.windows.splice(index, 1); renderWindows(); scheduleSave(); });
+    box.append(el("div", { className: "window-row" }, start, "→", end, ...days, remove));
+  });
+  if (!model.schedule.windows.length) box.append(el("p", { className: "hint", textContent: "Aucune plage : avec la restriction activée, le bot n'agirait jamais." }));
+}
 $("add-window").addEventListener("click", () => {
-  const windows = readWindows();
-  windows.push({ start: "08:00", end: "23:00", days: [0, 1, 2, 3, 4, 5, 6] });
-  renderWindows(windows);
+  model.schedule.windows.push({ start: "08:00", end: "23:00", days: [0, 1, 2, 3, 4, 5, 6] });
+  renderWindows();
   scheduleSave();
 });
+
+// ------------------------------------------------------------------------------ formulaire
+function renderAll() {
+  $("mode").value = model.mode;
+  $("cap").value = model.daily_cap;
+  $("cycle-min").value = model.cycle.min_minutes;
+  $("cycle-max").value = model.cycle.max_minutes;
+  $("sched-enabled").checked = model.schedule.enabled;
+  renderTimezones();
+  renderWindows();
+  $("cons-enabled").checked = model.constructions.enabled;
+  $("res-enabled").checked = model.research.enabled;
+  renderGoals($("cons-goals"), catalog.buildings, model.constructions.targets);
+  renderGoals($("res-goals"), catalog.research, model.research.targets);
+  renderPlanetControls();
+  catalogKey = catalogSignature();
+}
+const catalogSignature = () => JSON.stringify([catalog.buildings.map((e) => e.name), catalog.research.map((e) => e.name), catalog.planets]);
+
+const bind = (id, apply) => {
+  const node = $(id);
+  const event = node.type === "number" ? "input" : "change"; // champs numériques : enregistrés dès la saisie
+  node.addEventListener(event, () => { apply(node); scheduleSave(); });
+};
+bind("cap", (n) => { model.daily_cap = Number(n.value); });
+bind("cycle-min", (n) => { model.cycle.min_minutes = Number(n.value); });
+bind("cycle-max", (n) => { model.cycle.max_minutes = Number(n.value); });
+bind("sched-enabled", (n) => { model.schedule.enabled = n.checked; });
+bind("tz", (n) => { model.schedule.timezone = n.value; });
+bind("cons-enabled", (n) => { model.constructions.enabled = n.checked; });
+bind("res-enabled", (n) => { model.research.enabled = n.checked; });
 $("mode").addEventListener("change", () => {
   if ($("mode").value === "live") {
     const ok = confirm("Mode RÉEL : le bot va cliquer sur « Améliorer » et « Rechercher » sur votre vrai compte et dépenser des ressources, dans la limite du plafond quotidien.\n\nActiver le mode réel ?");
     if (!ok) { $("mode").value = "dry_run"; return; }
     confirmedLive = true;
   }
+  model.mode = $("mode").value;
   save();
 });
 
@@ -184,12 +260,16 @@ $("import").addEventListener("change", async (event) => {
   try {
     const data = JSON.parse(await file.text());
     data.mode = "dry_run"; // un fichier importé ne peut jamais activer le mode réel
+    delete data.catalog;
     confirmedLive = false;
     const res = await fetch("/api/automation/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ settings: data, confirm_live: false }) });
     const out = await res.json();
     if (!res.ok) return say((Array.isArray(out.detail) ? out.detail.join(" · ") : out.detail) || "Fichier refusé.", false);
-    fill(out.settings);
+    model = out.settings;
+    catalog = out.catalog;
+    renderAll();
     say("Réglages importés (mode à blanc).", true);
+    setTab("run");
   } catch {
     say("Fichier illisible.", false);
   }
@@ -223,8 +303,7 @@ $("read-state").addEventListener("click", async () => {
       ])),
     );
   }
-  const fresh = await (await fetch("/api/automation")).json();
-  fill(fresh.settings); // les noms découverts alimentent les listes de suggestion
+  await refreshCatalog(true);
 });
 
 // -------------------------------------------------------------------------- état en direct
@@ -234,10 +313,9 @@ function renderStatus(a, state) {
   $("badge").textContent = LABELS[state] || state;
   const live = a.mode === "live";
   const next = a.running && a.next_run_in_s !== null ? ` · prochain cycle dans ${a.next_run_in_s} s` : "";
-  const line = $("run-status");
-  line.replaceChildren(
+  $("run-status").replaceChildren(
     el("strong", { textContent: a.running ? (a.cycle_running ? "Actif — cycle en cours" : "Actif") : "Arrêté" }),
-    ` · mode `, el("strong", { className: live ? "live" : "", textContent: live ? "RÉEL" : "à blanc" }),
+    " · mode ", el("strong", { className: live ? "live" : "", textContent: live ? "RÉEL" : "à blanc" }),
     ` · plage : ${a.in_window ? "active" : "inactive"} (${a.window})`,
     ` · lancements aujourd'hui : ${a.launched_today}/${a.cap}${next}`,
     a.last_cycle ? ` · dernier cycle ${a.last_cycle}` : "",
@@ -253,14 +331,30 @@ async function refresh() {
     renderStatus(data.automation, data.state);
     const box = $("log");
     const stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 8;
-    {
-      box.replaceChildren(...data.logs.map((e) => el("div", { className: e.level }, el("span", { className: "ts", textContent: e.ts }), e.msg)));
-      if (stick) box.scrollTop = box.scrollHeight;
-    }
+    box.replaceChildren(...data.logs.map((e) => el("div", { className: e.level }, el("span", { className: "ts", textContent: e.ts }), e.msg)));
+    if (stick) box.scrollTop = box.scrollHeight;
   } catch { /* le bot redémarre : on réessaie */ }
 }
+/** Met à jour niveaux actuels et planètes ; ne reconstruit les listes que si leur contenu a changé. */
+async function refreshCatalog(force = false) {
+  try {
+    const data = await (await fetch("/api/automation")).json();
+    catalog = data.catalog;
+    if (force || catalogSignature() !== catalogKey) {
+      if (!document.activeElement || !document.activeElement.matches("input, select")) renderAll();
+    } else {
+      refreshLevels();
+    }
+  } catch { /* idem */ }
+}
+
 (async () => {
-  fill((await (await fetch("/api/automation")).json()).settings);
+  const data = await (await fetch("/api/automation")).json();
+  model = data.settings;
+  catalog = data.catalog;
+  renderAll();
+  setTab(initialTab());
   refresh();
   setInterval(refresh, 2000);
+  setInterval(() => refreshCatalog(false), 8000);
 })();

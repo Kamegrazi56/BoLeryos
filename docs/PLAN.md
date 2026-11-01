@@ -1,6 +1,6 @@
 # Plan de développement de BoLeryos
 
-*Dernière mise à jour : 2026-11-01 (phases 1 à 5 codées ; F2 et F5 en attente). Ce document fait foi : on le met à jour à chaque phase, et on ne repose pas une question dont la réponse y figure.*
+*Dernière mise à jour : 2026-11-01 (phases 1 à 5 codées, page Actions en onglets avec listes intégrées ; F2 et F5 en attente). Ce document fait foi : on le met à jour à chaque phase, et on ne repose pas une question dont la réponse y figure.*
 
 ## 1. Objectif
 

@@ -13,6 +13,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .. import human
+from . import catalog as catalog_module
 from .decide import decide
 from .driver import GameDriver, GameUiError
 from .numbers import norm
@@ -42,6 +43,7 @@ class AutomationRunner:
         self._last_notes: dict[str, str] = {}
         self._window_active: bool | None = None
         self._window_cache: tuple | None = None
+        self._levels: dict[str, dict[str, int]] = {}  # nom normalisé → planète → niveau lu
         self.last_cycle = ""
         self._state_path = Path(data_dir) / "automation-state.json" if data_dir and os.path.isdir(data_dir) else None
         self._load_state()
@@ -218,6 +220,7 @@ class AutomationRunner:
         try:
             await self.guard()
             planets = await self.driver.list_planets()
+            self.store.add_catalog("planets", [p.name for p in planets])
             self.bot.log(f"Cycle : {len(planets)} planète(s) lues ({'réel' if live else 'à blanc'}).")
             if cfg["research"]["enabled"]:
                 await self._research_step(cfg, planets, live)
@@ -242,8 +245,21 @@ class AutomationRunner:
         self._counter["count"] += 1
         self._save_state()
 
-    def _catalog(self, kind: str, cards: list[Card]) -> None:
+    def _catalog(self, kind: str, cards: list[Card], planet: str = "") -> None:
         self.store.add_catalog(kind, [c.name for c in cards])
+        for card in cards:  # niveau actuel, par planète pour les bâtiments
+            if card.level is not None:
+                self._levels.setdefault(norm(card.name), {})[norm(planet) if kind == "buildings" else "-"] = card.level
+
+    def catalog_view(self) -> dict:
+        """Listes affichées par la page Actions : éléments intégrés + découverts, niveaux actuels, planètes connues."""
+        cfg = self.store.get()
+        levels = {name: (min(by.values()), max(by.values())) for name, by in self._levels.items() if by}
+        view = {
+            kind: catalog_module.entries(kind, cfg["catalog"][kind], levels) for kind in ("buildings", "research")
+        }
+        view["planets"] = list(cfg["catalog"]["planets"])
+        return view
 
     async def _decide_and_act(
         self, cfg: dict, live: bool, label: str, key: str, targets: dict[str, int], cards: list[tuple[str, Card]],
@@ -311,7 +327,7 @@ class AutomationRunner:
                     await human.think(self.bot._settings)
                     page_state = await self.driver.read_page()
                     resources = page_state.resources
-                    self._catalog("buildings", page_state.cards)
+                    self._catalog("buildings", page_state.cards, planet.name)
                     cards += [(section, c) for c in page_state.cards]
                     if set(targets) <= {norm(c.name) for _, c in cards}:
                         break  # tous les bâtiments visés ont été vus : inutile de charger l'autre page
@@ -379,13 +395,14 @@ class AutomationRunner:
         self.idle.clear()
         try:
             planets = await self.driver.list_planets()
+            self.store.add_catalog("planets", [p.name for p in planets])
             sections: dict[str, dict] = {}
             for section in ("buildings", "facilities", "tech"):
                 if await self.driver.open_section(section):
                     await human.think(self.bot._settings)
                     state = await self.driver.read_page()
                     kind = "research" if section == "tech" else "buildings"
-                    self._catalog(kind, state.cards)
+                    self._catalog(kind, state.cards, state.planet)
                     sections[section] = {"title": state.section, "planet": state.planet, "resources": asdict(state.resources), "cards": [asdict(c) for c in state.cards]}
             return {"planets": [asdict(p) for p in planets], "sections": sections}
         finally:

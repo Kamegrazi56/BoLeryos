@@ -24,7 +24,7 @@ DEFAULTS: dict[str, Any] = {
     },
     "constructions": {"enabled": False, "targets": {}, "overrides": {}, "planets": []},
     "research": {"enabled": False, "targets": {}, "funding_planet": ""},
-    "catalog": {"buildings": [], "research": []},
+    "catalog": {"buildings": [], "research": [], "planets": []},
 }
 
 
@@ -126,7 +126,7 @@ def validate(data: dict, *, allow_live: bool, min_cycle_minutes: float = 1.0) ->
     if isinstance(catalog, dict):
         merged["catalog"] = {
             key: sorted({str(n).strip() for n in catalog.get(key, []) if str(n).strip()})[:200]
-            for key in ("buildings", "research")
+            for key in ("buildings", "research", "planets")
         }
 
     if errors:
@@ -167,6 +167,7 @@ class SettingsStore:
         cleaned = validate(
             data, allow_live=allow_live or self._data["mode"] == "live", min_cycle_minutes=self._min_cycle
         )
+        cleaned["catalog"] = self._data["catalog"]  # entretenu par le bot, jamais modifié par l'utilisateur
         self._data = cleaned
         self._save()
         return self.get()
