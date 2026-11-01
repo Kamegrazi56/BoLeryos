@@ -4,11 +4,9 @@ FROM mcr.microsoft.com/playwright/python:v1.64.1-noble
 
 WORKDIR /srv
 
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Pas de venv : l'image n'embarque pas python3-venv. Le conteneur ne sert qu'à ce bot.
+RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
 COPY app ./app
 
