@@ -22,6 +22,22 @@ Une case « Contrôle manuel » (au-dessus de l'écran) rend la vue cliquable co
 - La zone d'affichage occupe toute la page, et la hauteur du navigateur du bot s'adapte au format de l'écran (largeur fixe de 1440 px).
 - Toute personne qui accède à l'interface peut agir sur le compte du jeu : protégez-la (`ui_user` / `ui_password`).
 
+### Affichage en direct
+
+Chrome pousse lui-même une image à chaque changement de la page (CDP `Page.startScreencast`) ; le serveur ne garde que la dernière et l'envoie en JPEG brut sur le WebSocket. Mesure en local (serveur seul, sans réseau ni affichage du navigateur) : médiane de 5 ms, maximum d'environ 50 ms entre un changement de la page et l'envoi de l'image. Une capture classique sert de filet de sécurité si Chrome n'envoie rien pendant 1 s.
+
+### Choix de l'univers
+
+Après la connexion, la page « Choisissez votre univers » du jeu est lue par le bot : un bouton par univers apparaît au-dessus de l'écran, et un clic le fait entrer (avec les délais humains). La détection repose pour l'instant sur le seul libellé observé (« Reprendre la partie ») et sur une structure supposée d'après une capture d'écran : à confirmer avec l'export ci-dessous. En attendant, le contrôle manuel permet de cliquer soi-même.
+
+### Exploration de la structure du site
+
+Le panneau « Exploration de la structure du site » (désactivé par défaut) enregistre, pendant que vous naviguez, la structure des pages (balises, attributs, textes courts), les chemins d'API et la **forme** des réponses JSON et des messages WebSocket. Il exporte un fichier `boleryos-structure.json`.
+
+- Conservés : chemins (identifiants remplacés par `{id}`), noms de paramètres, **noms** d'en-têtes, de cookies et de clés de stockage, types des valeurs, courts libellés alphabétiques (ex. `open`).
+- Jamais conservés : valeurs de cookies, d'en-têtes et de stockage, valeurs de paramètres d'URL, mots de passe et saisies, e-mails, jetons, identifiants. Des tests le vérifient.
+- Les textes visibles à l'écran (titres, boutons, pseudo) et les courts libellés peuvent contenir des informations de jeu : relisez le fichier avant de le partager. Ne le commitez pas dans un dépôt public.
+
 ## Données du joueur
 
 - Aucun identifiant ni mot de passe dans l'image Docker, `docker-compose.yml`, les variables d'environnement ou un volume.

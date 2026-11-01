@@ -51,6 +51,16 @@ button:disabled { opacity: 0.5; cursor: wait; }
 .log div.warn { color: var(--warn); }
 .log .ts { color: var(--muted); margin-right: 8px; }
 .side h1, .side h2 { margin: 0 0 8px; font-size: 15px; }
+.tools { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 16px; padding: 0 2px 10px; font-size: 13px; }
+.universes { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.universes:not(:empty)::before { content: "Univers :"; color: var(--muted); }
+.explore { color: var(--muted); margin-left: auto; }
+.explore summary { cursor: pointer; user-select: none; }
+.explore-body { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 8px; }
+.explore .hint { margin: 6px 0 0; max-width: 560px; }
+button.small, a.button.small { padding: 5px 10px; font-size: 13px; }
+a.button { display: inline-block; border-radius: 6px; text-decoration: none; font-weight: 600; background: var(--accent); color: #04222a; }
+a.button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
 @media (max-width: 900px) {
   .app-grid { height: auto; }
   .app-grid.login, .app-grid.vision { grid-template-columns: 1fr; }

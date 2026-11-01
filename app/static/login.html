@@ -39,6 +39,20 @@
         <span>Page : <span id="page">-</span> · <span id="message"></span></span>
         <label class="switch"><input type="checkbox" id="manual"> Contrôle manuel</label>
       </div>
+      <div class="tools">
+        <span id="universes" class="universes"></span>
+        <details class="explore">
+          <summary>Exploration de la structure du site</summary>
+          <div class="explore-body">
+            <label class="switch"><input type="checkbox" id="rec"> Enregistrer la structure</label>
+            <button type="button" class="secondary small" id="snap">Capturer la page</button>
+            <a class="button secondary small" id="export" href="/api/explore/export" download>Exporter</a>
+            <button type="button" class="secondary small" id="clear">Effacer</button>
+            <span id="exp-count" class="hint"></span>
+          </div>
+          <p class="hint">Enregistre les pages, les chemins d'API et la forme des échanges. Les valeurs (mots de passe, jetons, cookies, e-mails, saisies) sont masquées ; vérifiez le fichier avant de l'envoyer.</p>
+        </details>
+      </div>
       <div id="screen" class="screen" tabindex="0"><span>Démarrage du navigateur du bot…</span></div>
     </section>
   </div>

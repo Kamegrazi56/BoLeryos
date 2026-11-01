@@ -25,9 +25,12 @@ from playwright.async_api import Browser, BrowserContext, Page, Playwright, asyn
 
 from . import human
 from .config import Settings
+from .explore import SNAPSHOT_JS, Recorder, should_skip_host
 
 TURNSTILE_SELECTOR = 'iframe[src*="challenges.cloudflare.com"]'
 COOKIE_REFUSE_NAME = "tout refuser"
+# Bouton d'entrée d'un univers (seul libellé observé : « Reprendre la partie » ; à compléter après exploration).
+UNIVERSE_BUTTON_RE = re.compile(r"reprendre la partie", re.I)
 
 # Point rouge qui suit la souris : rend les déplacements du bot visibles dans la vue en direct.
 CURSOR_SCRIPT = """
@@ -104,6 +107,9 @@ class BotSession:
         self._cdp = None  # session CDP de la page courante (flux d'images poussé par Chrome)
         self._screencasting = False
         self._tasks: set[asyncio.Task] = set()
+        # Exploration de la structure du site (désactivée par défaut)
+        self._recorder = Recorder()
+        self._snapshot_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------ état
     def log(self, message: str, level: str = "info") -> None:
@@ -120,6 +126,7 @@ class BotSession:
             "message": self._message,
             "page": self._page_label(),
             "manual": self._manual,
+            "explore": {"recording": self._recorder.enabled, **self._recorder.counts()},
         }
 
     def _page_label(self) -> str:
@@ -284,6 +291,9 @@ class BotSession:
         if self._settings.show_cursor:
             await self._context.add_init_script(CURSOR_SCRIPT)
         self._page = await self._context.new_page()
+        self._context.on("response", self._on_response)
+        self._page.on("websocket", self._on_websocket)
+        self._page.on("framenavigated", self._on_navigated)
         await self._attach_screencast()
 
     async def _open_home(self) -> None:
@@ -501,6 +511,147 @@ class BotSession:
             key = str(msg["key"])
             if _KEY_RE.match(key):
                 await page.keyboard.press(key)
+
+    # ------------------------------------------------ exploration de la structure
+    async def _on_response(self, response) -> None:
+        rec = self._recorder
+        if not rec.enabled:
+            return
+        try:
+            request = response.request
+            if request.resource_type not in {"xhr", "fetch", "document"}:
+                return
+            if should_skip_host(urlsplit(response.url).hostname):
+                return
+            content_type = response.headers.get("content-type", "")
+            body = None
+            if "json" in content_type:
+                raw = await response.body()
+                body = raw.decode("utf-8", errors="ignore") if len(raw) <= 300_000 else None
+            try:
+                request_body = request.post_data
+            except Exception:  # noqa: BLE001 - corps binaire
+                request_body = None
+            header_names = list((await request.all_headers()).keys())
+            rec.add_request(
+                request.method, response.url, response.status, request.resource_type,
+                header_names, request_body, content_type, body,
+            )
+        except Exception:  # noqa: BLE001 - redirection, page fermée, etc.
+            return
+
+    def _on_websocket(self, ws) -> None:
+        rec = self._recorder
+        if not rec.enabled or should_skip_host(urlsplit(ws.url).hostname):
+            return
+        ws.on("framesent", lambda payload: rec.enabled and rec.add_ws_frame(ws.url, "sent", payload))
+        ws.on("framereceived", lambda payload: rec.enabled and rec.add_ws_frame(ws.url, "received", payload))
+
+    def _on_navigated(self, frame) -> None:
+        """Prend un cliché de la page 1,5 s après chaque navigation, quand l'enregistrement est actif."""
+        page = self._page
+        if not self._recorder.enabled or page is None or frame != page.main_frame:
+            return
+        if self._snapshot_task is not None and not self._snapshot_task.done():
+            self._snapshot_task.cancel()
+
+        async def later() -> None:
+            await asyncio.sleep(1.5)
+            await self.snapshot_now()
+
+        self._snapshot_task = asyncio.create_task(later())
+
+    def set_recording(self, enabled: bool) -> None:
+        if enabled == self._recorder.enabled:
+            return
+        self._recorder.enabled = enabled
+        self.log(
+            "Enregistrement de la structure du site activé : navigation et échanges observés (valeurs masquées)."
+            if enabled else "Enregistrement de la structure du site désactivé."
+        )
+
+    def clear_recording(self) -> None:
+        self._recorder.clear()
+        self.log("Enregistrement effacé.")
+
+    async def snapshot_now(self) -> bool:
+        page = self._page
+        if page is None or page.is_closed():
+            return False
+        try:
+            data = await page.evaluate(SNAPSHOT_JS)
+            self._recorder.add_snapshot(page.url, data)
+            self.log(f"Page capturée : {self._page_label()} ({len(data['elements'])} éléments).")
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    async def export_structure(self) -> dict:
+        cookies, storage = [], {}
+        if self._context is not None and self._page is not None and not self._page.is_closed():
+            try:
+                cookies = await self._context.cookies()  # on n'en garde que les noms (voir Recorder.export)
+                storage = await self._page.evaluate(
+                    "() => ({ localStorage: Object.keys(localStorage), sessionStorage: Object.keys(sessionStorage) })"
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        return self._recorder.export(cookies, storage)
+
+    # ------------------------------------------------------------ choix de l'univers
+    async def _universe_buttons(self):
+        page = self._page
+        if page is None or page.is_closed() or self._state is not State.LOGGED_IN:
+            return None
+        return page.locator("button, a").filter(has_text=UNIVERSE_BUTTON_RE)
+
+    async def list_universes(self) -> list[dict]:
+        """Univers proposés par la page de choix. Structure supposée d'après une capture : à confirmer par l'export."""
+        buttons = await self._universe_buttons()
+        if buttons is None:
+            return []
+        found = []
+        try:
+            page_title = ""
+            heading = self._page.locator("h1").first
+            if await heading.count():
+                page_title = " ".join((await heading.inner_text(timeout=1_000)).split())
+            for i in range(await buttons.count()):
+                button = buttons.nth(i)
+                if not await button.is_visible():
+                    continue
+                card = button.locator("xpath=ancestor::*[.//h1 or .//h2 or .//h3 or .//h4][1]")
+                name = ""
+                if await card.count():
+                    title = card.locator("h1,h2,h3,h4").first
+                    name = " ".join((await title.inner_text(timeout=1_000)).split())
+                if not name or name == page_title:
+                    name = f"Univers {len(found) + 1}"
+                found.append({"index": i, "name": name[:40]})
+        except Exception:  # noqa: BLE001 - page en cours de chargement
+            return []
+        return found
+
+    async def enter_universe(self, index: int) -> dict[str, str]:
+        if self._manual:
+            return {**self.status(), "message": "Désactivez le contrôle manuel pour choisir un univers."}
+        if self._lock.locked():
+            return {**self.status(), "message": "Une opération est déjà en cours."}
+        async with self._lock:
+            buttons = await self._universe_buttons()
+            if buttons is None or not 0 <= index < await buttons.count():
+                self.log("Choix d'univers impossible : bouton introuvable.", "error")
+                return self.status()
+            names = {u["index"]: u["name"] for u in await self.list_universes()}
+            self.log(f"Choix de l'univers : {names.get(index, index)}.")
+            try:
+                await human.think(self._settings)
+                await human.click(self._page, buttons.nth(index), self._settings)
+                await self._page.wait_for_load_state("domcontentloaded", timeout=15_000)
+                self.log(f"Page affichée : {self._page_label()}.")
+            except Exception as exc:  # noqa: BLE001
+                self.log(f"Erreur pendant le choix de l'univers ({type(exc).__name__}).", "error")
+            return self.status()
 
     # --------------------------------------------------------------- nettoyage
     async def _teardown(self) -> None:

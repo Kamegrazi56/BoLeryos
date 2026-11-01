@@ -10,6 +10,7 @@ const LABELS = { idle: "Non connecté", logging_in: "Connexion…", logged_in: "
 
 let ws = null;
 let manualLockUntil = 0;
+let currentState = "idle";
 function send(obj) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
 }
@@ -23,6 +24,8 @@ function render(data) {
     manual.checked = !!data.manual;
   }
   screen.classList.toggle("manual", manual.checked);
+  renderExplore(data.explore);
+  currentState = data.state;
 
   const stick = logBox.scrollTop + logBox.clientHeight >= logBox.scrollHeight - 8;
   logBox.replaceChildren(...data.logs.map((entry) => {
@@ -156,3 +159,52 @@ if (logout) {
     location.href = "/";
   });
 }
+
+// ------------------------------------------------------- exploration de la structure
+const rec = document.getElementById("rec");
+let recLockUntil = 0;
+function post(url, body) {
+  return fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  }).then((r) => r.json());
+}
+function renderExplore(explore) {
+  if (!explore) return;
+  if (Date.now() > recLockUntil) rec.checked = !!explore.recording;
+  document.getElementById("exp-count").textContent =
+    `${explore.snapshots} page(s) · ${explore.requests} requête(s) · ${explore.sockets} WebSocket`;
+}
+rec.addEventListener("change", () => {
+  recLockUntil = Date.now() + 800;
+  post("/api/explore/recording", { enabled: rec.checked });
+});
+document.getElementById("snap").addEventListener("click", () => post("/api/explore/snapshot"));
+document.getElementById("clear").addEventListener("click", () => post("/api/explore/clear"));
+
+// ------------------------------------------------------------- choix de l'univers
+const universes = document.getElementById("universes");
+let universesKey = "";
+async function refreshUniverses() {
+  if (currentState !== "logged_in") {
+    universes.replaceChildren();
+    universesKey = "";
+    return;
+  }
+  try {
+    const list = await (await fetch("/api/universes")).json();
+    const key = JSON.stringify(list);
+    if (key === universesKey) return;
+    universesKey = key;
+    universes.replaceChildren(...list.map((u) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "small";
+      b.textContent = u.name;
+      b.addEventListener("click", () => post("/api/universe", { index: u.index }));
+      return b;
+    }));
+  } catch { /* le bot redémarre : on réessaiera */ }
+}
+setInterval(refreshUniverses, 3000);

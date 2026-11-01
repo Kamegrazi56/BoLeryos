@@ -41,6 +41,14 @@ class LoginRequest(BaseModel):
     password: SecretStr = Field(min_length=1, max_length=256)
 
 
+class RecordingRequest(BaseModel):
+    enabled: bool
+
+
+class UniverseRequest(BaseModel):
+    index: int = Field(ge=0, le=50)
+
+
 class BasicAuthMiddleware:
     """Protège toute l'interface (HTTP et WebSocket) si UI_USER / UI_PASSWORD sont définis."""
 
@@ -107,6 +115,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not _same_origin(request.headers, request.headers.get("host")):
             raise HTTPException(403, "Origine refusée.")
         return JSONResponse(await bot.logout(), headers=NO_STORE)
+
+    # --- Exploration de la structure du site ------------------------------------
+    def _check_origin(request: Request) -> None:
+        if not _same_origin(request.headers, request.headers.get("host")):
+            raise HTTPException(403, "Origine refusée.")
+
+    @app.post("/api/explore/recording")
+    async def api_explore_recording(body: RecordingRequest, request: Request):
+        _check_origin(request)
+        bot.set_recording(body.enabled)
+        return JSONResponse(bot.status(), headers=NO_STORE)
+
+    @app.post("/api/explore/snapshot")
+    async def api_explore_snapshot(request: Request):
+        _check_origin(request)
+        ok = await bot.snapshot_now()
+        return JSONResponse({"ok": ok, **bot.status()}, headers=NO_STORE)
+
+    @app.post("/api/explore/clear")
+    async def api_explore_clear(request: Request):
+        _check_origin(request)
+        bot.clear_recording()
+        return JSONResponse(bot.status(), headers=NO_STORE)
+
+    @app.get("/api/explore/export")
+    async def api_explore_export():
+        data = await bot.export_structure()
+        return JSONResponse(
+            data,
+            headers={**NO_STORE, "Content-Disposition": 'attachment; filename="boleryos-structure.json"'},
+        )
+
+    # --- Choix de l'univers -----------------------------------------------------
+    @app.get("/api/universes")
+    async def api_universes():
+        return JSONResponse(await bot.list_universes(), headers=NO_STORE)
+
+    @app.post("/api/universe")
+    async def api_universe(body: UniverseRequest, request: Request):
+        _check_origin(request)
+        return JSONResponse(await bot.enter_universe(body.index), headers=NO_STORE)
 
     @app.get("/api/status")
     async def api_status():
