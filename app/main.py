@@ -23,6 +23,15 @@ NO_STORE = {"Cache-Control": "no-store"}
 WS_TICK = 0.25  # fréquence de rafraîchissement du statut et du journal (secondes)
 
 
+class NoStoreStaticFiles(StaticFiles):
+    """Fichiers JS/CSS jamais mis en cache : après une mise à jour du bot, le navigateur recharge les nouveaux."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+
 class LoginRequest(BaseModel):
     # Libellé « identifiant » : le formulaire du jeu attend une adresse e-mail.
     identifier: str = Field(min_length=1, max_length=254)
@@ -133,7 +142,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_api_route("/", page("login.html"), methods=["GET"], include_in_schema=False)
     app.add_api_route("/vision", page("vision.html"), methods=["GET"], include_in_schema=False)
     app.add_api_route("/actions", page("actions.html"), methods=["GET"], include_in_schema=False)
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    app.mount("/static", NoStoreStaticFiles(directory=STATIC_DIR), name="static")
 
     if settings.ui_user and settings.ui_password:
         app.add_middleware(BasicAuthMiddleware, user=settings.ui_user, password=settings.ui_password)

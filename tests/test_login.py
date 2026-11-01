@@ -11,6 +11,14 @@ def test_pages_are_served(client):
         assert res.headers["cache-control"] == "no-store"
 
 
+def test_static_files_are_never_cached(client):
+    """Sinon un navigateur garde un ancien vision.js avec le nouveau serveur (écran noir)."""
+    for path in ("/static/vision.js", "/static/login.js", "/static/style.css"):
+        res = client.get(path)
+        assert res.status_code == 200
+        assert res.headers["cache-control"] == "no-store"
+
+
 def test_initial_status_is_idle(client):
     data = client.get("/api/status").json()
     assert data["state"] == "idle"
