@@ -32,7 +32,7 @@ Après la connexion, la page « Choisissez votre univers » du jeu est lue par l
 
 ### Exploration de la structure du site
 
-Le panneau « Exploration de la structure du site » (désactivé par défaut) enregistre, pendant que vous naviguez, la structure des pages (balises, attributs, textes courts), les chemins d'API et la **forme** des réponses JSON et des messages WebSocket. Il exporte un fichier `boleryos-structure.json`.
+Le panneau « Exploration de la structure du site » (désactivé par défaut) enregistre, pendant que vous naviguez, la structure des pages (balises, attributs, tous les textes visibles : niveaux, coûts, durées…), les chemins d'API et la **forme** des réponses JSON et des messages WebSocket. Il exporte un fichier `boleryos-structure.json`.
 
 - Conservés : chemins (identifiants remplacés par `{id}`), noms de paramètres, **noms** d'en-têtes, de cookies et de clés de stockage, types des valeurs, courts libellés alphabétiques (ex. `open`).
 - Jamais conservés : valeurs de cookies, d'en-têtes et de stockage, valeurs de paramètres d'URL, mots de passe et saisies, e-mails, jetons, identifiants. Des tests le vérifient.

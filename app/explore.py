@@ -65,7 +65,18 @@ SNAPSHOT_JS = """
     o.box = [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)];
     out.push(o);
   }
-  return { title: document.title, viewport: [innerWidth, innerHeight], elements: out };
+  // Textes visibles (niveaux, coûts, durées…) : éléments « feuilles » uniquement, sans valeur de champ.
+  const texts = [];
+  for (const el of document.body.querySelectorAll('*')) {
+    if (texts.length >= 800) break;
+    if (el.children.length || el.matches('script,style,noscript,input,textarea,select,option')) continue;
+    const t = (el.textContent || '').trim().replace(/\s+/g, ' ');
+    if (!t) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) continue;
+    texts.push({ path: cssPath(el), text: t.slice(0, 80) });
+  }
+  return { title: document.title, viewport: [innerWidth, innerHeight], elements: out, texts };
 }
 """
 
@@ -233,6 +244,7 @@ class Recorder:
         for el in snapshot.get("elements", []):
             clean = {k: (mask_text(v, 80) if isinstance(v, str) else v) for k, v in el.items()}
             elements.append(clean)
+        texts = [{"path": t.get("path", ""), "text": mask_text(t.get("text", ""), 80)} for t in snapshot.get("texts", [])]
         self.snapshots.append(
             {
                 "page": mask_url(url).split("?")[0],
@@ -240,6 +252,7 @@ class Recorder:
                 "viewport": snapshot.get("viewport"),
                 "taken_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "elements": elements,
+                "texts": texts,
             }
         )
 

@@ -108,6 +108,7 @@ def test_recorded_structure_never_contains_secrets(client):
     page = data["pages"][0]
     assert any(e.get("name") == "password" and e.get("type") == "password" for e in page["elements"])
     assert not any("value" in e for e in page["elements"])
+    assert any(t["text"] == "Se connecter" for t in page["texts"])  # textes visibles : niveaux, coûts, durées…
 
     # …et aucun secret nulle part dans le fichier.
     for secret in SECRETS:
@@ -123,6 +124,7 @@ def test_typed_values_are_not_recorded(client):
     assert client.post("/api/explore/snapshot").json()["ok"] is True
     raw = client.get("/api/explore/export").text
     assert "saisie-secrete" not in raw and "mot-de-passe-secret" not in raw
+    assert "example.com" not in raw  # aucune adresse e-mail, même partielle
 
 
 def test_clear_empties_the_recording(client):
