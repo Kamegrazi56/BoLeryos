@@ -4,6 +4,8 @@ Bot d'automatisation pour Aleryos, destiné aux **tests de protection anti-bot r
 
 > Le règlement du jeu (§12) interdit les bots sur les comptes de joueurs. Ce projet ne doit être utilisé que dans le cadre de l'accord avec l'éditeur, de préférence avec un compte de test dédié.
 
+> Plan de développement, décisions prises et feuille de route : [`docs/PLAN.md`](docs/PLAN.md).
+
 ## Pages
 
 | Page | Rôle |
