@@ -11,7 +11,9 @@ Le serveur garde l'état (planète active, stocks, niveaux) pour que les recharg
 import copy
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+
+from tests.mock_site import SERVERS_PAGE
 
 
 def _b(name, level, costs, duration, section="buildings"):
@@ -45,6 +47,9 @@ def initial_state():
         "close_on_select": True,
         "no_debit": False,
         "popup_after_click": False,
+        "require_auth": False,  # vrai : connexion → choix de l'univers → partie, avec session qui peut expirer
+        "logged_in": False,
+        "login_attempts": 0,
         "actions": [],
         "research_busy": False,
         "planets": [
@@ -58,6 +63,23 @@ def initial_state():
         ],
     }
 
+
+LOGIN_PAGE = """<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Aleryos</title></head><body>
+<div id="cookies"><button type="button" id="refuse">TOUT REFUSER</button></div>
+<main><form id="f"><input type="email" name="email" placeholder="Adresse e-mail"><input type="password" name="password" placeholder="Mot de passe">
+<button type="submit">Se connecter</button></form><p id="err" role="alert" hidden></p></main>
+<script>
+document.getElementById('refuse').onclick = () => document.getElementById('cookies').remove();
+document.getElementById('f').onsubmit = async (e) => {
+  e.preventDefault();
+  const r = await fetch('/api/login', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({password: e.target.password.value})});
+  if (r.ok) { location.href = '/servers'; return; }
+  const err = document.getElementById('err'); err.hidden = false; err.textContent = 'Identifiants invalides.';
+};
+</script></body></html>"""
+
+# Page de choix de l'univers : le bouton « Reprendre la partie » mène à la partie.
+SERVERS = SERVERS_PAGE.replace("/servers/asterion", "/game/asterion/buildings")
 
 PAGE = """<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Mock jeu</title>
 <style>.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
@@ -125,9 +147,33 @@ def create_mock_game() -> FastAPI:
     app = FastAPI()
     app.state.game = initial_state()
 
+    def _denied() -> bool:
+        g = app.state.game
+        return g["require_auth"] and not g["logged_in"]
+
+    @app.get("/", response_class=HTMLResponse)
+    async def login_page():
+        g = app.state.game
+        if g["require_auth"] and g["logged_in"]:
+            return RedirectResponse("/servers")
+        return LOGIN_PAGE
+
+    @app.post("/api/login")
+    async def login(request: Request):
+        g, body = app.state.game, await request.json()
+        g["login_attempts"] += 1
+        if body.get("password") != "good-password":
+            raise HTTPException(401, "identifiants invalides")
+        g["logged_in"] = True
+        return {"ok": True}
+
+    @app.get("/servers", response_class=HTMLResponse)
+    async def servers():
+        return RedirectResponse("/") if _denied() else SERVERS
+
     @app.get("/game/asterion/{section}", response_class=HTMLResponse)
     async def page(section: str):
-        return PAGE
+        return RedirectResponse("/") if _denied() else PAGE
 
     @app.get("/api/state")
     async def get_state():
@@ -171,7 +217,7 @@ def create_mock_game() -> FastAPI:
         app.state.game = initial_state()
         patch = await request.json() if (await request.body()) else {}
         g = app.state.game
-        for key in ("close_on_select", "no_debit", "popup_after_click"):
+        for key in ("close_on_select", "no_debit", "popup_after_click", "require_auth"):
             if key in patch:
                 g[key] = patch[key]
         for index, energy in (patch.get("energy") or {}).items():
@@ -179,6 +225,16 @@ def create_mock_game() -> FastAPI:
         for index, stocks in (patch.get("stocks") or {}).items():
             g["planets"][int(index)]["stocks"].update(stocks)
         return {"ok": True}
+
+    @app.post("/api/_logout")
+    async def logout():
+        app.state.game["logged_in"] = False  # session expirée
+        return {"ok": True}
+
+    @app.get("/api/_info")
+    async def info():
+        g = app.state.game
+        return {"logged_in": g["logged_in"], "login_attempts": g["login_attempts"]}
 
     @app.post("/api/_complete")
     async def complete():

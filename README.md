@@ -42,6 +42,22 @@ Le panneau « Exploration de la structure du site » (désactivé par défaut) e
 
 ## Automatisation
 
+### Interrupteur « Bot : ON / OFF »
+
+Un seul interrupteur, dans l'en-tête de chaque page. **ON** : le bot regarde où en est le site et ne fait que ce qui manque :
+
+| Écran du site | Ce que fait le bot |
+|---|---|
+| Page de connexion | Se connecte avec les identifiants mémorisés (onglet **Compte** de la page Actions, ou connexion faite une fois à la main sur la page Connexion). |
+| Choix de l'univers | Entre dans l'univers choisi dans l'onglet Compte (cliquer sur un bouton d'univers le mémorise aussi). |
+| Déjà dans une partie | Saute la connexion et le choix de l'univers, puis travaille. |
+| Session expirée | Se reconnecte tout seul. |
+
+**Garde-fous :** si le site **refuse** les identifiants, le bot n'essaie qu'**une fois** (risque de blocage du compte) et l'indique ; si la connexion n'aboutit pas (contrôle anti-bot ?), 3 essais espacés (1 min, 5 min) puis il demande de se connecter à la main et **reprend seul** dès que le site est connecté ; hors plage horaire, il ne se connecte pas non plus ; le contrôle manuel le met en pause. **OFF** arrête tout (c'est l'arrêt d'urgence).
+
+**Identifiants :** gardés **en mémoire du bot seulement** (jamais sur disque, ni dans le journal, ni dans les réglages exportés, ni renvoyés par l'API). Ils sont oubliés à la déconnexion et perdus au redémarrage du conteneur : il faut alors les ressaisir (onglet Compte). Les conserver au-delà d'un redémarrage est la décision D1 du plan, non prise.
+
+
 La page **Actions** pilote le planificateur. Tout y est organisé en **onglets** (Fonctionnement, Plages horaires, Constructions, Recherches, État du jeu, Journal, Réglages) ; la barre du haut, toujours visible, affiche l'état et les boutons **Démarrer** et **Arrêt d'urgence**. Tout est **à blanc par défaut** : le bot lit le jeu et écrit dans le journal ce qu'il *ferait*, sans cliquer. Le mode réel s'active à la main (confirmation) et n'est jamais rétabli après un redémarrage.
 
 | Fonction | Ce que fait le bot |
@@ -55,7 +71,7 @@ La page **Actions** pilote le planificateur. Tout y est organisé en **onglets**
 
 **Réglages :** enregistrés dans le volume Docker `boleryos-data` (`/data/automation.json`, non secret) ; exportables et importables en JSON (un fichier importé ne peut jamais activer le mode réel).
 
-**Pas encore fait :** connexion automatique avec identifiants enregistrés (attend le choix D1 du plan) et expéditions (attendent des captures). Voir [`docs/PLAN.md`](docs/PLAN.md).
+**Pas encore fait :** conservation des identifiants après un redémarrage du conteneur (attend le choix D1 du plan) et expéditions (attendent des captures). Voir [`docs/PLAN.md`](docs/PLAN.md).
 
 **Non vérifié sur le vrai jeu :** la navigation entre les pages Industrie / Installations / Laboratoire et le changement de planète ont été testés sur un faux jeu reconstitué d'après votre export, pas sur Aleryos. Commencez par « Lire l'état du jeu », puis laissez tourner à blanc et relisez le journal avant d'activer le mode réel.
 

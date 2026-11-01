@@ -1,6 +1,6 @@
 # Plan de développement de BoLeryos
 
-*Dernière mise à jour : 2026-11-01 (phases 1 à 5 codées, page Actions en onglets avec listes intégrées ; F2 et F5 en attente). Ce document fait foi : on le met à jour à chaque phase, et on ne repose pas une question dont la réponse y figure.*
+*Dernière mise à jour : 2026-11-01 (phases 1 à 5 codées, page Actions en onglets, interrupteur ON/OFF avec connexion automatique en mémoire ; D1 et F5 en attente). Ce document fait foi : on le met à jour à chaque phase, et on ne repose pas une question dont la réponse y figure.*
 
 ## 1. Objectif
 
@@ -16,7 +16,7 @@ Cadre : test de protections anti-bot **avec l'éditeur** (GEEKOS NEXUS), sur un 
 | # | Fonctionnalité | Phase | État des connaissances |
 |---|---|---|---|
 | F1 | **Période horaire d'activité** : le bot n'agit que dans une ou plusieurs plages de la journée. | 2 | Aucune capture nécessaire. |
-| F2 | **Connexion automatique** : identifiant, mot de passe et univers enregistrés dans le bot. | 6 | Change une décision (voir D1). Le choix de l'univers n'est pas secret. |
+| F2 | **Connexion automatique** : identifiant, mot de passe et univers enregistrés dans le bot. | 6 | **Fait en mémoire** : interrupteur ON/OFF, connexion et choix de l'univers automatiques, reconnexion si la session expire. **Reste D1** : conserver les identifiants après un redémarrage du conteneur. L'univers est mémorisé (non secret). |
 | F3 | **Constructions** selon un **niveau demandé** par le joueur, sur **toutes les planètes**, si les ressources de la planète suffisent. | 3-4 | Pages Industrie et Installations capturées (cartes avec « Améliorer »). |
 | F4 | **Recherches** lancées si les ressources suffisent. | 5 | Page capturée : boutons « Rechercher » / « Ressources insuffisantes ». |
 | F5 | **Expéditions** en mode spatial ou terrestre, avec des **modèles** et une **durée** choisis par le joueur. | 8 | Seule la page vide d'Opérations est capturée. Captures à faire (voir phase 8). |

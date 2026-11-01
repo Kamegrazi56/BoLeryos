@@ -55,6 +55,7 @@ def settings(mock_url):
         human_mode=False,  # pas de délais artificiels dans les tests (voir test_human.py)
         data_dir=None,
         min_cycle_minutes=0.01,
+        poll_seconds=0.3,
     )
 
 
@@ -83,6 +84,12 @@ class GameHandle:
 
     def complete(self) -> None:
         httpx.post(self.url + "/api/_complete", timeout=5).raise_for_status()
+
+    def logout(self) -> None:
+        httpx.post(self.url + "/api/_logout", timeout=5).raise_for_status()
+
+    def info(self) -> dict:
+        return httpx.get(self.url + "/api/_info", timeout=5).json()
 
     def actions(self) -> list[dict]:
         return httpx.get(self.url + "/api/_actions", timeout=5).json()
@@ -118,4 +125,13 @@ def game_client(settings, game):
         bot = c.app.state.bot
         c.portal.call(bot.ensure_started)
         bot._set(State.LOGGED_IN, "test")
+        yield c
+
+
+@pytest.fixture
+def world_client(settings, game):
+    """Bot qui démarre sur la page de connexion d'un faux site complet (connexion → univers → partie)."""
+    game.reset(require_auth=True)
+    with TestClient(create_app(replace(settings, login_url=game.url + "/", login_timeout=15.0))) as c:
+        c.portal.call(c.app.state.bot.ensure_started)
         yield c

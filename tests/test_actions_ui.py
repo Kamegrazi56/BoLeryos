@@ -10,7 +10,7 @@ from playwright.sync_api import sync_playwright
 from app.main import create_app
 from tests.conftest import _free_port
 
-TABS = ["run", "schedule", "constructions", "research", "state", "log", "settings"]
+TABS = ["run", "account", "schedule", "constructions", "research", "state", "log", "settings"]
 
 
 @pytest.fixture
@@ -62,11 +62,57 @@ def test_everything_is_in_tabs_and_only_one_panel_shows_at_a_time(ui):
     assert errors == []
 
 
-def test_start_and_emergency_stop_stay_visible_on_every_tab(ui):
+def test_the_on_off_switch_is_in_the_header_on_every_page_and_every_tab(ui):
     page, _, _ = ui
     for tab in TABS:
         page.click(f"#tab-{tab}")
-        assert page.locator("#start").is_visible() and page.locator("#stop").is_visible()
+        assert page.locator("header.top #power").is_visible()
+    base = page.url.split("/actions")[0]
+    page.goto(base + "/vision")
+    assert page.locator("header.top #power").is_visible()
+    # la page Connexion redirige vers Vision quand on est déjà connecté : on vérifie son contenu
+    html = page.request.get(base + "/").text()
+    assert 'id="power"' in html and "/static/power.js" in html
+
+
+def test_the_switch_turns_the_bot_on_then_off(ui):
+    page, _, app = ui
+    power = page.locator("#power")
+    assert power.inner_text() == "Bot : OFF" and power.get_attribute("aria-pressed") == "false"
+    power.click()
+    page.wait_for_function("document.querySelector('#power').textContent.includes('ON')", timeout=15000)
+    assert app.state.bot.automation.summary()["running"] is True
+    assert page.locator("#power").get_attribute("aria-pressed") == "true"
+    page.locator("#power").click()
+    page.wait_for_function("document.querySelector('#power').textContent.includes('OFF')", timeout=15000)
+    assert app.state.bot.automation.summary()["running"] is False
+
+
+def test_account_tab_keeps_credentials_in_memory_and_never_shows_them_again(ui):
+    page, _, app = ui
+    page.click("#tab-account")
+    page.fill("#acct-id", "titulaire.secret@example.com")
+    page.fill("#acct-pw", "mot-de-passe-tres-secret")
+    page.click("#acct-save")
+    page.wait_for_function("document.querySelector('#acct-status').textContent.includes('en mémoire (ti***)')", timeout=5000)
+    assert page.input_value("#acct-pw") == ""  # le mot de passe ne reste pas dans la page
+    assert app.state.bot.has_credentials()
+    assert "titulaire.secret" not in page.locator("#acct-status").inner_text()
+    page.click("#acct-forget")
+    page.wait_for_function("document.querySelector('#acct-status').textContent.includes('Aucun identifiant')", timeout=5000)
+    assert not app.state.bot.has_credentials()
+
+
+def test_universe_is_chosen_in_a_list_and_saved(ui):
+    page, _, app = ui
+    app.state.bot.automation.store.add_catalog("universes", ["Asterion", "Kael"])
+    page.reload()
+    page.wait_for_selector("#run-status")
+    page.click("#tab-account")
+    assert page.locator("#universe option").all_inner_texts() == ["Aucun : me demander", "Asterion", "Kael"]
+    page.select_option("#universe", "Asterion")
+    time.sleep(1.0)
+    assert app.state.bot.automation.store.get()["universe"] == "Asterion"
 
 
 def test_selected_tab_is_remembered_after_reload(ui):

@@ -44,6 +44,13 @@ class AutomationRunner:
         self._window_active: bool | None = None
         self._window_cache: tuple | None = None
         self._levels: dict[str, dict[str, int]] = {}  # nom normalisé → planète → niveau lu
+        # Superviseur de connexion
+        self.waiting = ""  # raison de l'attente affichée dans l'interface
+        self._login_failures = 0
+        self._login_blocked = ""  # raison si les tentatives automatiques sont suspendues
+        self._next_login_at = 0.0
+        self._unknown_since: float | None = None
+        self._universe_attempts = 0
         self.last_cycle = ""
         self._state_path = Path(data_dir) / "automation-state.json" if data_dir and os.path.isdir(data_dir) else None
         self._load_state()
@@ -115,6 +122,9 @@ class AutomationRunner:
             "next_run_in_s": max(0, round(self._next_run_at - time.monotonic())) if self._next_run_at else None,
             "last_cycle": self.last_cycle,
             "persistent": self.store.persistent,
+            "waiting": self.waiting if self._running else "",
+            "has_credentials": self.bot.has_credentials(),
+            "universe": cfg["universe"],
         }
 
     # -------------------------------------------------------------- contrôle
@@ -123,8 +133,13 @@ class AutomationRunner:
             return
         self._running = True
         self._unconfirmed_streak = 0
+        self._login_failures = 0
+        self._login_blocked = ""
+        self._next_login_at = 0.0
+        self.waiting = ""
         self._last_notes.clear()
-        self.bot.log(f"Automatisation démarrée (mode {'RÉEL' if self._cfg()['mode'] == 'live' else 'à blanc'}).")
+        self.bot.log(f"Bot activé (ON) — mode {'RÉEL' if self._cfg()['mode'] == 'live' else 'à blanc'}.")
+        await self.bot.ensure_started()  # le navigateur tourne même si aucun écran de l'interface n'est ouvert
         self._task = asyncio.create_task(self._loop())
 
     async def stop(self, reason: str = "demande de l'utilisateur") -> None:
@@ -138,7 +153,8 @@ class AutomationRunner:
         self.cycle_running = False
         self.idle.set()
         self._next_run_at = None
-        self.bot.log(f"Automatisation arrêtée ({reason}).", "warn")
+        self.waiting = ""
+        self.bot.log(f"Bot désactivé (OFF) — {reason}.", "warn")
 
     async def guard(self) -> None:
         """Point de contrôle appelé avant chaque action : interrompt le cycle si les conditions ne sont plus réunies."""
@@ -185,13 +201,20 @@ class AutomationRunner:
             if self._window_active != active:
                 self._window_active = active
                 self.bot.log(f"Plage horaire : {'active' if active else 'inactive'} ({text}).")
+            poll = self.bot._settings.poll_seconds
             if not active:
-                await self._sleep(30)
+                await self._sleep(poll * 3)
                 continue
-            problem = self._preconditions()
+            try:
+                problem = await self._ensure_ready(cfg)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                problem = f"vérification de l'écran impossible ({type(exc).__name__})"
+            self.waiting = problem or ""
             if problem:
                 self._note("precondition", f"En attente : {problem}.")
-                await self._sleep(15)
+                await self._sleep(poll)
                 continue
             self._last_notes.pop("precondition", None)
             try:
@@ -209,6 +232,86 @@ class AutomationRunner:
                     return
             lo, hi = cfg["cycle"]["min_minutes"], cfg["cycle"]["max_minutes"]
             await self._sleep(random.uniform(lo, hi) * 60)
+
+    # ------------------------------------------------------------ superviseur de connexion
+    async def _ensure_ready(self, cfg: dict) -> str | None:
+        """Regarde où en est le site et ne fait que ce qui manque : connexion, choix de l'univers, ou rien.
+
+        Retourne None quand le bot est dans une partie et peut agir, sinon la raison de l'attente.
+        """
+        b = self.bot
+        if b._manual:
+            return "contrôle manuel activé"
+        if b._lock.locked():
+            return "une autre opération est en cours"
+        if b._page is None or b._page.is_closed():
+            await b.ensure_started()
+            return "démarrage du navigateur"
+        screen = await b.detect_screen()
+        if screen != "unknown":
+            self._unknown_since = None
+        if screen in ("game", "universes"):  # connecté (par le bot ou à la main) : les blocages de connexion tombent
+            self._login_failures, self._login_blocked, self._next_login_at = 0, "", 0.0
+        if screen == "game":
+            self._universe_attempts = 0
+            return None
+        if screen == "universes":
+            return await self._pick_universe(cfg)
+        if screen == "login":
+            return await self._log_in()
+        # écran inconnu (chargement, redirection…) : on laisse un peu de temps puis on recharge la page de départ
+        now = time.monotonic()
+        self._unknown_since = self._unknown_since or now
+        if now - self._unknown_since > 45:
+            self._unknown_since = None
+            b.log("Écran non reconnu depuis 45 s : retour à la page de départ.", "warn")
+            await b._page.goto(b._settings.login_url, wait_until="domcontentloaded", timeout=30_000)
+        return "écran du site non reconnu"
+
+    async def _pick_universe(self, cfg: dict) -> str | None:
+        b = self.bot
+        universes = await b.list_universes()
+        self.store.add_catalog("universes", [u["name"] for u in universes])
+        wanted = cfg["universe"]
+        if not wanted:
+            return "choisissez un univers (onglet Compte, ou bouton d'univers sur la page Vision)"
+        match = next((u for u in universes if norm(u["name"]) == norm(wanted)), None)
+        if match is None:
+            return f"univers « {wanted} » indisponible sur la page de choix"
+        self._universe_attempts += 1
+        if self._universe_attempts > 4:
+            return "l'entrée dans l'univers n'aboutit pas : entrez-y à la main (contrôle manuel) ; le bot reprendra seul"
+        b.log(f"Page de choix de l'univers : entrée dans « {match['name']} ».")
+        await b.enter_universe(match["index"])
+        return "entrée dans l'univers en cours"
+
+    async def _log_in(self) -> str | None:
+        b = self.bot
+        if self._login_blocked:
+            return self._login_blocked
+        if not b.has_credentials():
+            return "identifiants requis (onglet Compte)"
+        wait = self._next_login_at - time.monotonic()
+        if wait > 0:
+            return f"nouvelle tentative de connexion dans {wait:.0f} s"
+        identifier, password = b._creds  # type: ignore[misc]
+        await b.login(identifier, password, supervised=True)
+        if b._state.value == "logged_in":
+            self._login_failures = 0
+            return "connexion réussie, vérification de l'écran"
+        kind = b.last_login_kind
+        self._login_failures += 1
+        if kind == "refused":  # identifiants refusés : ne pas réessayer (risque de blocage du compte)
+            self._login_blocked = "connexion refusée par le site : corrigez les identifiants (onglet Compte), puis OFF puis ON"
+            b.log("Reconnexion automatique suspendue : le site a refusé les identifiants.", "error")
+        elif self._login_failures >= 3:
+            self._login_blocked = "intervention requise (contrôle anti-bot ?) : connectez-vous à la main (page Connexion, contrôle manuel) ; le bot reprendra seul"
+            b.log("Trois tentatives de connexion sans résultat : intervention manuelle requise.", "error")
+        else:
+            delay = (60, 300)[min(self._login_failures - 1, 1)]
+            self._next_login_at = time.monotonic() + delay
+            b.log(f"Connexion sans résultat : nouvelle tentative dans {delay} s.", "warn")
+        return self._login_blocked or "connexion non aboutie"
 
     # ------------------------------------------------------------------- cycle
     async def run_cycle(self, cfg: dict | None = None) -> None:
@@ -259,6 +362,7 @@ class AutomationRunner:
             kind: catalog_module.entries(kind, cfg["catalog"][kind], levels) for kind in ("buildings", "research")
         }
         view["planets"] = list(cfg["catalog"]["planets"])
+        view["universes"] = list(cfg["catalog"]["universes"])
         return view
 
     async def _decide_and_act(

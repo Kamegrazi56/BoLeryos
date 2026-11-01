@@ -75,6 +75,7 @@ class State(str, Enum):
 class _Outcome:
     success: bool
     message: str
+    kind: str = ""  # « refused » (le site refuse), « timeout » (aucun résultat : Turnstile ?), « technical »
 
 
 def _mask(identifier: str) -> str:
@@ -96,6 +97,9 @@ class BotSession:
         self._logs: deque[dict[str, str]] = deque(maxlen=1000)
         self._dirty = False  # une tentative de connexion a déjà eu lieu dans ce contexte
         self._manual = False  # contrôle manuel (clics/clavier de l'utilisateur) activé
+        # Identifiants gardés EN MÉMOIRE seulement (jamais sur disque ni dans le journal), pour se reconnecter tout seul.
+        self._creds: tuple[str, str] | None = None
+        self.last_login_kind = ""
         self._viewport = {"width": VIEWPORT_WIDTH, "height": 900}
         self._last_typing_log = 0.0
         # Flux d'images
@@ -318,19 +322,65 @@ class BotSession:
         self._dirty = False
 
     # ------------------------------------------------------------- connexion
-    async def login(self, identifier: str, password: str) -> dict[str, str]:
+    # ----------------------------------------------------- identifiants (mémoire)
+    def has_credentials(self) -> bool:
+        return self._creds is not None
+
+    def credentials_hint(self) -> str:
+        return _mask(self._creds[0]) if self._creds else ""
+
+    def set_credentials(self, identifier: str, password: str) -> None:
+        self._creds = (identifier, password)
+        self.log(f"Identifiants mémorisés pour la reconnexion automatique ({_mask(identifier)}) : en mémoire seulement.")
+
+    def forget_credentials(self) -> None:
+        if self._creds:
+            self.log("Identifiants oubliés.")
+        self._creds = None
+
+    # ----------------------------------------------------- écran courant du site
+    async def detect_screen(self) -> str:
+        """« game » (dans une partie), « universes » (choix de l'univers), « login » (formulaire visible) ou « unknown »."""
+        page = self._page
+        if page is None or page.is_closed():
+            return "unknown"
+        path = urlsplit(page.url).path.rstrip("/")
+        screen = "unknown"
+        if "/game/" in path + "/":
+            screen = "game"
+        elif path == "/servers" or path.endswith("/servers"):
+            screen = "universes"
+        else:
+            try:
+                s = self._settings
+                if await page.locator(s.email_selector).first.is_visible() and await page.locator(s.password_selector).first.is_visible():
+                    screen = "login"
+            except Exception:  # noqa: BLE001 - page en cours de chargement
+                pass
+        if screen in ("game", "universes") and self._state is not State.LOGGED_IN:
+            self._set(State.LOGGED_IN, "Session détectée : déjà connecté.")
+            self.log("Session détectée : le site est déjà connecté, la connexion est sautée.")
+        elif screen == "login" and self._state is State.LOGGED_IN:
+            self._set(State.IDLE, "Session expirée.")
+            self.log("Session expirée : la page de connexion s'affiche à nouveau.", "warn")
+        return screen
+
+    # ------------------------------------------------------------- connexion
+    async def login(self, identifier: str, password: str, *, supervised: bool = False) -> dict[str, str]:
         if self._lock.locked():
             return {**self.status(), "message": "Une connexion est déjà en cours."}
         if self._manual:
             return {**self.status(), "message": "Désactivez le contrôle manuel pour lancer la connexion automatique."}
-        await self.automation.stop("nouvelle connexion")
+        if self.automation.cycle_running and not supervised:
+            return {**self.status(), "message": "Une automatisation est en cours : coupez le bot (OFF) avant de vous reconnecter."}
         async with self._lock:
             self._set(State.LOGGING_IN, "Connexion en cours…")
-            self.log(f"Connexion demandée pour {_mask(identifier)}.")
+            self.log(f"Connexion demandée pour {_mask(identifier)}{' (automatique)' if supervised else ''}.")
             try:
                 await self.ensure_started()
                 if self._page is None or self._page.is_closed():
                     self._set(State.ERROR, "Navigateur indisponible : voir le journal.")
+                    self.last_login_kind = "technical"
                     return self.status()
                 if self._dirty:  # nouvelle tentative : session vierge
                     await self._reset_context()
@@ -339,8 +389,11 @@ class BotSession:
             except Exception as exc:  # noqa: BLE001 - on ne journalise que le type, jamais le contenu
                 self.log(f"Erreur technique pendant la connexion ({type(exc).__name__}).", "error")
                 self._set(State.ERROR, "Erreur technique pendant la connexion.")
+                self.last_login_kind = "technical"
                 return self.status()
+            self.last_login_kind = outcome.kind
             if outcome.success:
+                self._creds = (identifier, password)  # en mémoire, pour se reconnecter si la session expire
                 self._set(State.LOGGED_IN, outcome.message)
                 self.log(outcome.message)
             else:
@@ -352,6 +405,7 @@ class BotSession:
 
     async def logout(self) -> dict[str, str]:
         await self.automation.stop("déconnexion")
+        self._creds = None  # se déconnecter, c'est aussi oublier les identifiants
         async with self._lock:
             if self._page is not None:
                 try:
@@ -374,7 +428,7 @@ class BotSession:
         try:
             await email.wait_for(state="visible", timeout=15_000)
         except Exception:  # noqa: BLE001
-            return _Outcome(False, "Formulaire de connexion introuvable (sélecteurs à vérifier).")
+            return _Outcome(False, "Formulaire de connexion introuvable (sélecteurs à vérifier).", "technical")
 
         await human.think(s)
         self.log("Saisie de l'identifiant.")
@@ -411,7 +465,7 @@ class BotSession:
         turnstile_seen = False
         while time.monotonic() < deadline:
             if page.is_closed():
-                return _Outcome(False, "La page du navigateur a été fermée.")
+                return _Outcome(False, "La page du navigateur a été fermée.", "technical")
             try:
                 if not turnstile_seen and await page.locator(TURNSTILE_SELECTOR).count():
                     turnstile_seen = True
@@ -420,7 +474,7 @@ class BotSession:
                 if await alert.count():
                     text = " ".join((await alert.first.inner_text()).split())
                     if text:
-                        return _Outcome(False, f"Connexion refusée par le site : {text}")
+                        return _Outcome(False, f"Connexion refusée par le site : {text}", "refused")
                 if not await page.locator(s.password_selector).first.is_visible():
                     return _Outcome(True, "Connecté : le formulaire de connexion a disparu.")
             except Exception:  # noqa: BLE001 - navigation en cours : on réessaie
@@ -428,7 +482,7 @@ class BotSession:
             await asyncio.sleep(0.4)
         await self._log_form_text(page)
         hint = " (Turnstile détecté : il bloque probablement le bot)" if turnstile_seen else ""
-        return _Outcome(False, f"Aucun résultat de connexion avant {s.login_timeout:.0f} s{hint}.")
+        return _Outcome(False, f"Aucun résultat de connexion avant {s.login_timeout:.0f} s{hint}.", "timeout")
 
     async def _log_form_text(self, page: Page) -> None:
         """Diagnostic : texte visible autour du formulaire (n'inclut pas les valeurs saisies)."""
@@ -653,6 +707,8 @@ class BotSession:
                 return self.status()
             names = {u["index"]: u["name"] for u in await self.list_universes()}
             self.log(f"Choix de l'univers : {names.get(index, index)}.")
+            if index in names:
+                self.automation.store.set_universe(names[index])  # mémorisé : le bot y retournera tout seul
             try:
                 await human.think(self._settings)
                 await human.click(self._page, buttons.nth(index), self._settings)

@@ -102,3 +102,10 @@ th, td { border-bottom: 1px solid var(--border); padding: 4px 6px; text-align: l
 th { color: var(--muted); font-weight: 600; }
 label.file { cursor: pointer; }
 .tabpanel .log { height: calc(100vh - 330px); min-height: 260px; }
+
+/* Interrupteur ON/OFF du bot (en-tête) */
+button.power { margin-left: auto; padding: 6px 16px; border-radius: 999px; font-size: 13px; font-weight: 700; letter-spacing: .04em; border: 2px solid var(--border); background: transparent; color: var(--muted); }
+button.power.on { background: var(--ok); border-color: var(--ok); color: #052212; }
+button.power.off:hover { border-color: var(--accent); color: var(--text); }
+button.power:disabled { opacity: .6; }
+header.top .badge { margin-left: 0; }

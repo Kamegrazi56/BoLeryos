@@ -52,6 +52,8 @@ class Settings:
     show_cursor: bool = True
     # Dossier des réglages d'automatisation (JSON, jamais d'identifiants). Utilisé seulement s'il existe.
     data_dir: str | None = "/data"
+    # Fréquence de vérification de l'écran quand le bot attend (connexion, univers, plage horaire), en secondes.
+    poll_seconds: float = 10.0
     # Intervalle minimal autorisé entre deux cycles d'automatisation (minutes).
     min_cycle_minutes: float = 1.0
     # Protection facultative de l'interface du bot (HTTP Basic). Ce n'est PAS
@@ -79,6 +81,7 @@ def load_settings() -> Settings:
         key_delay_max=_env_float("KEY_DELAY_MAX", defaults.key_delay_max),
         show_cursor=_env_bool("SHOW_CURSOR", defaults.show_cursor),
         data_dir=os.environ.get("DATA_DIR", defaults.data_dir) or None,
+        poll_seconds=_env_float("POLL_SECONDS", defaults.poll_seconds),
         min_cycle_minutes=_env_float("MIN_CYCLE_MINUTES", defaults.min_cycle_minutes),
         ui_user=os.environ.get("UI_USER") or None,
         ui_password=os.environ.get("UI_PASSWORD") or None,

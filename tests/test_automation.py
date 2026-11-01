@@ -266,12 +266,13 @@ def test_scheduler_runs_cycles_and_stops_on_demand(game_client, game):
     assert game.actions() == []  # à blanc
 
 
-def test_scheduler_waits_until_the_player_is_in_a_game(game_client):
+def test_scheduler_detects_an_already_open_session_instead_of_waiting(game_client):
     bot = _bot(game_client)
-    bot._set(bot._state.__class__.IDLE, "test")
+    bot._set(bot._state.__class__.IDLE, "test")  # le bot a oublié son état, mais le site est dans une partie
     _configure(game_client, constructions=MINES)
     game_client.post("/api/automation/start")
-    assert _until(lambda: _has(game_client, "En attente : pas connecté"))
+    assert _until(lambda: _has(game_client, "Session détectée"))
+    assert _until(lambda: _has(game_client, "Cycle :"))
     game_client.post("/api/automation/stop")
 
 

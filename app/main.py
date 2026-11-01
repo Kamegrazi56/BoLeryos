@@ -50,6 +50,11 @@ class AutomationSettingsRequest(BaseModel):
     confirm_live: bool = False
 
 
+class CredentialsRequest(BaseModel):
+    identifier: str = Field(min_length=1, max_length=254)
+    password: SecretStr = Field(min_length=1, max_length=256)
+
+
 class RecordingRequest(BaseModel):
     enabled: bool
 
@@ -165,6 +170,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def api_universe(body: UniverseRequest, request: Request):
         _check_origin(request)
         return JSONResponse(await bot.enter_universe(body.index), headers=NO_STORE)
+
+    # --- Compte : identifiants gardés en mémoire seulement ----------------------------
+    @app.get("/api/account")
+    async def api_account():
+        cfg = bot.automation.store.get()
+        return JSONResponse(
+            {
+                "has_credentials": bot.has_credentials(),
+                "hint": bot.credentials_hint(),  # jamais l'identifiant complet ni le mot de passe
+                "universe": cfg["universe"],
+                "universes": cfg["catalog"]["universes"],
+            },
+            headers=NO_STORE,
+        )
+
+    @app.post("/api/account/credentials")
+    async def api_account_credentials(body: CredentialsRequest, request: Request):
+        _check_origin(request)
+        bot.set_credentials(body.identifier.strip(), body.password.get_secret_value())
+        return JSONResponse({"has_credentials": True, "hint": bot.credentials_hint()}, headers=NO_STORE)
+
+    @app.delete("/api/account/credentials")
+    async def api_account_forget(request: Request):
+        _check_origin(request)
+        bot.forget_credentials()
+        return JSONResponse({"has_credentials": False, "hint": ""}, headers=NO_STORE)
 
     # --- Automatisation ---------------------------------------------------------
     @app.get("/api/automation")

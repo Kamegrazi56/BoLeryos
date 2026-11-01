@@ -6,7 +6,7 @@ const el = (tag, props = {}, ...children) => {
   return node;
 };
 const DAYS = ["L", "M", "M", "J", "V", "S", "D"];
-const TABS = ["run", "schedule", "constructions", "research", "state", "log", "settings"];
+const TABS = ["run", "account", "schedule", "constructions", "research", "state", "log", "settings"];
 
 let model = null; // réglages en cours d'édition (source de vérité de l'interface)
 let catalog = { buildings: [], research: [], planets: [] };
@@ -223,9 +223,42 @@ function renderAll() {
   renderGoals($("cons-goals"), catalog.buildings, model.constructions.targets);
   renderGoals($("res-goals"), catalog.research, model.research.targets);
   renderPlanetControls();
+  renderUniverse();
   catalogKey = catalogSignature();
 }
-const catalogSignature = () => JSON.stringify([catalog.buildings.map((e) => e.name), catalog.research.map((e) => e.name), catalog.planets]);
+const catalogSignature = () => JSON.stringify([catalog.buildings.map((e) => e.name), catalog.research.map((e) => e.name), catalog.planets, catalog.universes]);
+
+function renderUniverse() {
+  const names = [...new Set([...(catalog.universes || []), model.universe].filter(Boolean))];
+  $("universe").replaceChildren(el("option", { value: "", textContent: "Aucun : me demander" }), ...names.map((n) => el("option", { value: n, textContent: n })));
+  $("universe").value = model.universe || "";
+}
+$("universe").addEventListener("change", () => { model.universe = $("universe").value; scheduleSave(); });
+
+// Compte : identifiants gardés en mémoire du bot seulement
+async function refreshAccount() {
+  try {
+    const a = await (await fetch("/api/account")).json();
+    $("acct-status").replaceChildren(
+      el("strong", { textContent: a.has_credentials ? `Identifiants en mémoire (${a.hint})` : "Aucun identifiant en mémoire" }),
+      a.has_credentials ? " — le bot peut se reconnecter tout seul." : " — le bot ne pourra pas se connecter tout seul.",
+    );
+  } catch { /* idem */ }
+}
+$("acct-save").addEventListener("click", async () => {
+  const identifier = $("acct-id").value.trim(), password = $("acct-pw").value;
+  if (!identifier || !password) { $("acct-msg").textContent = "Renseignez l'identifiant et le mot de passe."; return; }
+  const res = await fetch("/api/account/credentials", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ identifier, password }) });
+  $("acct-pw").value = ""; // jamais conservé dans la page
+  $("acct-msg").textContent = res.ok ? "Mémorisés." : "Refusé.";
+  refreshAccount();
+});
+$("acct-forget").addEventListener("click", async () => {
+  await fetch("/api/account/credentials", { method: "DELETE" });
+  $("acct-id").value = ""; $("acct-pw").value = "";
+  $("acct-msg").textContent = "Oubliés.";
+  refreshAccount();
+});
 
 const bind = (id, apply) => {
   const node = $(id);
@@ -251,8 +284,7 @@ $("mode").addEventListener("change", () => {
 
 // ------------------------------------------------------------------------ actions et état
 const post = (url) => fetch(url, { method: "POST" });
-$("start").addEventListener("click", async () => { await save(); await post("/api/automation/start"); refresh(); });
-$("stop").addEventListener("click", async () => { await post("/api/automation/stop"); refresh(); });
+window.beforePowerOn = save; // l'interrupteur ON/OFF de l'en-tête enregistre d'abord les réglages
 
 $("import").addEventListener("change", async (event) => {
   const file = event.target.files[0];
@@ -320,7 +352,8 @@ function renderStatus(a, state) {
     ` · lancements aujourd'hui : ${a.launched_today}/${a.cap}${next}`,
     a.last_cycle ? ` · dernier cycle ${a.last_cycle}` : "",
   );
-  $("start").disabled = a.running;
+  const waiting = a.running && a.waiting ? ` · en attente : ${a.waiting}` : "";
+  if (waiting) $("run-status").append(waiting);
   $("persist").textContent = a.persistent
     ? "Réglages enregistrés sur le serveur (volume /data) : ils survivent à un redémarrage."
     : "Aucun volume /data : les réglages sont perdus au redémarrage (exportez-les pour les conserver).";
@@ -355,6 +388,8 @@ async function refreshCatalog(force = false) {
   renderAll();
   setTab(initialTab());
   refresh();
+  refreshAccount();
   setInterval(refresh, 2000);
+  setInterval(refreshAccount, 8000);
   setInterval(() => refreshCatalog(false), 8000);
 })();

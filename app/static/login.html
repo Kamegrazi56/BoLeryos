@@ -15,6 +15,7 @@
       <a href="/vision">Vision</a>
       <a href="/actions">Actions</a>
     </nav>
+    <button id="power" class="power off" type="button" aria-pressed="false">Bot : OFF</button>
     <span id="badge" class="badge idle">Non connecté</span>
   </header>
   <div class="app-grid login">
@@ -30,7 +31,7 @@
         </div>
         <div id="msg" class="msg" role="status"></div>
       </form>
-      <p class="hint" style="margin-top:6px">Vos identifiants ne sont pas stockés dans le conteneur : ils restent en mémoire le temps de la connexion, puis seule la session du navigateur est conservée jusqu'à la déconnexion.</p>
+      <p class="hint" style="margin-top:6px">Vos identifiants restent <strong>en mémoire du bot</strong> (jamais écrits sur disque) pour se reconnecter si la session expire. Ils sont oubliés à la déconnexion et au redémarrage du conteneur. Avec l'interrupteur <strong>Bot : ON</strong>, le bot se connecte seul quand la page de connexion s'affiche, et saute cette étape sinon.</p>
       <h2 style="margin-top:14px">Journal du bot</h2>
       <div id="log" class="log"></div>
     </aside>
@@ -56,6 +57,7 @@
       <div id="screen" class="screen" tabindex="0"><span>Démarrage du navigateur du bot…</span></div>
     </section>
   </div>
+  <script src="/static/power.js"></script>
   <script src="/static/vision.js"></script>
   <script src="/static/login.js"></script>
 </body>

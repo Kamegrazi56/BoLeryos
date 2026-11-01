@@ -15,6 +15,7 @@ from .schedule import parse_hhmm
 
 DEFAULTS: dict[str, Any] = {
     "mode": "dry_run",  # « dry_run » (à blanc) ou « live » (réel)
+    "universe": "",  # univers où entrer automatiquement (nom affiché sur la page de choix) ; vide = demander
     "daily_cap": 20,
     "cycle": {"min_minutes": 3.0, "max_minutes": 8.0},
     "schedule": {
@@ -24,7 +25,7 @@ DEFAULTS: dict[str, Any] = {
     },
     "constructions": {"enabled": False, "targets": {}, "overrides": {}, "planets": []},
     "research": {"enabled": False, "targets": {}, "funding_planet": ""},
-    "catalog": {"buildings": [], "research": [], "planets": []},
+    "catalog": {"buildings": [], "research": [], "planets": [], "universes": []},
 }
 
 
@@ -64,6 +65,12 @@ def validate(data: dict, *, allow_live: bool, min_cycle_minutes: float = 1.0) ->
         errors.append("mode réel : confirmation explicite requise")
     else:
         merged["mode"] = mode
+
+    universe = data.get("universe", merged["universe"])
+    if not isinstance(universe, str) or len(universe) > 60:
+        errors.append("univers : un nom de 60 caractères au plus")
+    else:
+        merged["universe"] = universe.strip()
 
     cap = data.get("daily_cap", merged["daily_cap"])
     if isinstance(cap, bool) or not isinstance(cap, int) or not 1 <= cap <= 500:
@@ -126,7 +133,7 @@ def validate(data: dict, *, allow_live: bool, min_cycle_minutes: float = 1.0) ->
     if isinstance(catalog, dict):
         merged["catalog"] = {
             key: sorted({str(n).strip() for n in catalog.get(key, []) if str(n).strip()})[:200]
-            for key in ("buildings", "research", "planets")
+            for key in ("buildings", "research", "planets", "universes")
         }
 
     if errors:
@@ -171,6 +178,11 @@ class SettingsStore:
         self._data = cleaned
         self._save()
         return self.get()
+
+    def set_universe(self, name: str) -> None:
+        if self._data["universe"] != name:
+            self._data["universe"] = name
+            self._save()
 
     def add_catalog(self, kind: str, names: list[str]) -> None:
         known = set(self._data["catalog"][kind])
