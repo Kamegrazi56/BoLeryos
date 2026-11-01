@@ -61,13 +61,52 @@ def test_cross_origin_requests_are_rejected(client):
     assert client.post("/api/logout", headers=evil).status_code == 403
 
 
+def _receive_until(ws, predicate, attempts=60):
+    """Lit les messages du flux jusqu'à ce que `predicate` soit vrai."""
+    for _ in range(attempts):
+        msg = ws.receive_json()
+        if predicate(msg):
+            return msg
+    raise AssertionError("Condition jamais atteinte dans le flux de la vue en direct")
+
+
 def test_vision_websocket_streams_screenshot_and_logs(client):
     client.post("/api/login", json=GOOD)
     with client.websocket_connect("/ws/vision") as ws:
-        msg = ws.receive_json()
+        msg = _receive_until(ws, lambda m: m.get("image"))
     assert msg["state"] == "logged_in"
-    assert msg["image"] and base64.b64decode(msg["image"])[:2] == b"\xff\xd8"  # JPEG
+    assert base64.b64decode(msg["image"])[:2] == b"\xff\xd8"  # JPEG
     assert any("Connecté" in entry["msg"] for entry in msg["logs"])
+
+
+def test_home_page_is_visible_without_logging_in(client):
+    """Sans connexion, la vue en direct montre déjà la page d'accueil du site."""
+    with client.websocket_connect("/ws/vision") as ws:
+        msg = _receive_until(ws, lambda m: m.get("image"))
+    assert msg["state"] == "idle"
+    assert base64.b64decode(msg["image"])[:2] == b"\xff\xd8"
+    assert any("Page d'accueil chargée" in entry["msg"] for entry in msg["logs"])
+
+
+def test_image_is_only_sent_when_it_changes(client):
+    with client.websocket_connect("/ws/vision") as ws:
+        _receive_until(ws, lambda m: m.get("image"))
+        later = [ws.receive_json() for _ in range(8)]
+    # La page du faux site est statique : les messages suivants n'embarquent plus l'image.
+    assert any("image" not in m for m in later)
+
+
+def test_logout_returns_to_live_home_page(client):
+    client.post("/api/login", json=GOOD)
+    client.post("/api/logout")
+    with client.websocket_connect("/ws/vision") as ws:
+        msg = _receive_until(ws, lambda m: m.get("image") and m["state"] == "idle")
+    assert "127.0.0.1" in msg["page"]
+
+
+def test_new_attempt_after_failure_starts_from_clean_session(client):
+    assert client.post("/api/login", json=BAD).json()["state"] == "error"
+    assert client.post("/api/login", json=GOOD).json()["state"] == "logged_in"
 
 
 def test_ui_basic_auth_when_configured(make_client):

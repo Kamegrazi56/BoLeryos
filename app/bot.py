@@ -1,4 +1,7 @@
-"""Session du bot : navigateur Playwright, connexion, journal et captures.
+"""Session du bot : navigateur Playwright toujours actif, connexion, journal et flux d'images.
+
+Le navigateur démarre dès qu'un écran de l'interface est ouvert et affiche la page d'accueil du site,
+même sans connexion. La page est capturée en continu pour l'affichage en direct.
 
 Règles sur les identifiants du joueur :
 - ils arrivent par `login()` depuis l'interface web, jamais depuis l'environnement ;
@@ -19,10 +22,25 @@ from urllib.parse import urlsplit
 
 from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
 
+from . import human
 from .config import Settings
 
 TURNSTILE_SELECTOR = 'iframe[src*="challenges.cloudflare.com"]'
 COOKIE_REFUSE_NAME = "tout refuser"
+
+# Point rouge qui suit la souris : rend les déplacements du bot visibles dans la vue en direct.
+CURSOR_SCRIPT = """
+(() => {
+  if (window.top !== window) return;
+  const dot = document.createElement('div');
+  dot.style.cssText = 'position:fixed;z-index:2147483647;width:14px;height:14px;border-radius:50%;'
+    + 'background:rgba(255,60,60,.8);border:2px solid #fff;pointer-events:none;left:-30px;top:-30px;'
+    + 'transform:translate(-50%,-50%)';
+  const add = () => document.documentElement.appendChild(dot);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', add); else add();
+  addEventListener('mousemove', (e) => { dot.style.left = e.clientX + 'px'; dot.style.top = e.clientY + 'px'; }, true);
+})();
+"""
 
 
 class State(str, Enum):
@@ -39,14 +57,15 @@ class _Outcome:
 
 
 def _mask(identifier: str) -> str:
-    """Version masquee de l'identifiant, pour le journal (jamais la valeur complete)."""
+    """Version masquée de l'identifiant, pour le journal (jamais la valeur complète)."""
     return identifier[:2] + "***" if identifier else "***"
 
 
 class BotSession:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._lock = asyncio.Lock()
+        self._lock = asyncio.Lock()  # connexion / déconnexion
+        self._start_lock = asyncio.Lock()  # démarrage du navigateur
         self._pw: Playwright | None = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
@@ -54,6 +73,14 @@ class BotSession:
         self._state = State.IDLE
         self._message = "Non connecté."
         self._logs: deque[dict[str, str]] = deque(maxlen=200)
+        self._dirty = False  # une tentative de connexion a déjà eu lieu dans ce contexte
+        # Flux d'images
+        self._capture_task: asyncio.Task | None = None
+        self._start_task: asyncio.Task | None = None
+        self._viewers = 0
+        self._frame_id = 0
+        self._frame_b64: str | None = None
+        self._last_jpeg: bytes | None = None
 
     # ------------------------------------------------------------------ état
     def log(self, message: str, level: str = "info") -> None:
@@ -78,38 +105,52 @@ class BotSession:
         self._state = state
         self._message = message
 
-    # ------------------------------------------------------------- connexion
-    async def login(self, identifier: str, password: str) -> dict[str, str]:
-        if self._lock.locked():
-            return {**self.status(), "message": "Une connexion est déjà en cours."}
-        async with self._lock:
-            await self._teardown()
-            self._set(State.LOGGING_IN, "Connexion en cours…")
-            self.log(f"Connexion demandée pour {_mask(identifier)}.")
-            try:
-                await self._start_browser()
-                outcome = await self._do_login(identifier, password)
-            except Exception as exc:  # noqa: BLE001 - on ne journalise que le type, jamais le contenu
-                self.log(f"Erreur technique pendant la connexion ({type(exc).__name__}).", "error")
-                await self._teardown()
-                self._set(State.ERROR, "Erreur technique pendant la connexion.")
-                return self.status()
-            if outcome.success:
-                self._set(State.LOGGED_IN, outcome.message)
-                self.log(outcome.message)
-            else:
-                # Le navigateur reste ouvert pour que la page « Vision » montre la cause
-                # (ex. Turnstile). La prochaine tentative ou la déconnexion le ferme.
-                self.log(outcome.message, "error")
-                self._set(State.ERROR, outcome.message)
-            return self.status()
+    # ---------------------------------------------------- flux d'images (live)
+    def viewer_joined(self) -> None:
+        self._viewers += 1
 
-    async def logout(self) -> dict[str, str]:
-        async with self._lock:
-            await self._teardown()
-            self._set(State.IDLE, "Non connecté.")
-            self.log("Déconnexion : session du navigateur fermée.")
-            return self.status()
+    def viewer_left(self) -> None:
+        self._viewers = max(0, self._viewers - 1)
+
+    def frame(self) -> tuple[int, str | None]:
+        """Dernière image (JPEG en base64) et son numéro ; le numéro change quand l'image change."""
+        return self._frame_id, self._frame_b64
+
+    async def _capture_loop(self) -> None:
+        while True:
+            try:
+                page = self._page
+                if self._viewers > 0 and page is not None and not page.is_closed():
+                    data = await page.screenshot(type="jpeg", quality=60, timeout=5_000)
+                    if data != self._last_jpeg:
+                        self._last_jpeg = data
+                        self._frame_b64 = base64.b64encode(data).decode("ascii")
+                        self._frame_id += 1
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - navigation ou changement de contexte en cours
+                pass
+            await asyncio.sleep(self._settings.screenshot_interval)
+
+    # ------------------------------------------------------------- navigateur
+    def start_in_background(self) -> None:
+        """Démarre le navigateur sans bloquer l'appelant (ouverture d'un écran de l'interface)."""
+        if self._start_task is None or self._start_task.done():
+            self._start_task = asyncio.create_task(self.ensure_started())
+
+    async def ensure_started(self) -> None:
+        async with self._start_lock:
+            if self._page is not None and not self._page.is_closed():
+                return
+            try:
+                await self._teardown()
+                self.log("Démarrage du navigateur du bot…")
+                await self._start_browser()
+                await self._open_home()
+                self._capture_task = asyncio.create_task(self._capture_loop())
+            except Exception as exc:  # noqa: BLE001
+                self.log(f"Impossible de démarrer le navigateur ({type(exc).__name__}).", "error")
+                await self._teardown()
 
     async def _start_browser(self) -> None:
         s = self._settings
@@ -119,38 +160,116 @@ class BotSession:
             executable_path=s.chromium_path,
             args=["--no-sandbox"] if s.no_sandbox else [],
         )
+        await self._new_page()
+
+    async def _new_page(self) -> None:
+        """Nouveau contexte = session vierge (sans cookies) avec une page vide."""
+        assert self._browser is not None
+        if self._context is not None:
+            try:
+                await self._context.close()
+            except Exception:  # noqa: BLE001
+                pass
         self._context = await self._browser.new_context(
             viewport={"width": 1440, "height": 900}, locale="fr-FR"
         )
+        if self._settings.show_cursor:
+            await self._context.add_init_script(CURSOR_SCRIPT)
         self._page = await self._context.new_page()
+
+    async def _open_home(self) -> None:
+        page = self._page
+        assert page is not None
+        await page.goto(self._settings.login_url, wait_until="domcontentloaded", timeout=45_000)
+        self.log("Page d'accueil chargée.")
+        await human.move_mouse_randomly(page)
+        await human.think(self._settings)
+        await self._refuse_cookies(page)
+
+    async def _reset_context(self) -> None:
+        await self._new_page()
+        await self._open_home()
+        self._dirty = False
+
+    # ------------------------------------------------------------- connexion
+    async def login(self, identifier: str, password: str) -> dict[str, str]:
+        if self._lock.locked():
+            return {**self.status(), "message": "Une connexion est déjà en cours."}
+        async with self._lock:
+            self._set(State.LOGGING_IN, "Connexion en cours…")
+            self.log(f"Connexion demandée pour {_mask(identifier)}.")
+            try:
+                await self.ensure_started()
+                if self._page is None or self._page.is_closed():
+                    self._set(State.ERROR, "Navigateur indisponible : voir le journal.")
+                    return self.status()
+                if self._dirty:  # nouvelle tentative : session vierge
+                    await self._reset_context()
+                self._dirty = True
+                outcome = await self._do_login(identifier, password)
+            except Exception as exc:  # noqa: BLE001 - on ne journalise que le type, jamais le contenu
+                self.log(f"Erreur technique pendant la connexion ({type(exc).__name__}).", "error")
+                self._set(State.ERROR, "Erreur technique pendant la connexion.")
+                return self.status()
+            if outcome.success:
+                self._set(State.LOGGED_IN, outcome.message)
+                self.log(outcome.message)
+            else:
+                # Le navigateur reste sur la page pour que la vue en direct montre la cause
+                # (ex. Turnstile). La prochaine tentative repart d'une session vierge.
+                self.log(outcome.message, "error")
+                self._set(State.ERROR, outcome.message)
+            return self.status()
+
+    async def logout(self) -> dict[str, str]:
+        async with self._lock:
+            if self._page is not None:
+                try:
+                    await self._reset_context()
+                except Exception as exc:  # noqa: BLE001
+                    self.log(f"Erreur pendant la déconnexion ({type(exc).__name__}).", "error")
+            self._dirty = False
+            self._set(State.IDLE, "Non connecté.")
+            self.log("Déconnexion : session du navigateur effacée.")
+            return self.status()
 
     async def _do_login(self, identifier: str, password: str) -> _Outcome:
         s = self._settings
         page = self._page
         assert page is not None
-        await page.goto(s.login_url, wait_until="domcontentloaded", timeout=45_000)
-        self.log("Page de connexion chargée.")
-
-        await self._refuse_cookies(page)
 
         email = page.locator(s.email_selector).first
         pwd = page.locator(s.password_selector).first
+        submit = page.locator(s.submit_selector).first
         try:
             await email.wait_for(state="visible", timeout=15_000)
         except Exception:  # noqa: BLE001
             return _Outcome(False, "Formulaire de connexion introuvable (sélecteurs à vérifier).")
 
-        await email.fill(identifier)
-        await pwd.fill(password)
-        await page.locator(s.submit_selector).first.click()
+        await human.think(s)
+        self.log("Saisie de l'identifiant.")
+        await human.click(page, email, s)
+        await human.micro(s)
+        await human.type_text(page, identifier, s)
+
+        await human.think(s)
+        self.log("Saisie du mot de passe.")
+        await human.click(page, pwd, s)
+        await human.micro(s)
+        await human.type_text(page, password, s)
+
+        await human.think(s)
+        self.log("Clic sur le bouton de connexion.")
+        await human.click(page, submit, s)
         self.log("Formulaire envoyé, attente du résultat.")
         return await self._wait_outcome(page)
 
     async def _refuse_cookies(self, page: Page) -> None:
         """Choix par défaut : refuser les traceurs optionnels (bandeau de consentement)."""
-        button = page.get_by_role("button", name=COOKIE_REFUSE_NAME, exact=False)
+        button = page.get_by_role("button", name=COOKIE_REFUSE_NAME, exact=False).first
         try:
-            await button.first.click(timeout=4_000)
+            await button.wait_for(state="visible", timeout=4_000)
+            await human.click(page, button, self._settings)
             self.log("Bandeau cookies : « Tout refuser ».")
         except Exception:  # noqa: BLE001 - pas de bandeau : rien à faire
             self.log("Pas de bandeau cookies détecté.")
@@ -190,19 +309,11 @@ class BotSession:
         except Exception:  # noqa: BLE001
             pass
 
-    # --------------------------------------------------------------- captures
-    async def screenshot_b64(self) -> str | None:
-        page = self._page
-        if page is None or page.is_closed():
-            return None
-        try:
-            data = await page.screenshot(type="jpeg", quality=60, timeout=5_000)
-        except Exception:  # noqa: BLE001
-            return None
-        return base64.b64encode(data).decode("ascii")
-
     # --------------------------------------------------------------- nettoyage
     async def _teardown(self) -> None:
+        if self._capture_task is not None:
+            self._capture_task.cancel()
+            self._capture_task = None
         for closer in (
             self._context.close if self._context else None,
             self._browser.close if self._browser else None,
@@ -216,5 +327,5 @@ class BotSession:
         self._page = self._context = self._browser = self._pw = None
 
     async def shutdown(self) -> None:
-        async with self._lock:
+        async with self._start_lock, self._lock:
             await self._teardown()

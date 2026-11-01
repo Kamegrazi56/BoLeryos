@@ -11,19 +11,22 @@ function render(data) {
   page.textContent = data.page || "-";
   message.textContent = data.message || "";
 
-  if (data.image) {
-    let img = screen.querySelector("img");
-    if (!img) {
-      screen.textContent = "";
-      img = document.createElement("img");
-      img.alt = "Vue du navigateur du bot";
-      screen.appendChild(img);
+  // `image` n'est présent que lorsque la capture a changé ; sinon on garde l'image affichée.
+  if ("image" in data) {
+    if (data.image) {
+      let img = screen.querySelector("img");
+      if (!img) {
+        screen.textContent = "";
+        img = document.createElement("img");
+        img.alt = "Vue du navigateur du bot";
+        screen.appendChild(img);
+      }
+      img.src = "data:image/jpeg;base64," + data.image;
+    } else {
+      screen.replaceChildren(Object.assign(document.createElement("span"), {
+        textContent: "Démarrage du navigateur du bot…",
+      }));
     }
-    img.src = "data:image/jpeg;base64," + data.image;
-  } else {
-    screen.replaceChildren(Object.assign(document.createElement("span"), {
-      textContent: data.state === "idle" ? "Non connecté : retournez à la page de connexion." : "Aucune image disponible.",
-    }));
   }
 
   const stick = logBox.scrollTop + logBox.clientHeight >= logBox.scrollHeight - 8;

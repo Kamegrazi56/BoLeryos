@@ -40,8 +40,16 @@ class Settings:
     headless: bool = True
     no_sandbox: bool = False
     chromium_path: str | None = None
-    # Intervalle d'envoi des captures vers la page « Vision » (secondes).
-    screenshot_interval: float = 1.0
+    # Intervalle entre deux captures du navigateur pour l'affichage en direct (secondes).
+    screenshot_interval: float = 0.4
+    # Comportement humain : délais courts et aléatoires entre les actions.
+    human_mode: bool = True
+    human_delay_min: float = 0.4   # pause entre deux actions (secondes)
+    human_delay_max: float = 1.4
+    key_delay_min: float = 0.05    # délai entre deux touches (secondes)
+    key_delay_max: float = 0.18
+    # Affiche un point rouge à l'endroit de la souris dans la vue en direct.
+    show_cursor: bool = True
     # Protection facultative de l'interface du bot (HTTP Basic). Ce n'est PAS
     # un identifiant du jeu.
     ui_user: str | None = None
@@ -60,6 +68,12 @@ def load_settings() -> Settings:
         no_sandbox=_env_bool("CHROMIUM_NO_SANDBOX", defaults.no_sandbox),
         chromium_path=os.environ.get("CHROMIUM_PATH") or None,
         screenshot_interval=_env_float("SCREENSHOT_INTERVAL", defaults.screenshot_interval),
+        human_mode=_env_bool("HUMAN_MODE", defaults.human_mode),
+        human_delay_min=_env_float("HUMAN_DELAY_MIN", defaults.human_delay_min),
+        human_delay_max=_env_float("HUMAN_DELAY_MAX", defaults.human_delay_max),
+        key_delay_min=_env_float("KEY_DELAY_MIN", defaults.key_delay_min),
+        key_delay_max=_env_float("KEY_DELAY_MAX", defaults.key_delay_max),
+        show_cursor=_env_bool("SHOW_CURSOR", defaults.show_cursor),
         ui_user=os.environ.get("UI_USER") or None,
         ui_password=os.environ.get("UI_PASSWORD") or None,
     )

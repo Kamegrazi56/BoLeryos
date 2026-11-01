@@ -8,8 +8,8 @@ Bot d'automatisation pour Aleryos, destiné aux **tests de protection anti-bot r
 
 | Page | Rôle |
 |---|---|
-| `/` | Connexion : le joueur saisit son identifiant (e-mail) et son mot de passe dans des champs texte. |
-| `/vision` | Vue en direct du navigateur du bot (captures) et journal de ce qu'il fait. |
+| `/` | Connexion : le joueur saisit son identifiant (e-mail) et son mot de passe dans des champs texte, avec la vue en direct du navigateur du bot à côté. |
+| `/vision` | Vue en direct du navigateur du bot et journal de tout ce qu'il fait. Le navigateur affiche le site même sans connexion. |
 | `/actions` | Choix des actions à automatiser (vide pour l'instant : à construire après exploration du jeu connecté). |
 
 ## Données du joueur
@@ -44,6 +44,11 @@ Ils se modifient directement dans `app/config.py` (aucune donnée de joueur) :
 |---|---|---|
 | `login_url` | Page contenant le formulaire de connexion (URL de test de l'éditeur possible) | `https://aleryos.com/fr` |
 | `ui_user` / `ui_password` | Protège l'interface du bot par mot de passe (HTTP Basic) | désactivé |
+| `human_mode` | Comportement humain : pauses courtes et aléatoires entre les actions, souris déplacée progressivement, frappe touche par touche | `True` |
+| `human_delay_min` / `human_delay_max` | Pause entre deux actions (secondes) | `0.4` / `1.4` |
+| `key_delay_min` / `key_delay_max` | Délai entre deux touches (secondes) | `0.05` / `0.18` |
+| `show_cursor` | Point rouge à l'endroit de la souris dans la vue en direct | `True` |
+| `screenshot_interval` | Intervalle entre deux images de la vue en direct (secondes) | `0.4` |
 | `login_timeout` | Attente maximale du résultat de la connexion, en secondes | `30` |
 | `email_selector`, `password_selector`, `submit_selector` | Sélecteurs du formulaire | relevés sur le site |
 

@@ -20,6 +20,7 @@ from .config import Settings, load_settings
 
 STATIC_DIR = Path(__file__).parent / "static"
 NO_STORE = {"Cache-Control": "no-store"}
+WS_TICK = 0.25  # fréquence de rafraîchissement du statut et du journal (secondes)
 
 
 class LoginRequest(BaseModel):
@@ -105,14 +106,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await ws.close(code=1008)
             return
         await ws.accept()
+        bot.viewer_joined()
+        bot.start_in_background()  # le navigateur affiche le site même sans connexion
+        last_frame = -1
         try:
             while True:
-                await ws.send_json(
-                    {**bot.status(), "logs": bot.logs(), "image": await bot.screenshot_b64()}
-                )
-                await asyncio.sleep(settings.screenshot_interval)
+                frame_id, image = bot.frame()
+                payload = {**bot.status(), "logs": bot.logs()}
+                if frame_id != last_frame:  # l'image n'est envoyée que si elle a changé
+                    payload["image"] = image
+                    last_frame = frame_id
+                await ws.send_json(payload)
+                await asyncio.sleep(WS_TICK)
         except (WebSocketDisconnect, RuntimeError):
             pass
+        finally:
+            bot.viewer_left()
 
     # --- Pages ---------------------------------------------------------------
     def page(name: str):

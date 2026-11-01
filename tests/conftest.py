@@ -49,7 +49,8 @@ def settings(mock_url):
         login_timeout=10.0,
         no_sandbox=True,
         chromium_path=chromium,
-        screenshot_interval=0.2,
+        screenshot_interval=0.1,
+        human_mode=False,  # pas de délais artificiels dans les tests (voir test_human.py)
     )
 
 
