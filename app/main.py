@@ -7,6 +7,7 @@ import base64
 import binascii
 import json
 import secrets
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -21,7 +22,8 @@ from .config import Settings, load_settings
 
 STATIC_DIR = Path(__file__).parent / "static"
 NO_STORE = {"Cache-Control": "no-store"}
-WS_TICK = 0.25  # fréquence de rafraîchissement du statut et du journal (secondes)
+WS_TICK = 0.25  # délai maximal entre deux envois du statut et du journal (secondes)
+MIN_FRAME_INTERVAL = 0.04  # écart minimal entre deux images envoyées
 
 
 class NoStoreStaticFiles(StaticFiles):
@@ -134,15 +136,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         reader_task = asyncio.create_task(reader())
         last_frame = -1
+        last_status = None
+        last_status_time = 0.0
         try:
             while not reader_task.done():  # la tâche se termine quand le client part
                 frame_id, image = bot.frame()
-                payload = {**bot.status(), "logs": bot.logs()}
-                if frame_id != last_frame:  # l'image n'est envoyée que si elle a changé
-                    payload["image"] = image
+                if image is not None and frame_id != last_frame:
+                    await ws.send_bytes(image)  # image JPEG brute, sans conversion en texte
                     last_frame = frame_id
-                await ws.send_json(payload)
-                await asyncio.sleep(WS_TICK)
+                    await asyncio.sleep(MIN_FRAME_INTERVAL)  # plafonne le débit (~25 images/s)
+                status = {**bot.status(), "logs": bot.logs()}
+                now = time.monotonic()
+                if status != last_status or now - last_status_time > 2:
+                    await ws.send_json(status)
+                    last_status, last_status_time = status, now
+                await bot.wait_frame(WS_TICK)
         except (WebSocketDisconnect, RuntimeError):
             pass
         finally:

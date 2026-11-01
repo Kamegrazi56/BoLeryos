@@ -24,25 +24,6 @@ function render(data) {
   }
   screen.classList.toggle("manual", manual.checked);
 
-  // `image` n'est présent que lorsque la capture a changé ; sinon on garde l'image affichée.
-  if ("image" in data) {
-    if (data.image) {
-      let img = screen.querySelector("img");
-      if (!img) {
-        screen.textContent = "";
-        img = document.createElement("img");
-        img.alt = "Vue du navigateur du bot";
-        img.draggable = false;
-        screen.appendChild(img);
-      }
-      img.src = "data:image/jpeg;base64," + data.image;
-    } else {
-      screen.replaceChildren(Object.assign(document.createElement("span"), {
-        textContent: "Démarrage du navigateur du bot…",
-      }));
-    }
-  }
-
   const stick = logBox.scrollTop + logBox.clientHeight >= logBox.scrollHeight - 8;
   logBox.replaceChildren(...data.logs.map((entry) => {
     const row = document.createElement("div");
@@ -69,11 +50,32 @@ new ResizeObserver(() => {
   resizeTimer = setTimeout(reportViewport, 400);
 }).observe(screen);
 
+// Les images arrivent en binaire (JPEG) : pas de conversion en texte, affichage immédiat.
+let frameUrl = null;
+function showFrame(blob) {
+  let img = screen.querySelector("img");
+  if (!img) {
+    screen.textContent = "";
+    img = document.createElement("img");
+    img.alt = "Vue du navigateur du bot";
+    img.draggable = false;
+    screen.appendChild(img);
+  }
+  const previous = frameUrl;
+  frameUrl = URL.createObjectURL(blob);
+  img.onload = () => { if (previous) URL.revokeObjectURL(previous); };
+  img.src = frameUrl;
+}
+
 function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   ws = new WebSocket(`${proto}://${location.host}/ws/vision`);
   ws.onopen = reportViewport;
-  ws.onmessage = (event) => render(JSON.parse(event.data));
+  ws.binaryType = "blob";
+  ws.onmessage = (event) => {
+    if (typeof event.data === "string") render(JSON.parse(event.data));
+    else showFrame(event.data);
+  };
   ws.onclose = () => setTimeout(connect, 2000);
 }
 connect();

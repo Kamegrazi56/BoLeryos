@@ -2,6 +2,8 @@
 
 import time
 
+from tests.helpers import receive_until
+
 EMAIL = 'input[name="email"]'
 
 
@@ -31,10 +33,7 @@ def _email_center(client):
 
 
 def _wait_home(ws):
-    for _ in range(80):
-        if ws.receive_json().get("image"):
-            return
-    raise AssertionError("La page d'accueil ne s'affiche pas")
+    receive_until(ws, lambda s, f: f is not None)
 
 
 def _click(ws, x, y):

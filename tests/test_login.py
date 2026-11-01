@@ -1,4 +1,6 @@
-import base64
+import time
+
+from tests.helpers import receive_until
 
 GOOD = {"identifier": "joueur.test@example.com", "password": "good-password"}
 BAD = {"identifier": "joueur.test@example.com", "password": "mauvais-mdp-secret"}
@@ -69,47 +71,43 @@ def test_cross_origin_requests_are_rejected(client):
     assert client.post("/api/logout", headers=evil).status_code == 403
 
 
-def _receive_until(ws, predicate, attempts=60):
-    """Lit les messages du flux jusqu'à ce que `predicate` soit vrai."""
-    for _ in range(attempts):
-        msg = ws.receive_json()
-        if predicate(msg):
-            return msg
-    raise AssertionError("Condition jamais atteinte dans le flux de la vue en direct")
-
-
 def test_vision_websocket_streams_screenshot_and_logs(client):
     client.post("/api/login", json=GOOD)
     with client.websocket_connect("/ws/vision") as ws:
-        msg = _receive_until(ws, lambda m: m.get("image"))
-    assert msg["state"] == "logged_in"
-    assert base64.b64decode(msg["image"])[:2] == b"\xff\xd8"  # JPEG
-    assert any("Connecté" in entry["msg"] for entry in msg["logs"])
+        state, frame = receive_until(ws, lambda s, f: f is not None)
+    assert state["state"] == "logged_in"
+    assert frame[:2] == b"\xff\xd8"  # JPEG brut, sans conversion en texte
+    assert any("Connecté" in entry["msg"] for entry in state["logs"])
 
 
 def test_home_page_is_visible_without_logging_in(client):
     """Sans connexion, la vue en direct montre déjà la page d'accueil du site."""
     with client.websocket_connect("/ws/vision") as ws:
-        msg = _receive_until(ws, lambda m: m.get("image"))
-    assert msg["state"] == "idle"
-    assert base64.b64decode(msg["image"])[:2] == b"\xff\xd8"
-    assert any("Page d'accueil chargée" in entry["msg"] for entry in msg["logs"])
+        state, frame = receive_until(ws, lambda s, f: f is not None)
+    assert state["state"] == "idle"
+    assert frame[:2] == b"\xff\xd8"
+    assert any("Page d'accueil chargée" in entry["msg"] for entry in state["logs"])
 
 
-def test_image_is_only_sent_when_it_changes(client):
+def test_frames_are_pushed_quickly_when_the_page_changes(client):
+    """Chrome pousse une image dès que la page change (pas d'attente d'une capture périodique)."""
+    page = client.app.state.bot._page
     with client.websocket_connect("/ws/vision") as ws:
-        _receive_until(ws, lambda m: m.get("image"))
-        later = [ws.receive_json() for _ in range(8)]
-    # La page du faux site est statique : les messages suivants n'embarquent plus l'image.
-    assert any("image" not in m for m in later)
+        _, first = receive_until(ws, lambda s, f: f is not None)
+        page = client.app.state.bot._page
+        started = time.monotonic()
+        client.portal.call(page.evaluate, "document.body.style.background = 'rgb(255,0,0)'")
+        _, changed = receive_until(ws, lambda s, f: f is not None and f != first)
+        elapsed = time.monotonic() - started
+    assert elapsed < 1.5, f"image reçue après {elapsed:.2f} s"
 
 
 def test_logout_returns_to_live_home_page(client):
     client.post("/api/login", json=GOOD)
     client.post("/api/logout")
     with client.websocket_connect("/ws/vision") as ws:
-        msg = _receive_until(ws, lambda m: m.get("image") and m["state"] == "idle")
-    assert "127.0.0.1" in msg["page"]
+        state, _ = receive_until(ws, lambda s, f: f is not None and s["state"] == "idle")
+    assert "127.0.0.1" in state["page"]
 
 
 def test_new_attempt_after_failure_starts_from_clean_session(client):

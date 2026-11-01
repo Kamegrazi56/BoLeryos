@@ -52,6 +52,7 @@ _KEY_RE = re.compile(
 _MOUSE_BUTTONS = {"left", "middle", "right"}
 VIEWPORT_WIDTH = 1440
 VIEWPORT_MIN_HEIGHT, VIEWPORT_MAX_HEIGHT = 600, 1100
+SCREENCAST_MIN_INTERVAL = 0.03  # secondes entre deux images acceptées de Chrome
 
 
 def _num(value, lo: float, hi: float) -> float:
@@ -97,8 +98,12 @@ class BotSession:
         self._start_task: asyncio.Task | None = None
         self._viewers = 0
         self._frame_id = 0
-        self._frame_b64: str | None = None
-        self._last_jpeg: bytes | None = None
+        self._frame_jpeg: bytes | None = None
+        self._last_frame_time = 0.0
+        self._frame_event = asyncio.Event()
+        self._cdp = None  # session CDP de la page courante (flux d'images poussé par Chrome)
+        self._screencasting = False
+        self._tasks: set[asyncio.Task] = set()
 
     # ------------------------------------------------------------------ état
     def log(self, message: str, level: str = "info") -> None:
@@ -129,29 +134,106 @@ class BotSession:
         self._message = message
 
     # ---------------------------------------------------- flux d'images (live)
+    def _spawn(self, coro) -> None:
+        task = asyncio.create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
     def viewer_joined(self) -> None:
         self._viewers += 1
+        if self._viewers == 1:
+            self._spawn(self._start_screencast())
 
     def viewer_left(self) -> None:
         self._viewers = max(0, self._viewers - 1)
-        if self._viewers == 0 and self._manual:  # personne ne regarde : on rend la main au bot
-            self._manual = False
-            self.log("Contrôle manuel désactivé (plus aucun écran ouvert).")
+        if self._viewers == 0:
+            self._spawn(self._stop_screencast())
+            if self._manual:  # personne ne regarde : on rend la main au bot
+                self._manual = False
+                self.log("Contrôle manuel désactivé (plus aucun écran ouvert).")
 
-    def frame(self) -> tuple[int, str | None]:
-        """Dernière image (JPEG en base64) et son numéro ; le numéro change quand l'image change."""
-        return self._frame_id, self._frame_b64
+    def frame(self) -> tuple[int, bytes | None]:
+        """Dernière image (JPEG) et son numéro ; le numéro change à chaque nouvelle image."""
+        return self._frame_id, self._frame_jpeg
+
+    async def wait_frame(self, timeout: float) -> None:
+        """Attend l'arrivée d'une nouvelle image (ou la fin du délai)."""
+        try:
+            await asyncio.wait_for(self._frame_event.wait(), timeout)
+        except asyncio.TimeoutError:
+            pass
+
+    def _publish_frame(self, jpeg: bytes) -> None:
+        self._frame_jpeg = jpeg
+        self._frame_id += 1
+        self._last_frame_time = time.monotonic()
+        self._frame_event.set()  # réveille les écrans en attente, puis on réarme
+        self._frame_event.clear()
+
+    async def _attach_screencast(self) -> None:
+        """Chrome pousse lui-même une image à chaque changement de la page (bien plus réactif que des captures)."""
+        if self._context is None or self._page is None:
+            return
+        cdp = await self._context.new_cdp_session(self._page)
+        self._cdp = cdp
+        self._screencasting = False
+
+        async def on_frame(params: dict) -> None:
+            try:
+                self._publish_frame(base64.b64decode(params["data"]))
+                # Retarder l'accusé plafonne le débit (~30 images/s) sans jamais perdre le dernier
+                # changement : Chrome regroupe ce qui se passe entre-temps dans l'image suivante.
+                await asyncio.sleep(SCREENCAST_MIN_INTERVAL)
+            finally:
+                try:  # sans accusé de réception, Chrome n'envoie plus d'images
+                    await cdp.send("Page.screencastFrameAck", {"sessionId": params["sessionId"]})
+                except Exception:  # noqa: BLE001
+                    pass
+
+        cdp.on("Page.screencastFrame", on_frame)
+        if self._viewers > 0:
+            await self._start_screencast()
+
+    async def _start_screencast(self) -> None:
+        if self._cdp is None or self._screencasting:
+            return
+        try:
+            await self._cdp.send(
+                "Page.startScreencast",
+                {
+                    "format": "jpeg",
+                    "quality": 60,
+                    "maxWidth": VIEWPORT_WIDTH,
+                    "maxHeight": VIEWPORT_MAX_HEIGHT,
+                    "everyNthFrame": 1,
+                },
+            )
+            self._screencasting = True
+        except Exception:  # noqa: BLE001 - la capture de secours prend le relais
+            self._screencasting = False
+
+    async def _stop_screencast(self) -> None:
+        if self._cdp is None or not self._screencasting or self._viewers > 0:
+            return
+        self._screencasting = False
+        try:
+            await self._cdp.send("Page.stopScreencast")
+        except Exception:  # noqa: BLE001
+            pass
 
     async def _capture_loop(self) -> None:
+        """Filet de sécurité : une capture classique si Chrome n'a envoyé aucune image depuis 1 s
+        (page immobile, flux interrompu, changement de page)."""
         while True:
             try:
                 page = self._page
-                if self._viewers > 0 and page is not None and not page.is_closed():
+                idle = time.monotonic() - self._last_frame_time
+                if self._viewers > 0 and page is not None and not page.is_closed() and idle > 1.0:
                     data = await page.screenshot(type="jpeg", quality=60, timeout=5_000)
-                    if data != self._last_jpeg:
-                        self._last_jpeg = data
-                        self._frame_b64 = base64.b64encode(data).decode("ascii")
-                        self._frame_id += 1
+                    if data != self._frame_jpeg:
+                        self._publish_frame(data)
+                    else:
+                        self._last_frame_time = time.monotonic()
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001 - navigation ou changement de contexte en cours
@@ -202,6 +284,7 @@ class BotSession:
         if self._settings.show_cursor:
             await self._context.add_init_script(CURSOR_SCRIPT)
         self._page = await self._context.new_page()
+        await self._attach_screencast()
 
     async def _open_home(self) -> None:
         page = self._page
