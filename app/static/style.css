@@ -33,6 +33,8 @@ button:disabled { opacity: 0.5; cursor: wait; }
 .msg.error { color: var(--err); }
 .msg.ok { color: var(--ok); }
 .hint { color: var(--muted); font-size: 13px; margin-top: 18px; }
+.login-live { display: grid; grid-template-columns: 360px 1fr; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .login-live { grid-template-columns: 1fr; } }
 .vision { display: grid; grid-template-columns: 1fr 340px; gap: 16px; }
 @media (max-width: 900px) { .vision { grid-template-columns: 1fr; } }
 .screen { width: 100%; aspect-ratio: 16 / 10; background: #000; border-radius: 8px; display: grid; place-items: center; color: var(--muted); overflow: hidden; }

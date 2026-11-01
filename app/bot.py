@@ -177,8 +177,18 @@ class BotSession:
             except Exception:  # noqa: BLE001 - navigation en cours : on réessaie
                 pass
             await asyncio.sleep(0.4)
+        await self._log_form_text(page)
         hint = " (Turnstile détecté : il bloque probablement le bot)" if turnstile_seen else ""
         return _Outcome(False, f"Aucun résultat de connexion avant {s.login_timeout:.0f} s{hint}.")
+
+    async def _log_form_text(self, page: Page) -> None:
+        """Diagnostic : texte visible autour du formulaire (n'inclut pas les valeurs saisies)."""
+        try:
+            area = page.locator(self._settings.password_selector).first.locator("xpath=ancestor::form[1]/..")
+            text = " ".join((await area.inner_text(timeout=2_000)).split())[:300]
+            self.log(f"Texte visible autour du formulaire : {text}", "warn")
+        except Exception:  # noqa: BLE001
+            pass
 
     # --------------------------------------------------------------- captures
     async def screenshot_b64(self) -> str | None:

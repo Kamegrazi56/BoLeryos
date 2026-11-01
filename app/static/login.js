@@ -1,13 +1,9 @@
+// La vue en direct (capture, journal, badge) est gérée par vision.js, chargé avant ce fichier.
 const form = document.getElementById("login-form");
 const submit = document.getElementById("submit");
 const msg = document.getElementById("msg");
-const badge = document.getElementById("badge");
-
-const LABELS = { idle: "Non connecté", logging_in: "Connexion…", logged_in: "Connecté", error: "Échec" };
 
 function show(state, message) {
-  badge.className = "badge " + state;
-  badge.textContent = LABELS[state] || state;
   msg.className = "msg " + (state === "error" ? "error" : state === "logged_in" ? "ok" : "");
   msg.textContent = message || "";
 }
@@ -33,8 +29,7 @@ form.addEventListener("submit", async (event) => {
     } else {
       show(data.state, data.message);
       if (data.state === "logged_in") {
-        form.password.value = "";
-        setTimeout(() => { location.href = "/vision"; }, 600);
+        setTimeout(() => { location.href = "/vision"; }, 1500);
       }
     }
   } catch {

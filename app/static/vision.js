@@ -47,7 +47,10 @@ function connect() {
 }
 connect();
 
-document.getElementById("logout").addEventListener("click", async () => {
-  await fetch("/api/logout", { method: "POST" });
-  location.href = "/";
-});
+const logout = document.getElementById("logout");
+if (logout) {
+  logout.addEventListener("click", async () => {
+    await fetch("/api/logout", { method: "POST" });
+    location.href = "/";
+  });
+}
