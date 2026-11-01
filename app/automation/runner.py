@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 from .. import human
 from . import catalog as catalog_module
-from .decide import decide
+from .decide import Outcome, decide, decide_ordered
 from .driver import GameDriver, GameUiError
 from .numbers import norm
 from .schedule import is_active, local_now, next_change, windows_from_settings
@@ -51,6 +51,11 @@ class AutomationRunner:
         self._next_login_at = 0.0
         self._unknown_since: float | None = None
         self._universe_attempts = 0
+        self._in_game = False
+        # Constructions : état de chaque planète (en attente de ressources, occupée…) et prochaine vérification
+        self._pstate: dict[str, dict] = {}
+        self._cons_signature = ""
+        self._known_planets: list[PlanetInfo] = []
         self.last_cycle = ""
         self._state_path = Path(data_dir) / "automation-state.json" if data_dir and os.path.isdir(data_dir) else None
         self._load_state()
@@ -125,6 +130,7 @@ class AutomationRunner:
             "waiting": self.waiting if self._running else "",
             "has_credentials": self.bot.has_credentials(),
             "universe": cfg["universe"],
+            "planets_state": self.planets_state(),
         }
 
     # -------------------------------------------------------------- contrôle
@@ -137,6 +143,7 @@ class AutomationRunner:
         self._login_blocked = ""
         self._next_login_at = 0.0
         self.waiting = ""
+        self._pstate.clear()
         self._last_notes.clear()
         self.bot.log(f"Bot activé (ON) — mode {'RÉEL' if self._cfg()['mode'] == 'live' else 'à blanc'}.")
         await self.bot.ensure_started()  # le navigateur tourne même si aucun écran de l'interface n'est ouvert
@@ -231,7 +238,11 @@ class AutomationRunner:
                     await self.stop("3 erreurs consécutives")
                     return
             lo, hi = cfg["cycle"]["min_minutes"], cfg["cycle"]["max_minutes"]
-            await self._sleep(random.uniform(lo, hi) * 60)
+            wait = random.uniform(lo, hi) * 60
+            due_in = self.next_due_in(self._cfg())
+            if due_in is not None:  # on ne dépasse pas l'échéance d'une revérification
+                wait = min(wait, max(2.0, due_in))
+            await self._sleep(wait)
 
     # ------------------------------------------------------------ superviseur de connexion
     async def _ensure_ready(self, cfg: dict) -> str | None:
@@ -252,8 +263,14 @@ class AutomationRunner:
             self._unknown_since = None
         if screen in ("game", "universes"):  # connecté (par le bot ou à la main) : les blocages de connexion tombent
             self._login_failures, self._login_blocked, self._next_login_at = 0, "", 0.0
+        if screen != "game":
+            self._in_game = False
         if screen == "game":
             self._universe_attempts = 0
+            if not self._in_game:  # arrivée (ou retour) dans la partie
+                self._in_game = True
+                self._last_notes.pop("idle-cycle", None)
+                b.log("Dans la partie : le bot travaille.")
             return None
         if screen == "universes":
             return await self._pick_universe(cfg)
@@ -317,22 +334,85 @@ class AutomationRunner:
     async def run_cycle(self, cfg: dict | None = None) -> None:
         cfg = cfg or self._cfg()
         live = cfg["mode"] == "live"
+        cons = cfg["constructions"]
         self.cycle_running = True
         self.idle.clear()
         started = time.monotonic()
         try:
             await self.guard()
+            signature = self._cons_sig(cons)
+            if signature != self._cons_signature:  # réglages modifiés : on repart d'un état propre
+                self._cons_signature = signature
+                self._pstate.clear()
+            research_on = cfg["research"]["enabled"]
+            if not research_on and not self._constructions_due(cfg):
+                due_in = self.next_due_in(cfg)
+                when = f" (prochain contrôle dans {due_in / 60:.0f} min)" if due_in is not None else ""
+                self._note("idle-cycle", f"Cycle : rien à vérifier pour l'instant{when}.")
+                return
+            self._last_notes.pop("idle-cycle", None)
             planets = await self.driver.list_planets()
+            self._known_planets = planets
             self.store.add_catalog("planets", [p.name for p in planets])
             self.bot.log(f"Cycle : {len(planets)} planète(s) lues ({'réel' if live else 'à blanc'}).")
-            if cfg["research"]["enabled"]:
+            if research_on:
                 await self._research_step(cfg, planets, live)
-            if cfg["constructions"]["enabled"]:
+            if cons["enabled"] and cons["queue"]:
                 await self._constructions_step(cfg, planets, live)
             self.last_cycle = f"{datetime.now():%H:%M:%S} ({time.monotonic() - started:.0f} s)"
         finally:
             self.cycle_running = False
             self.idle.set()
+
+    # ----------------------------------------------- constructions : état par planète
+    @staticmethod
+    def _cons_sig(cons: dict) -> str:
+        keys = ("enabled", "scope", "planet", "queue", "recheck_minutes")
+        return json.dumps({k: cons[k] for k in keys}, sort_keys=True)
+
+    @staticmethod
+    def _in_scope(cons: dict, planets: list[PlanetInfo]) -> list[PlanetInfo]:
+        if cons["scope"] == "one":
+            return [p for p in planets if norm(p.name) == norm(cons["planet"])]
+        return list(planets)
+
+    def _planet_due(self, key: str) -> bool:
+        state = self._pstate.get(key)
+        return state is None or state["next"] <= time.time()
+
+    def _constructions_due(self, cfg: dict) -> bool:
+        cons = cfg["constructions"]
+        if not cons["enabled"] or not cons["queue"]:
+            return False
+        if not self._known_planets:
+            return True  # liste des planètes pas encore lue
+        scope = self._in_scope(cons, self._known_planets)
+        if not scope:
+            return True  # planète désignée absente de la liste connue : on relit la liste
+        return any(self._planet_due(norm(p.name)) for p in scope)
+
+    def next_due_in(self, cfg: dict) -> float | None:
+        """Secondes avant la prochaine revérification d'une planète (None si rien n'est programmé)."""
+        cons = cfg["constructions"]
+        if not cons["enabled"] or not cons["queue"] or not self._known_planets:
+            return None
+        waits = []
+        for planet in self._in_scope(cons, self._known_planets):
+            state = self._pstate.get(norm(planet.name))
+            waits.append(max(0.0, state["next"] - time.time()) if state else 60.0)
+        return min(waits) if waits else None
+
+    def _set_pstate(self, key: str, name: str, status: str, seconds: float, detail: str = "") -> None:
+        self._pstate[key] = {"name": name, "status": status, "next": time.time() + seconds, "detail": detail}
+
+    def planets_state(self) -> list[dict]:
+        """Planètes suivies par le timer des constructions : statut, raison, prochaine vérification."""
+        now = time.time()
+        rows = [
+            {"planet": st["name"], "status": st["status"], "detail": st["detail"], "next_in_s": max(0, round(st["next"] - now))}
+            for st in self._pstate.values()
+        ]
+        return sorted(rows, key=lambda r: (r["next_in_s"], r["planet"]))[:30]
 
     def _busy(self, key: str) -> bool:
         return self._busy_until.get(key, 0) > time.time()
@@ -365,23 +445,15 @@ class AutomationRunner:
         view["universes"] = list(cfg["catalog"]["universes"])
         return view
 
-    async def _decide_and_act(
-        self, cfg: dict, live: bool, label: str, key: str, targets: dict[str, int], cards: list[tuple[str, Card]],
-        resources, action: str, planet_label: str,
-    ) -> bool:
-        """Décide, journalise, et lance en mode réel. Retourne True si une action réelle a été lancée."""
-        outcome = decide([c for _, c in cards], resources, targets, action)
-        if outcome.decision is None:
-            self._note(f"{label}:{key}", f"{planet_label} : rien à lancer ({outcome.summary()}).")
-            return False
-        decision = outcome.decision
+    async def _launch_decision(self, cfg: dict, live: bool, note_key: str, key: str, decision, cards, planet_label: str) -> str:
+        """Journalise la décision et, en mode réel, clique. Retourne « would_launch », « launched », « capped » ou « failed »."""
         section = next(s for s, c in cards if c is decision.card)
         if not live:
-            self._note(f"{label}:{key}", f"[À blanc] {planet_label} : je lancerais {decision.describe()}.")
-            return False
+            self._note(note_key, f"[À blanc] {planet_label} : je lancerais {decision.describe()}.")
+            return "would_launch"
         if self.launched_today(cfg) >= cfg["daily_cap"]:
             self._note("cap", f"Plafond quotidien atteint ({cfg['daily_cap']}) : aucune nouvelle action aujourd'hui.", "warn")
-            return False
+            return "capped"
         self._last_notes.pop("cap", None)
         self.bot.log(f"{planet_label} : je lance {decision.describe()}.")
         result = await self.driver.launch(decision.card, section)
@@ -389,60 +461,102 @@ class AutomationRunner:
             self._unconfirmed_streak = 0
             self._count_launch(cfg)
             self._mark_busy(key, decision.card)
-            self._last_notes.pop(f"{label}:{key}", None)
+            self._last_notes.pop(note_key, None)
             self.bot.log(f"{planet_label} : lancement confirmé ({result.detail}) — {self.launched_today(cfg)}/{cfg['daily_cap']} aujourd'hui.")
-            return True
+            return "launched"
         self._unconfirmed_streak += 1
         self.bot.log(f"{planet_label} : lancement non confirmé ({result.detail}).", "warn")
         if self._unconfirmed_streak >= 2:
             await self.stop("deux lancements consécutifs non confirmés")
             raise Interrupted("lancements non confirmés")
-        return False
+        return "failed"
+
+    async def _decide_and_act(
+        self, cfg: dict, live: bool, label: str, key: str, targets: dict[str, int], cards: list[tuple[str, Card]],
+        resources, action: str, planet_label: str,
+    ) -> bool:
+        """Recherches : décide (le moins pesant sur le stock d'abord) et lance. True si une action réelle est partie."""
+        outcome = decide([c for _, c in cards], resources, targets, action)
+        if outcome.decision is None:
+            self._note(f"{label}:{key}", f"{planet_label} : rien à lancer ({outcome.summary()}).")
+            return False
+        return await self._launch_decision(cfg, live, f"{label}:{key}", key, outcome.decision, cards, planet_label) == "launched"
+
+    async def _read_buildings(self, planet: PlanetInfo, names: list[str]):
+        """Ouvre les pages Industrie puis Infrastructures (seulement si nécessaire) et lit les cartes de la planète."""
+        cards: list[tuple[str, Card]] = []
+        resources = None
+        for section in ("buildings", "facilities"):
+            if not await self.driver.open_section(section):
+                self.bot.log(f"Planète {planet.name} : page « {section} » inaccessible.", "warn")
+                break
+            await human.think(self.bot._settings)
+            page_state = await self.driver.read_page()
+            resources = page_state.resources
+            self._catalog("buildings", page_state.cards, planet.name)
+            cards += [(section, c) for c in page_state.cards]
+            if {norm(n) for n in names} <= {norm(c.name) for _, c in cards}:
+                break  # tous les bâtiments de la liste ont été vus : inutile de charger l'autre page
+        return cards, resources
 
     async def _constructions_step(self, cfg: dict, planets: list[PlanetInfo], live: bool) -> None:
+        """Pour chaque planète à vérifier : lance la PREMIÈRE amélioration réalisable de la liste, sinon met la planète
+        en attente et la revérifiera dans `recheck_minutes`."""
         cons = cfg["constructions"]
-        base = normalized_targets(cons["targets"])
-        overrides = {norm(p): normalized_targets(t) for p, t in cons["overrides"].items()}
-        wanted = {norm(p) for p in cons["planets"]}
-        order = [p for p in planets if not wanted or norm(p.name) in wanted]
-        random.shuffle(order)
-        for planet in order:
+        queue = [(q["name"], q["level"]) for q in cons["queue"]]
+        scope = self._in_scope(cons, planets)
+        if cons["scope"] == "one" and not scope:
+            self._note("cons:planet", f"Constructions : planète « {cons['planet']} » introuvable dans la liste des planètes.", "warn")
+            return
+        self._last_notes.pop("cons:planet", None)
+        recheck = cons["recheck_minutes"] * 60
+        due = [p for p in scope if self._planet_due(norm(p.name))]
+        random.shuffle(due)
+        for planet in due:
             await self.guard()
-            targets = {**base, **overrides.get(norm(planet.name), {})}
-            if not targets:
-                continue
-            key = norm(planet.name)
-            label = f"Planète {planet.name}"
+            key, label = norm(planet.name), f"Planète {planet.name}"
             if self._busy(key):
-                until = datetime.fromtimestamp(self._busy_until[key])
-                self._note(f"busy:{key}", f"{label} : construction en cours, nouvelle vérification après {until:%H:%M}.")
+                remaining = self._busy_until[key] - time.time()
+                self._set_pstate(key, planet.name, "busy", max(5.0, remaining), "construction en cours")
+                self._note(f"busy:{key}", f"{label} : construction en cours, nouvelle vérification après {datetime.fromtimestamp(self._busy_until[key]):%H:%M}.")
                 continue
             self._last_notes.pop(f"busy:{key}", None)
             try:
                 if not await self.driver.switch_planet(planet):
                     self.bot.log(f"{label} : changement de planète non confirmé, planète ignorée.", "warn")
                     continue
-                cards: list[tuple[str, Card]] = []
-                resources = None
-                for section in ("buildings", "facilities"):
-                    if not await self.driver.open_section(section):
-                        self.bot.log(f"{label} : page « {section} » inaccessible.", "warn")
-                        break
-                    await human.think(self.bot._settings)
-                    page_state = await self.driver.read_page()
-                    resources = page_state.resources
-                    self._catalog("buildings", page_state.cards, planet.name)
-                    cards += [(section, c) for c in page_state.cards]
-                    if set(targets) <= {norm(c.name) for _, c in cards}:
-                        break  # tous les bâtiments visés ont été vus : inutile de charger l'autre page
+                cards, resources = await self._read_buildings(planet, [n for n, _ in queue])
                 if resources is None:
                     continue
-                await self._decide_and_act(cfg, live, "c", key, targets, cards, resources, "Améliorer", label)
+                outcome = decide_ordered([c for _, c in cards], resources, queue)
+                await self._settle_planet(cfg, live, planet, key, label, outcome, cards, recheck)
             except GameUiError as exc:
                 self.bot.log(f"{label} : {exc}.", "error")
                 await self.stop("écran du jeu inattendu")
                 raise Interrupted(str(exc)) from exc
             await human.think(self.bot._settings)
+
+    async def _settle_planet(self, cfg: dict, live: bool, planet: PlanetInfo, key: str, label: str, outcome: Outcome, cards, recheck: float) -> None:
+        wait = recheck * random.uniform(0.95, 1.1)  # légère variation : pas de métronome
+        minutes = f"{wait / 60:.0f}" if wait >= 90 else f"{wait / 60:.1f}"
+        if outcome.decision is not None:
+            result = await self._launch_decision(cfg, live, f"c:{key}", key, outcome.decision, cards, label)
+            if result == "launched":
+                self._set_pstate(key, planet.name, "busy", max(5.0, self._busy_until[key] - time.time()), f"{outcome.decision.card.name} en cours")
+            elif result == "would_launch":
+                self._set_pstate(key, planet.name, "would_launch", wait, f"à blanc : {outcome.decision.card.name}")
+            else:  # plafond atteint ou lancement non confirmé
+                self._set_pstate(key, planet.name, "retry", wait, "lancement non effectué")
+        elif outcome.pending:
+            detail = " ; ".join(outcome.pending[:3])
+            self._set_pstate(key, planet.name, "pending", wait, detail)
+            self._note(f"c:{key}", f"{label} : en attente ({detail}) — nouvelle vérification dans {minutes} min.")
+        elif outcome.reached and not outcome.notes:
+            self._set_pstate(key, planet.name, "done", 6 * 3600, "objectifs atteints")
+            self._note(f"c:{key}", f"{label} : tous les objectifs de la liste sont atteints.")
+        else:
+            self._set_pstate(key, planet.name, "idle", wait, outcome.summary())
+            self._note(f"c:{key}", f"{label} : rien à lancer ({outcome.summary()}) — nouvelle vérification dans {minutes} min.")
 
     async def _research_step(self, cfg: dict, planets: list[PlanetInfo], live: bool) -> None:
         res = cfg["research"]

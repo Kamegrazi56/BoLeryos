@@ -180,8 +180,7 @@ def test_an_expired_session_is_reconnected_automatically(world_client, game):
     c.portal.call(c.app.state.bot._page.reload)
     assert _until(lambda: game.info()["login_attempts"] == 2), _logs(c)[-10:]
     assert _has(c, "Session expirée")
-    before = _count(c, "Cycle :")
-    assert _until(lambda: _count(c, "Cycle :") > before)  # et le travail reprend
+    assert _until(lambda: _count(c, "Dans la partie : le bot travaille.") == 2)  # le travail reprend après la reconnexion
     _off(c)
 
 

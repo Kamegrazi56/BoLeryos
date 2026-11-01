@@ -109,3 +109,16 @@ button.power.on { background: var(--ok); border-color: var(--ok); color: #052212
 button.power.off:hover { border-color: var(--accent); color: var(--text); }
 button.power:disabled { opacity: .6; }
 header.top .badge { margin-left: 0; }
+
+/* Constructions : portée, liste ordonnée, timer */
+.scope { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; }
+.scope select { width: auto; min-width: 220px; }
+.queue { list-style: none; margin: 8px 0; padding: 0; max-width: 820px; }
+.queue-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.queue-row .rank { width: 24px; height: 24px; display: inline-grid; place-items: center; border-radius: 50%; background: var(--border); font-size: 12px; font-weight: 700; }
+.queue-row .goal-name { flex: 1; }
+.queue-row input[type=number] { width: 90px; }
+.queue-row.hint, li.empty { padding: 8px 0; }
+input.inline { width: 90px; display: inline-block; margin: 0 6px; }
+#cons-add-name { width: auto; min-width: 260px; }
+#cons-add-level { width: 150px; }

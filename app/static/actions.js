@@ -12,7 +12,6 @@ let model = null; // réglages en cours d'édition (source de vérité de l'inte
 let catalog = { buildings: [], research: [], planets: [] };
 let confirmedLive = false;
 let saveTimer = null;
-let overridePlanet = "";
 let catalogKey = "";
 
 const fmt = (v) => {
@@ -63,11 +62,9 @@ function say(text, ok) {
   msg.className = "msg " + (ok ? "ok" : "error");
 }
 async function save() {
+  if (model.constructions.scope === "one" && !model.constructions.planet) return; // en attente du choix de la planète
   const body = JSON.parse(JSON.stringify(model));
   delete body.catalog; // entretenu par le bot
-  for (const [planet, goals] of Object.entries(body.constructions.overrides)) {
-    if (!Object.keys(goals).length) delete body.constructions.overrides[planet]; // exception vide : retirée
-  }
   const res = await fetch("/api/automation/settings", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -115,62 +112,119 @@ function renderGoals(container, entries, targets, placeholders = {}) {
   });
 }
 function refreshLevels() {
-  for (const [kind, ids] of [["buildings", ["cons-goals", "ov-goals"]], ["research", ["res-goals"]]]) {
-    const byName = Object.fromEntries(catalog[kind].map((e) => [e.name, e]));
-    ids.forEach((id) => $(id).querySelectorAll(".goal-row").forEach((row) => {
-      const entry = byName[row.querySelector("input").dataset.goal];
-      if (entry) row.querySelector(".goal-current").textContent = currentLevel(entry);
-    }));
-  }
+  const buildings = Object.fromEntries(catalog.buildings.map((e) => [e.name, e]));
+  document.querySelectorAll("#cons-queue .queue-row").forEach((row) => {
+    const entry = buildings[row.querySelector(".goal-name").textContent];
+    if (entry) row.querySelector(".goal-current").textContent = currentLevel(entry);
+  });
+  const research = Object.fromEntries(catalog.research.map((e) => [e.name, e]));
+  $("res-goals").querySelectorAll(".goal-row").forEach((row) => {
+    const entry = research[row.querySelector("input").dataset.goal];
+    if (entry) row.querySelector(".goal-current").textContent = currentLevel(entry);
+  });
 }
 
-// ------------------------------------------------------------------------------ planètes
-function renderPlanetControls() {
-  const planets = [...new Set([...catalog.planets, ...model.constructions.planets, ...Object.keys(model.constructions.overrides)])];
-  const box = $("cons-planets");
-  box.replaceChildren();
-  const all = el("input", { type: "checkbox", checked: model.constructions.planets.length === 0 });
-  all.addEventListener("change", () => {
-    model.constructions.planets = all.checked ? [] : [...planets];
-    renderPlanetControls();
-    scheduleSave();
-  });
-  box.append(el("label", { className: "switch" }, all, "Toutes les planètes"));
-  if (!planets.length) {
-    box.append(el("p", { className: "hint", textContent: "La liste des planètes apparaît après « Lire l'état du jeu » (onglet État du jeu)." }));
-  } else if (!all.checked) {
-    planets.forEach((name) => {
-      const cb = el("input", { type: "checkbox", checked: model.constructions.planets.includes(name) });
-      cb.addEventListener("change", () => {
-        const set = new Set(model.constructions.planets);
-        cb.checked ? set.add(name) : set.delete(name);
-        model.constructions.planets = [...set];
-        scheduleSave();
-      });
-      box.append(el("label", { className: "switch planet" }, cb, name));
+// ------------------------------------------------------------------------------ constructions
+function renderScope() {
+  const c = model.constructions;
+  $("scope-all").checked = c.scope === "all";
+  $("scope-one").checked = c.scope === "one";
+  const names = [...new Set([...catalog.planets, c.planet].filter(Boolean))];
+  $("cons-planet").replaceChildren(
+    el("option", { value: "", textContent: names.length ? "Choisir une planète…" : "Aucune planète connue" }),
+    ...names.map((n) => el("option", { value: n, textContent: n })),
+  );
+  $("cons-planet").value = c.planet;
+  $("cons-planet").disabled = c.scope !== "one";
+  $("cons-planet-hint").textContent = !catalog.planets.length
+    ? "La liste des planètes apparaît après « Lire l'état du jeu » (onglet État du jeu) ou au premier cycle du bot."
+    : c.scope === "one" && !c.planet ? "Choisissez la planète concernée." : "";
+}
+document.querySelectorAll('input[name="cons-scope"]').forEach((radio) => radio.addEventListener("change", () => {
+  const c = model.constructions;
+  c.scope = radio.value;
+  c.planet = c.scope === "all" ? "" : c.planet || catalog.planets[0] || "";
+  renderScope();
+  scheduleSave();
+}));
+$("cons-planet").addEventListener("change", () => { model.constructions.planet = $("cons-planet").value; renderScope(); scheduleSave(); });
+
+/** Liste ordonnée des améliorations souhaitées : le bot lance la première réalisable. */
+function renderQueue() {
+  const queue = model.constructions.queue;
+  const byName = Object.fromEntries(catalog.buildings.map((e) => [e.name, e]));
+  const list = $("cons-queue");
+  list.replaceChildren();
+  queue.forEach((item, i) => {
+    const level = el("input", { type: "number", min: 0, max: 999, ariaLabel: `Niveau demandé pour ${item.name}` });
+    level.value = item.level;
+    level.addEventListener("input", () => {
+      if (level.value === "") return;
+      item.level = Math.max(0, Math.min(999, Number(level.value)));
+      scheduleSave();
     });
+    const button = (text, title, onClick, disabled = false) => {
+      const b = el("button", { type: "button", className: "secondary small", textContent: text, title, disabled });
+      b.addEventListener("click", onClick);
+      return b;
+    };
+    const move = (d) => () => { [queue[i], queue[i + d]] = [queue[i + d], queue[i]]; renderQueue(); scheduleSave(); };
+    list.append(el("li", { className: "queue-row" },
+      el("span", { className: "rank", textContent: String(i + 1) }),
+      el("span", { className: "goal-name", textContent: item.name }),
+      el("span", { className: "goal-current", textContent: byName[item.name] ? currentLevel(byName[item.name]) : "niveau actuel inconnu" }),
+      level,
+      button("↑", "Monter (plus prioritaire)", move(-1), i === 0),
+      button("↓", "Descendre", move(1), i === queue.length - 1),
+      button("×", "Retirer de la liste", () => { queue.splice(i, 1); renderQueue(); scheduleSave(); }),
+    ));
+  });
+  if (!queue.length) list.append(el("li", { className: "hint empty", textContent: "Liste vide : choisissez un bâtiment ci-dessous." }));
+  // bâtiment à ajouter : liste intégrée au bot, sans ceux déjà présents
+  const used = new Set(queue.map((q) => q.name));
+  const select = $("cons-add-name");
+  select.replaceChildren(el("option", { value: "", textContent: "Choisir un bâtiment…" }));
+  let group = null, optgroup = null;
+  catalog.buildings.filter((e) => !used.has(e.name)).forEach((e) => {
+    if (e.group !== group) { group = e.group; optgroup = el("optgroup", { label: group }); select.append(optgroup); }
+    optgroup.append(el("option", { value: e.name, textContent: e.name }));
+  });
+}
+$("cons-add").addEventListener("click", () => {
+  const name = $("cons-add-name").value, level = $("cons-add-level").value;
+  if (!name || level === "") return;
+  model.constructions.queue.push({ name, level: Math.max(0, Math.min(999, Number(level))) });
+  $("cons-add-level").value = "";
+  renderQueue();
+  scheduleSave();
+});
+
+const PLANET_STATUS = {
+  pending: "en attente de ressources", busy: "construction en cours", would_launch: "réalisable (mode à blanc)",
+  done: "objectifs atteints", idle: "rien à lancer", retry: "à réessayer",
+};
+const waitText = (s) => (s >= 90 ? `${Math.round(s / 60)} min` : `${s} s`);
+/** Planètes suivies par le timer : état et prochaine vérification. */
+function renderPending(rows) {
+  const box = $("cons-pending");
+  if (!rows || !rows.length) {
+    box.replaceChildren(el("p", { className: "hint", textContent: "Aucune planète suivie pour l'instant : le bot n'en a pas encore vérifié." }));
+    return;
   }
-  // exceptions par planète
-  const sel = $("ov-planet");
-  sel.replaceChildren(el("option", { value: "", textContent: planets.length ? "Choisir une planète…" : "Aucune planète connue" }),
-    ...planets.map((n) => el("option", { value: n, textContent: n })));
-  if (!planets.includes(overridePlanet)) overridePlanet = "";
-  sel.value = overridePlanet;
-  renderOverrides();
-  // planète qui finance les recherches
-  const fund = $("res-planet");
+  box.replaceChildren(
+    el("h3", { textContent: "Planètes suivies" }),
+    table(["Planète", "État", "Détail", "Prochaine vérification"], rows.map((r) => [r.planet, PLANET_STATUS[r.status] || r.status, r.detail, `dans ${waitText(r.next_in_s)}`])),
+  );
+}
+
+function renderResearchPlanet() {
   const names = [...new Set([...catalog.planets, model.research.funding_planet].filter(Boolean))];
-  fund.replaceChildren(el("option", { value: "", textContent: "Automatique (la planète qui a le plus de Fer)" }),
-    ...names.map((n) => el("option", { value: n, textContent: n })));
-  fund.value = model.research.funding_planet;
+  $("res-planet").replaceChildren(
+    el("option", { value: "", textContent: "Automatique (la planète qui a le plus de Fer)" }),
+    ...names.map((n) => el("option", { value: n, textContent: n })),
+  );
+  $("res-planet").value = model.research.funding_planet;
 }
-function renderOverrides() {
-  const container = $("ov-goals");
-  if (!overridePlanet) return container.replaceChildren();
-  const current = (model.constructions.overrides[overridePlanet] ||= {});
-  renderGoals(container, catalog.buildings, current, model.constructions.targets);
-}
-$("ov-planet").addEventListener("change", () => { overridePlanet = $("ov-planet").value; renderOverrides(); });
 $("res-planet").addEventListener("change", () => { model.research.funding_planet = $("res-planet").value; scheduleSave(); });
 
 // ------------------------------------------------------------------------ plages horaires
@@ -220,9 +274,11 @@ function renderAll() {
   renderWindows();
   $("cons-enabled").checked = model.constructions.enabled;
   $("res-enabled").checked = model.research.enabled;
-  renderGoals($("cons-goals"), catalog.buildings, model.constructions.targets);
+  $("cons-recheck").value = model.constructions.recheck_minutes;
+  renderScope();
+  renderQueue();
   renderGoals($("res-goals"), catalog.research, model.research.targets);
-  renderPlanetControls();
+  renderResearchPlanet();
   renderUniverse();
   catalogKey = catalogSignature();
 }
@@ -271,6 +327,7 @@ bind("cycle-max", (n) => { model.cycle.max_minutes = Number(n.value); });
 bind("sched-enabled", (n) => { model.schedule.enabled = n.checked; });
 bind("tz", (n) => { model.schedule.timezone = n.value; });
 bind("cons-enabled", (n) => { model.constructions.enabled = n.checked; });
+bind("cons-recheck", (n) => { if (n.value !== "") model.constructions.recheck_minutes = Number(n.value); });
 bind("res-enabled", (n) => { model.research.enabled = n.checked; });
 $("mode").addEventListener("change", () => {
   if ($("mode").value === "live") {
@@ -352,6 +409,7 @@ function renderStatus(a, state) {
     ` · lancements aujourd'hui : ${a.launched_today}/${a.cap}${next}`,
     a.last_cycle ? ` · dernier cycle ${a.last_cycle}` : "",
   );
+  renderPending(a.planets_state);
   const waiting = a.running && a.waiting ? ` · en attente : ${a.waiting}` : "";
   if (waiting) $("run-status").append(waiting);
   $("persist").textContent = a.persistent

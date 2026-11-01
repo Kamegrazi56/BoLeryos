@@ -123,63 +123,111 @@ def test_selected_tab_is_remembered_after_reload(ui):
     assert page.locator("#panel-research").is_visible()
 
 
-def test_building_and_research_lists_are_built_in_without_any_name_field(ui):
+def _saved(app):
+    return app.state.bot.automation.store.get()
+
+
+def _wait_saved(page, seconds=1.0):
+    time.sleep(seconds)  # l'interface enregistre ~0,5 s après la dernière saisie
+
+
+def test_buildings_and_research_come_from_built_in_lists_without_any_name_field(ui):
     page, _, _ = ui
     page.click("#tab-constructions")
-    names = page.locator("#cons-goals .goal-name").all_inner_texts()
-    assert names[:2] == ["Mine de Fer", "Extracteur de Cristal"] and len(names) == 16
-    assert {"Industrie", "Infrastructures"} == {h.text_content() for h in page.locator("#cons-goals h3").all()}
+    names = page.locator("#cons-add-name option").all_text_contents()[1:]
+    assert len(names) == 16 and names[:2] == ["Mine de Fer", "Extracteur de Cristal"]
+    assert {"Industrie", "Infrastructures"} == {g.get_attribute("label") for g in page.locator("#cons-add-name optgroup").all()}
     assert "Tour à résonance" in names and "Terraformeur" in names
+    assert page.locator("#panel-constructions input[type=text]").count() == 0  # aucune saisie libre de nom
     page.click("#tab-research")
     research = page.locator("#res-goals .goal-name").all_inner_texts()
     assert len(research) == 23 and "Ingénierie minière" in research
-    # aucune saisie libre de nom : seuls des champs numériques dans les listes
-    for panel in ("cons-goals", "res-goals"):
-        assert page.locator(f"#{panel} input[type=text]").count() == 0
-        assert page.locator(f"#{panel} input:not([type=number])").count() == 0
+    assert page.locator("#res-goals input:not([type=number])").count() == 0
 
 
-def test_goals_are_saved_on_the_server_and_empty_means_no_goal(ui):
+def test_the_player_builds_an_ordered_list_of_upgrades(ui):
     page, _, app = ui
     page.click("#tab-constructions")
-    page.fill("#cons-goals [data-goal='Mine de Fer']", "45")
-    page.fill("#cons-goals [data-goal='Caserne']", "20")
-    page.check("#cons-enabled")
-    page.fill("#cons-goals [data-goal='Caserne']", "")  # vidé : plus d'objectif
+    for name, level in (("Mine de Fer", "45"), ("Centrale Énergétique", "30"), ("Caserne", "20")):
+        page.select_option("#cons-add-name", name)
+        page.fill("#cons-add-level", level)
+        page.click("#cons-add")
+    assert page.locator("#cons-queue .queue-row .goal-name").all_inner_texts() == ["Mine de Fer", "Centrale Énergétique", "Caserne"]
+    assert "Mine de Fer" not in page.locator("#cons-add-name option").all_text_contents()  # déjà dans la liste
+    page.locator("#cons-queue .queue-row").nth(2).locator("button[title^='Monter']").click()
+    page.locator("#cons-queue .queue-row").nth(1).locator("button[title^='Monter']").click()  # Caserne passe en premier
+    page.locator("#cons-queue .queue-row").nth(2).locator("button[title='Retirer de la liste']").click()  # retire Centrale
+    page.locator("#cons-queue .queue-row").nth(1).locator("input[type=number]").fill("46")
+    _wait_saved(page)
+    assert _saved(app)["constructions"]["queue"] == [{"name": "Caserne", "level": 20}, {"name": "Mine de Fer", "level": 46}]
+    assert page.locator("#cons-queue .queue-row .rank").all_inner_texts() == ["1", "2"]
+    assert page.locator("#cons-queue .queue-row").nth(0).locator("button[title^='Monter']").is_disabled()  # le premier ne monte plus
+
+
+def test_research_goals_are_saved_and_empty_means_no_goal(ui):
+    page, _, app = ui
     page.click("#tab-research")
     page.fill("#res-goals [data-goal='Technologie laser']", "25")
+    page.fill("#res-goals [data-goal='Technologie ionique']", "20")
     page.check("#res-enabled")
-    page.wait_for_function("document.querySelector('#save-msg').textContent.includes('enregistrés')", timeout=5000)
-    time.sleep(0.8)
-    saved = app.state.bot.automation.store.get()
-    assert saved["constructions"]["targets"] == {"Mine de Fer": 45} and saved["constructions"]["enabled"] is True
-    assert saved["research"]["targets"] == {"Technologie laser": 25} and saved["research"]["enabled"] is True
+    page.fill("#res-goals [data-goal='Technologie ionique']", "")
+    _wait_saved(page)
+    assert _saved(app)["research"] == {"enabled": True, "targets": {"Technologie laser": 25}, "funding_planet": ""}
 
 
-def test_planets_levels_and_exceptions_come_from_the_game_not_from_typing(ui):
+def test_all_planets_or_a_single_selected_planet(ui):
     page, _, app = ui
     page.click("#tab-state")
     page.click("#read-state")
     page.wait_for_function("document.querySelector('#read-msg').textContent.includes('terminée')", timeout=60000)
     page.click("#tab-constructions")
-    # niveaux actuels lus dans le jeu
-    row = page.locator("#cons-goals .goal-row", has_text="Mine de Fer")
-    assert "actuel : 40" in row.inner_text()
-    # liste des planètes à cocher ; exception pour une planète choisie dans une liste
-    assert page.locator("#ov-planet option").all_inner_texts()[1:] == ["6-79-Egide", "8-50-Concorde", "9-169-Strate"]
-    page.select_option("#ov-planet", "6-79-Egide")
-    page.fill("#ov-goals [data-goal='Mine de Fer']", "50")
-    time.sleep(1.0)
-    assert app.state.bot.automation.store.get()["constructions"]["overrides"] == {"6-79-Egide": {"Mine de Fer": 50}}
-    page.uncheck("#cons-planets input")  # « Toutes les planètes » décoché : une case par planète, toutes cochées
-    assert page.locator("#cons-planets label.planet").count() == 3
-    for other in ("Concorde", "Strate"):
-        page.locator("#cons-planets label.planet", has_text=other).locator("input").uncheck()
-    time.sleep(1.0)
-    assert app.state.bot.automation.store.get()["constructions"]["planets"] == ["6-79-Egide"]
-    # planète qui finance les recherches : liste déroulante
+    assert page.locator("#scope-all").is_checked() and page.locator("#cons-planet").is_disabled()
+    assert page.locator("#cons-planet option").all_inner_texts()[1:] == ["6-79-Egide", "8-50-Concorde", "9-169-Strate"]
+    page.check("#scope-one")
+    assert page.locator("#cons-planet").is_enabled() and page.locator("#cons-planet").input_value() == "6-79-Egide"  # première proposée
+    page.select_option("#cons-planet", "9-169-Strate")
+    _wait_saved(page)
+    cons = _saved(app)["constructions"]
+    assert (cons["scope"], cons["planet"]) == ("one", "9-169-Strate")
+    page.check("#scope-all")
+    _wait_saved(page)
+    cons = _saved(app)["constructions"]
+    assert (cons["scope"], cons["planet"]) == ("all", "") and page.locator("#cons-planet").is_disabled()
+    # niveau actuel lu dans le jeu, affiché dans la liste
+    page.select_option("#cons-add-name", "Mine de Fer")
+    page.fill("#cons-add-level", "45")
+    page.click("#cons-add")
+    assert "actuel : 40" in page.locator("#cons-queue .queue-row").first.inner_text()
     page.click("#tab-research")
     assert "8-50-Concorde" in page.locator("#res-planet option").all_inner_texts()
+
+
+def test_the_waiting_timer_is_set_in_minutes_and_saved(ui):
+    page, _, app = ui
+    page.click("#tab-constructions")
+    assert page.input_value("#cons-recheck") == "15"
+    page.fill("#cons-recheck", "30")
+    _wait_saved(page)
+    assert _saved(app)["constructions"]["recheck_minutes"] == 30.0
+
+
+def test_planets_waiting_for_resources_are_listed_with_their_next_check(ui):
+    page, _, app = ui
+    page.click("#tab-constructions")
+    assert "Aucune planète suivie" in page.locator("#cons-pending").inner_text()
+    page.select_option("#cons-add-name", "Mine de Fer")
+    page.fill("#cons-add-level", "45")
+    page.click("#cons-add")
+    page.check("#cons-enabled")
+    _wait_saved(page)
+    page.click("#power")  # ON : un premier cycle (à blanc) vérifie les planètes
+    page.wait_for_selector("#cons-pending table", timeout=60000)
+    page.wait_for_function(
+        "document.querySelectorAll('#cons-pending tr').length >= 4", timeout=60000)  # en-tête + les trois planètes
+    text = page.locator("#cons-pending").inner_text()
+    assert "8-50-Concorde" in text and "en attente de ressources" in text and "dans" in text
+    assert "réalisable (mode à blanc)" in text  # Egide pourrait être améliorée
+    page.click("#power")  # OFF
 
 
 def test_time_windows_can_be_edited(ui):

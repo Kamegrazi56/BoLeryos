@@ -1,6 +1,6 @@
 # Plan de développement de BoLeryos
 
-*Dernière mise à jour : 2026-11-01 (phases 1 à 5 codées, page Actions en onglets, interrupteur ON/OFF avec connexion automatique en mémoire ; D1 et F5 en attente). Ce document fait foi : on le met à jour à chaque phase, et on ne repose pas une question dont la réponse y figure.*
+*Dernière mise à jour : 2026-11-01 (phases 1 à 5 codées ; constructions : liste ordonnée, une ou toutes les planètes, timer d'attente ; D1 et F5 en attente). Ce document fait foi : on le met à jour à chaque phase, et on ne repose pas une question dont la réponse y figure.*
 
 ## 1. Objectif
 
@@ -90,8 +90,9 @@ Cadre : test de protections anti-bot **avec l'éditeur** (GEEKOS NEXUS), sur un 
 | D4 | Conflit de ressources entre fonctions | Ordre de priorité réglable ; défaut : recherches, puis constructions, puis expéditions. Réserve d'Éther pour les expéditions réglable (défaut 0). |
 | D5 | Recherches (F4) | Niveau demandé par technologie (vide = pas de recherche). Planète qui finance : celle où « Rechercher » est actif avec le plus de ressources, ou une planète désignée. |
 | D6 | Expéditions (F5) | Modèles et quantités choisis par le joueur (« tout », un nombre ou un pourcentage de ce qui est disponible) ; durée 1 à 6 h ; nombre maximal de missions simultanées réglable ; **pause automatique de la fonction après un crash ou des pertes** ; à blanc au départ. Règle de choix de la Brèche : à définir après les captures. |
-| D7 | Niveau demandé (constructions) | Valeur globale par bâtiment, exceptions par planète. Aucun niveau = rien n'est lancé pour ce bâtiment. |
-| D8 | Priorité entre bâtiments | Celui dont le coût pèse le moins sur le stock de la planète (le plus grand rapport coût / stock, le plus petit d'abord). |
+| D7 | Constructions : liste | **Liste ordonnée** d'améliorations (bâtiment + niveau demandé), choisies dans la liste intégrée ; portée : toutes les planètes ou une seule. |
+| D8 | Priorité entre bâtiments | **L'ordre choisi par le joueur** : sur chaque planète, la première amélioration de la liste réalisable avec les ressources est lancée. (Les recherches gardent la règle « le moins pesant sur le stock ».) |
+| D13 | Timer des constructions en attente | Une planète où rien n'est réalisable est revérifiée toutes les X minutes (défaut 15, ± quelques %), sans repasser sur les autres ; une planète occupée est revue à la fin de sa construction ; objectifs atteints : revérifiée toutes les 6 h ; réglages modifiés : tout est revérifié. Avant chaque revérification de la planète déjà affichée, la page est rechargée pour lire des ressources à jour. |
 | D9 | Énergie | Si le bilan est négatif : pas d'amélioration de mine ; Centrale Énergétique d'abord si abordable, sinon journal. |
 | D10 | Stockage | Avertissement dans le journal à 95 % de la capacité ; pas d'amélioration automatique des hangars. |
 | D11 | Rythme | Un cycle toutes les 3 à 8 minutes (aléatoire), puis délais humains entre les clics. |

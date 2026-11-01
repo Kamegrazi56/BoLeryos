@@ -29,12 +29,18 @@ def _until(predicate, timeout=15.0):
     return False
 
 
-def _configure(client, *, mode="dry_run", cap=20, constructions=None, research=None, schedule=None, cycle=(0.02, 0.02)):
+def _configure(client, *, mode="dry_run", cap=20, constructions=None, research=None, schedule=None, cycle=(0.02, 0.02),
+               scope="all", planet="", recheck=15.0):
+    """`constructions` : dict ou liste de (nom, niveau) — l'ORDRE est la priorité."""
+    items = list((constructions or {}).items()) if isinstance(constructions, dict) else list(constructions or [])
     body = {
         "mode": mode,
         "daily_cap": cap,
         "cycle": {"min_minutes": cycle[0], "max_minutes": cycle[1]},
-        "constructions": {"enabled": bool(constructions), "targets": constructions or {}},
+        "constructions": {
+            "enabled": bool(items), "scope": scope, "planet": planet, "recheck_minutes": recheck,
+            "queue": [{"name": n, "level": lvl} for n, lvl in items],
+        },
         "research": {"enabled": bool(research), "targets": research or {}},
     }
     if schedule:
@@ -42,6 +48,16 @@ def _configure(client, *, mode="dry_run", cap=20, constructions=None, research=N
     res = client.put("/api/automation/settings", json={"settings": body, "confirm_live": mode == "live"})
     assert res.status_code == 200, res.text
     return res.json()
+
+
+def _force_due(client):
+    """Fait comme si le délai de revérification de chaque planète était écoulé."""
+    for state in _runner(client)._pstate.values():
+        state["next"] = 0
+
+
+def _planets_state(client):
+    return {row["planet"]: row for row in client.get("/api/automation").json()["status"]["planets_state"]}
 
 
 def _cycle(client):
@@ -106,8 +122,8 @@ def test_dry_run_decides_and_logs_but_never_clicks(game_client, game):
     _cycle(game_client)
     assert game.actions() == []
     assert _has(game_client, "[À blanc] Planète 8-50-Concorde : je lancerais Centrale Énergétique")
-    assert _has(game_client, "[À blanc] Planète 6-79-Egide : je lancerais Centrale Énergétique")
-    assert _has(game_client, "Planète 9-169-Strate : rien à lancer")
+    assert _has(game_client, "[À blanc] Planète 6-79-Egide : je lancerais Mine de Fer")  # la première de la liste réalisable
+    assert _has(game_client, "Planète 9-169-Strate : en attente")
 
 
 def test_disabled_features_do_nothing(game_client, game):
@@ -117,10 +133,10 @@ def test_disabled_features_do_nothing(game_client, game):
 
 
 # ------------------------------------------------------------------------------- réel
-def test_live_mode_launches_the_upgrade_that_weighs_least_and_confirms_it(game_client, game):
+def test_live_mode_launches_the_first_feasible_upgrade_of_the_list_and_confirms_it(game_client, game):
     _configure(game_client, mode="live", constructions=MINES)  # pas de Centrale visée
     _cycle(game_client)
-    assert game.actions() == [{"kind": "building", "planet": "6-79-Egide", "name": "Synthétiseur d'Éther", "level_after": 35}]
+    assert game.actions() == [{"kind": "building", "planet": "6-79-Egide", "name": "Mine de Fer", "level_after": 41}]
     assert _has(game_client, "lancement confirmé")
     assert game_client.get("/api/automation").json()["status"]["launched_today"] == 1
 
@@ -128,9 +144,10 @@ def test_live_mode_launches_the_upgrade_that_weighs_least_and_confirms_it(game_c
 def test_a_planet_with_a_construction_in_progress_is_left_alone(game_client, game):
     _configure(game_client, mode="live", constructions=MINES)
     _cycle(game_client)
+    _force_due(game_client)
     _cycle(game_client)  # deuxième cycle : la construction n'est pas terminée
     assert len(game.actions()) == 1
-    assert _has(game_client, "construction en cours")
+    assert _planets_state(game_client)["6-79-Egide"]["status"] == "busy"
 
 
 def test_each_planet_gets_at_most_one_launch_per_cycle(game_client, game):
@@ -161,6 +178,115 @@ def test_unreadable_screen_never_leads_to_a_click(game_client, game):
     runner = _runner(game_client)
     state = game_client.portal.call(runner.driver.read_page)
     assert state.resources.fer is None  # « 12 To » n'est pas compris : le bot ne devine pas
+
+
+# ----------------------------------------------------- planète(s), priorité, timer d'attente
+def test_one_selected_planet_is_the_only_one_touched(game_client, game):
+    _configure(game_client, mode="live", constructions={**MINES, "Centrale Énergétique": 30}, scope="one", planet="6-79-Egide")
+    _cycle(game_client)
+    assert [(a["planet"], a["name"]) for a in game.actions()] == [("6-79-Egide", "Mine de Fer")]
+    assert list(_planets_state(game_client)) == ["6-79-Egide"]  # Concorde et Strate ne sont même pas visitées
+
+
+def test_an_unknown_single_planet_is_reported_and_nothing_happens(game_client, game):
+    _configure(game_client, mode="live", constructions=MINES, scope="one", planet="Planète fantôme")
+    _cycle(game_client)
+    assert game.actions() == [] and _has(game_client, "introuvable dans la liste des planètes")
+
+
+def test_the_players_order_decides_which_feasible_upgrade_goes_first(game_client, game):
+    # Sur Egide tout est abordable : l'ordre de la liste décide, pas le coût
+    _configure(game_client, mode="live", constructions=[("Centrale Énergétique", 30), ("Mine de Fer", 45)], scope="one", planet="6-79-Egide")
+    _cycle(game_client)
+    assert [a["name"] for a in game.actions()] == ["Centrale Énergétique"]
+
+
+def test_the_first_unaffordable_entries_are_skipped_for_the_first_feasible_one(game_client, game):
+    _configure(game_client, mode="live", scope="one", planet="8-50-Concorde",
+               constructions=[("Mine de Fer", 45), ("Extracteur de Cristal", 45), ("Centrale Énergétique", 30), ("Caserne", 25)])
+    _cycle(game_client)
+    assert [a["name"] for a in game.actions()] == ["Centrale Énergétique"]  # seule abordable avec les ressources de Concorde
+
+
+def test_a_planet_waiting_for_resources_is_rechecked_only_when_its_timer_is_due(game_client, game):
+    _configure(game_client, constructions=[("Mine de Fer", 45)], recheck=5.0)  # à blanc, revérification toutes les 5 min
+    _cycle(game_client)
+    state = _planets_state(game_client)
+    assert state["8-50-Concorde"]["status"] == "pending" and "ressources insuffisantes" in state["8-50-Concorde"]["detail"]
+    assert state["9-169-Strate"]["status"] == "pending"
+    assert state["6-79-Egide"]["status"] == "would_launch"
+    assert all(270 <= row["next_in_s"] <= 340 for row in state.values())  # ≈ 5 min (± quelques %)
+    assert _has(game_client, "en attente") and _has(game_client, "nouvelle vérification dans 5 min")
+
+    runner = _runner(game_client)
+    runner._running = True
+    before = game_client.portal.call(runner.driver.active_planet)
+    cycles = sum("Cycle : 3 planète" in line for line in _logs(game_client))
+    _cycle(game_client)  # immédiatement : aucune planète n'est à revérifier
+    assert game_client.portal.call(runner.driver.active_planet) == before  # le bot n'a même pas changé de planète
+    assert sum("Cycle : 3 planète" in line for line in _logs(game_client)) == cycles
+    assert _has(game_client, "Cycle : rien à vérifier pour l'instant")
+    runner._running = False
+
+    _force_due(game_client)  # le délai est écoulé
+    _cycle(game_client)
+    assert sum("Cycle : 3 planète" in line for line in _logs(game_client)) == cycles + 1
+
+
+def test_the_construction_is_launched_once_the_resources_are_there(game_client, game):
+    _configure(game_client, mode="live", constructions=[("Mine de Fer", 45)], scope="one", planet="9-169-Strate", recheck=5.0)
+    _cycle(game_client)
+    assert game.actions() == [] and _planets_state(game_client)["9-169-Strate"]["status"] == "pending"
+    game.set_stocks(2, Fer=1e9, Cristal=1e9)  # les ressources arrivent
+    _cycle(game_client)
+    assert game.actions() == []  # pas encore l'heure de revérifier
+    _force_due(game_client)
+    _cycle(game_client)
+    assert game.actions() == [{"kind": "building", "planet": "9-169-Strate", "name": "Mine de Fer", "level_after": 41}]
+    assert _planets_state(game_client)["9-169-Strate"]["status"] == "busy"
+
+
+def test_goals_all_reached_are_reported_and_not_rechecked_for_hours(game_client):
+    _configure(game_client, constructions=[("Mine de Fer", 40)], scope="one", planet="6-79-Egide")  # déjà niveau 40
+    _cycle(game_client)
+    state = _planets_state(game_client)["6-79-Egide"]
+    assert state["status"] == "done" and state["next_in_s"] > 5 * 3600
+    assert _has(game_client, "tous les objectifs de la liste sont atteints")
+
+
+def test_changing_the_list_makes_every_planet_due_again(game_client):
+    _configure(game_client, constructions=[("Mine de Fer", 45)], recheck=60.0)
+    _cycle(game_client)
+    cycles = sum("Cycle : 3 planète" in line for line in _logs(game_client))
+    _configure(game_client, constructions=[("Mine de Fer", 46)], recheck=60.0)  # liste modifiée
+    _cycle(game_client)
+    assert sum("Cycle : 3 planète" in line for line in _logs(game_client)) == cycles + 1
+
+
+def test_the_dry_run_decision_is_logged_once_not_at_every_check(game_client):
+    _configure(game_client, constructions=[("Mine de Fer", 45)], scope="one", planet="6-79-Egide", recheck=5.0)
+    for _ in range(3):
+        _cycle(game_client)
+        _force_due(game_client)
+    assert sum("[À blanc] Planète 6-79-Egide" in line for line in _logs(game_client)) == 1
+
+
+def test_next_due_in_tells_the_scheduler_when_to_wake_up(game_client):
+    runner = _runner(game_client)
+    cfg = _configure(game_client, constructions=[("Mine de Fer", 45)], recheck=5.0)["settings"]
+    assert runner.next_due_in(cfg) is None  # rien n'a encore été lu
+    _cycle(game_client)
+    assert 270 <= runner.next_due_in(cfg) <= 340
+    _force_due(game_client)
+    assert runner.next_due_in(cfg) == 0
+
+
+def test_scope_and_timer_are_validated_by_the_api(game_client):
+    bad_scope = {"constructions": {"enabled": True, "scope": "one", "planet": "", "queue": []}}
+    res = game_client.put("/api/automation/settings", json={"settings": bad_scope})
+    assert res.status_code == 422 and any("planète" in e for e in res.json()["detail"])
+    bad_timer = {"constructions": {"enabled": True, "scope": "all", "queue": [], "recheck_minutes": 0}}
+    assert game_client.put("/api/automation/settings", json={"settings": bad_timer}).status_code == 422
 
 
 # --------------------------------------------------------------------------- recherches
@@ -301,7 +427,8 @@ def test_export_is_a_download_without_secrets(game_client):
     _configure(game_client, constructions=MINES)
     res = game_client.get("/api/automation/export")
     assert res.headers["content-disposition"].startswith("attachment")
-    assert res.json()["constructions"]["targets"] == MINES and "password" not in res.text.lower()
+    assert res.json()["constructions"]["queue"] == [{"name": n, "level": lvl} for n, lvl in MINES.items()]
+    assert "password" not in res.text.lower()
 
 
 def test_automation_endpoints_reject_other_sites(game_client):

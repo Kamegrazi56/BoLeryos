@@ -101,9 +101,21 @@ class GameDriver:
         await self._close_planets_window()
         return planets
 
+    async def refresh(self) -> None:
+        """Recharge la page affichée : après une longue attente, l'écran peut montrer des ressources périmées."""
+        section = self.current_section()
+        if not section:
+            return
+        await self.guard()
+        await self.page.reload(wait_until="domcontentloaded", timeout=30_000)
+        await self._wait_section(section, 15)
+
     async def switch_planet(self, planet: PlanetInfo) -> bool:
         if norm(await self.active_planet()) == norm(planet.name):
-            return True
+            # Même planète : changer de planète rafraîchit l'écran, pas ce cas-là — on recharge pour lire des valeurs à jour.
+            await self.refresh()
+            if norm(await self.active_planet()) == norm(planet.name):
+                return True
         await self._open_planets_window()
         button = self.page.locator("button").filter(has_text=planet.name).filter(has_text=planet.coords).first
         if not await button.count():

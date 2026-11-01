@@ -78,14 +78,28 @@
 
     <section class="tabpanel card" id="panel-constructions" role="tabpanel" aria-labelledby="tab-constructions" hidden>
       <label class="switch"><input type="checkbox" id="cons-enabled"> Lancer des améliorations de bâtiments</label>
-      <p class="hint">Indiquez le <strong>niveau demandé</strong> pour chaque bâtiment (vide = ne rien lancer). Le bot améliore un bâtiment tant que son niveau est inférieur, si la planète a les ressources et si le bouton est actif. Une seule construction à la fois par planète ; si l'énergie est négative, les mines sont ignorées.</p>
-      <div id="cons-goals" class="goals"></div>
+
       <h2>Planètes concernées</h2>
-      <div id="cons-planets" class="planets"></div>
-      <h2>Exceptions par planète</h2>
-      <p class="hint">Un niveau demandé propre à une planète remplace le niveau global.</p>
-      <label class="field">Planète <select id="ov-planet"></select></label>
-      <div id="ov-goals" class="goals"></div>
+      <div class="scope">
+        <label class="switch"><input type="radio" name="cons-scope" id="scope-all" value="all"> Toutes les planètes</label>
+        <label class="switch"><input type="radio" name="cons-scope" id="scope-one" value="one"> Une seule planète :</label>
+        <select id="cons-planet" aria-label="Planète concernée"></select>
+      </div>
+      <p id="cons-planet-hint" class="hint"></p>
+
+      <h2>Améliorations souhaitées, par ordre de priorité</h2>
+      <p class="hint">Le bot parcourt cette liste <strong>de haut en bas</strong> sur chaque planète concernée et lance la <strong>première</strong> amélioration réalisable avec les ressources de la planète (niveau inférieur à celui demandé, bouton actif). Une seule construction à la fois par planète ; si l'énergie est négative, les mines sont ignorées.</p>
+      <ol id="cons-queue" class="queue"></ol>
+      <div class="row">
+        <select id="cons-add-name" aria-label="Bâtiment à ajouter"></select>
+        <input id="cons-add-level" type="number" min="0" max="999" placeholder="niveau demandé">
+        <button id="cons-add" type="button" class="small">Ajouter à la liste</button>
+      </div>
+
+      <h2>Timer des constructions en attente</h2>
+      <label class="field">Revérifier toutes les <input id="cons-recheck" type="number" min="1" max="1440" step="1" class="inline"> minutes</label>
+      <p class="hint">Quand aucune amélioration de la liste n'est réalisable sur une planète (ressources insuffisantes), la planète est mise <strong>en attente</strong> et revérifiée toutes les X minutes, sans repasser sur les autres planètes. Une planète où une construction vient d'être lancée est revue à la fin de la construction.</p>
+      <div id="cons-pending"></div>
     </section>
 
     <section class="tabpanel card" id="panel-research" role="tabpanel" aria-labelledby="tab-research" hidden>

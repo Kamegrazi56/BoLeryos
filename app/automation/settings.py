@@ -23,7 +23,14 @@ DEFAULTS: dict[str, Any] = {
         "timezone": "Europe/Paris",
         "windows": [{"start": "08:00", "end": "23:00", "days": [0, 1, 2, 3, 4, 5, 6]}],
     },
-    "constructions": {"enabled": False, "targets": {}, "overrides": {}, "planets": []},
+    "constructions": {
+        "enabled": False,
+        "scope": "all",  # « all » (toutes les planètes) ou « one » (une seule, désignée par `planet`)
+        "planet": "",
+        # Liste par ordre de priorité : le bot lance la PREMIÈRE amélioration réalisable avec les ressources.
+        "queue": [],  # [{"name": "Mine de Fer", "level": 45}, …]
+        "recheck_minutes": 15.0,  # une planète où une amélioration attend des ressources est revérifiée toutes les X min
+    },
     "research": {"enabled": False, "targets": {}, "funding_planet": ""},
     "catalog": {"buildings": [], "research": [], "planets": [], "universes": []},
 }
@@ -49,6 +56,41 @@ def _targets(raw: Any, where: str, errors: list[str]) -> dict[str, int]:
         else:
             out[name] = int(level)
     return out
+
+
+def _queue(raw: Any, errors: list[str]) -> list[dict]:
+    """Liste ordonnée d'améliorations : [{name, level}], sans doublon."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    if not isinstance(raw, list):
+        errors.append("constructions.queue : une liste est attendue")
+        return out
+    if len(raw) > 40:
+        errors.append("constructions.queue : 40 améliorations au plus")
+    for item in raw[:40]:
+        name = str(item.get("name", "")).strip() if isinstance(item, dict) else ""
+        level = item.get("level") if isinstance(item, dict) else None
+        if not name or len(name) > 80:
+            errors.append("constructions.queue : nom invalide")
+        elif isinstance(level, bool) or not isinstance(level, (int, float)) or not 0 <= level <= 999:
+            errors.append(f"constructions.queue : niveau invalide pour « {name} » (0 à 999)")
+        elif norm(name) in seen:
+            errors.append(f"constructions.queue : « {name} » est en double")
+        else:
+            seen.add(norm(name))
+            out.append({"name": name, "level": int(level)})
+    return out
+
+
+def _migrate_constructions(cons: dict) -> dict:
+    """Anciens réglages : niveaux par bâtiment (`targets`) et liste de planètes (`planets`)."""
+    cons = dict(cons)
+    if "queue" not in cons and isinstance(cons.get("targets"), dict):
+        cons["queue"] = [{"name": n, "level": lvl} for n, lvl in cons["targets"].items()]
+    if "scope" not in cons and isinstance(cons.get("planets"), list):
+        planets = [str(p) for p in cons["planets"]]
+        cons["scope"], cons["planet"] = ("one", planets[0]) if len(planets) == 1 else ("all", "")
+    return cons
 
 
 def validate(data: dict, *, allow_live: bool, min_cycle_minutes: float = 1.0) -> dict:
@@ -106,15 +148,26 @@ def validate(data: dict, *, allow_live: bool, min_cycle_minutes: float = 1.0) ->
 
     cons = data.get("constructions", merged["constructions"])
     if isinstance(cons, dict):
-        overrides: dict[str, dict[str, int]] = {}
-        for planet, tg in (cons.get("overrides") or {}).items():
-            overrides[str(planet)] = _targets(tg, f"constructions.overrides.{planet}", errors)
-        planets = [str(p) for p in (cons.get("planets") or [])]
+        cons = _migrate_constructions(cons)
+        scope = cons.get("scope", "all")
+        planet = str(cons.get("planet", "")).strip()[:80]
+        if scope not in ("all", "one"):
+            errors.append("constructions.scope : « all » ou « one »")
+        elif scope == "one" and not planet:
+            errors.append("constructions : choisissez la planète concernée")
+        try:
+            recheck = float(cons.get("recheck_minutes", merged["constructions"]["recheck_minutes"]))
+            if recheck < min_cycle_minutes or recheck > 1440:
+                raise ValueError
+        except (TypeError, ValueError):
+            recheck = merged["constructions"]["recheck_minutes"]
+            errors.append(f"constructions : revérification toutes les {min_cycle_minutes:g} à 1440 minutes")
         merged["constructions"] = {
             "enabled": bool(cons.get("enabled", False)),
-            "targets": _targets(cons.get("targets", {}), "constructions.targets", errors),
-            "overrides": overrides,
-            "planets": planets,
+            "scope": scope if scope in ("all", "one") else "all",
+            "planet": planet if scope == "one" else "",
+            "queue": _queue(cons.get("queue", []), errors),
+            "recheck_minutes": recheck,
         }
     else:
         errors.append("constructions : un objet est attendu")

@@ -236,6 +236,12 @@ def create_mock_game() -> FastAPI:
         g = app.state.game
         return {"logged_in": g["logged_in"], "login_attempts": g["login_attempts"]}
 
+    @app.post("/api/_stocks")
+    async def set_stocks(request: Request):
+        body = await request.json()
+        app.state.game["planets"][int(body["index"])]["stocks"].update(body["stocks"])
+        return {"ok": True}
+
     @app.post("/api/_complete")
     async def complete():
         g = app.state.game
