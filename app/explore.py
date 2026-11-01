@@ -95,6 +95,14 @@ def _looks_like_id(segment: str) -> bool:
     return len(segment) >= 24
 
 
+UUID_ANYWHERE_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+
+def mask_key(name: str) -> str:
+    """Nom d'une clé de stockage ou d'un cookie : les identifiants qu'il contient sont remplacés par {id}."""
+    return UUID_ANYWHERE_RE.sub("{id}", str(name))
+
+
 def mask_path(path: str) -> str:
     return "/".join("{id}" if _looks_like_id(seg) else seg for seg in path.split("/"))
 
@@ -265,9 +273,13 @@ class Recorder:
                 "note": "Structure uniquement : valeurs, jetons, cookies et saisies sont masqués ou absents.",
             },
             "cookies": [
-                {k: c.get(k) for k in ("name", "domain", "path", "httpOnly", "secure", "sameSite")} for c in cookies
+                {
+                    **{k: c.get(k) for k in ("domain", "path", "httpOnly", "secure", "sameSite")},
+                    "name": mask_key(c.get("name", "")),
+                }
+                for c in cookies
             ],
-            "storage_keys": storage,
+            "storage_keys": {kind: [mask_key(k) for k in keys] for kind, keys in storage.items()},
             "pages": self.snapshots,
             "requests": list(self.requests.values()),
             "websockets": [

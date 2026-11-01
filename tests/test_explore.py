@@ -48,6 +48,18 @@ def test_shape_keeps_keys_and_types_but_hides_values():
     assert "3f2b8c1e" not in json.dumps(result)
 
 
+def test_identifiers_inside_storage_and_cookie_names_are_masked():
+    user, universe = "6f85f193-7286-4f32-b390-5ec46c6393ab", "a0000000-0000-0000-0000-000000000002"
+    rec = Recorder()
+    data = rec.export(
+        [{"name": f"sb-{user}-token", "domain": "x.com"}],
+        {"localStorage": [f"aleryos:vote-ready:v1:{universe}:{user}", "aleryos.locale"], "sessionStorage": []},
+    )
+    raw = json.dumps(data)
+    assert user not in raw and universe not in raw
+    assert "aleryos:vote-ready:v1:{id}:{id}" in raw and "aleryos.locale" in raw
+
+
 def test_recorder_is_bounded():
     rec = Recorder()
     for i in range(1000):
