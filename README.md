@@ -20,20 +20,30 @@ Bot d'automatisation pour Aleryos, destiné aux **tests de protection anti-bot r
 
 ## Lancer
 
+**Avec Portainer (Web editor)** : Stacks > Add stack > Web editor, coller le contenu de `docker-compose.yml`, puis Deploy. L'image est construite directement depuis GitHub, sans variable à déclarer.
+
+**Avec Docker en ligne de commande** :
+
 ```bash
 docker compose up --build
 ```
 
-Puis ouvrir http://127.0.0.1:8000. Le port n'est publié que sur la machine locale.
+Puis ouvrir http://127.0.0.1:8000. Le port n'est publié que sur la machine du conteneur (pour y accéder à distance : tunnel SSH, ou remplacer par `"8000:8000"` en protégeant l'interface, voir ci-dessous).
 
-Réglages techniques (variables d'environnement, aucune donnée de joueur) :
+## Réglages
 
-| Variable | Rôle | Défaut |
+Ils se modifient directement dans `app/config.py` (aucune donnée de joueur) :
+
+| Champ | Rôle | Défaut |
 |---|---|---|
-| `LOGIN_URL` | Page contenant le formulaire de connexion (URL de test de l'éditeur possible) | `https://aleryos.com/fr` |
-| `UI_USER` / `UI_PASSWORD` | Protège l'interface du bot par mot de passe (HTTP Basic) | désactivé |
-| `LOGIN_TIMEOUT` | Attente maximale du résultat de la connexion, en secondes | `30` |
-| `EMAIL_SELECTOR`, `PASSWORD_SELECTOR`, `SUBMIT_SELECTOR` | Sélecteurs du formulaire | relevés sur le site |
+| `login_url` | Page contenant le formulaire de connexion (URL de test de l'éditeur possible) | `https://aleryos.com/fr` |
+| `ui_user` / `ui_password` | Protège l'interface du bot par mot de passe (HTTP Basic) | désactivé |
+| `login_timeout` | Attente maximale du résultat de la connexion, en secondes | `30` |
+| `email_selector`, `password_selector`, `submit_selector` | Sélecteurs du formulaire | relevés sur le site |
+
+Les mêmes réglages peuvent aussi être surchargés par variables d'environnement (`LOGIN_URL`, `UI_USER`, `UI_PASSWORD`, `LOGIN_TIMEOUT`, `EMAIL_SELECTOR`, `PASSWORD_SELECTOR`, `SUBMIT_SELECTOR`), mais ce n'est pas nécessaire.
+
+Ne mettez jamais un mot de passe réel dans `app/config.py` si le dépôt est public.
 
 ## Connexion et Cloudflare Turnstile
 
