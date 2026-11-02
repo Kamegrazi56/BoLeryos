@@ -54,6 +54,8 @@ class Settings:
     data_dir: str | None = "/data"
     # Fréquence de vérification de l'écran quand le bot attend (connexion, univers, plage horaire), en secondes.
     poll_seconds: float = 10.0
+    # Autorise les alertes vers une adresse locale ou en http (tests uniquement : sinon https public obligatoire).
+    allow_private_webhooks: bool = False
     # Intervalle minimal autorisé entre deux cycles d'automatisation (minutes).
     min_cycle_minutes: float = 1.0
     # Protection facultative de l'interface du bot (HTTP Basic). Ce n'est PAS

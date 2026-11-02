@@ -10,9 +10,12 @@ Bot d'automatisation pour Aleryos, destiné aux **tests de protection anti-bot r
 
 | Page | Rôle |
 |---|---|
-| `/` | Connexion : le joueur saisit son identifiant (e-mail) et son mot de passe dans des champs texte, avec la vue en direct du navigateur du bot à côté. |
-| `/vision` | Vue en direct du navigateur du bot et journal de tout ce qu'il fait. Le navigateur affiche le site même sans connexion. |
-| `/actions` | Choix des actions à automatiser (vide pour l'instant : à construire après exploration du jeu connecté). |
+| `/` **Accueil** | Un grand interrupteur **ON / OFF**, une phrase qui dit ce que fait le bot, la liste **« Prêt à démarrer ? »** (✓ / ✗ avec un lien « Corriger »), le choix **Simulation / Réel**, un résumé en phrases de ce que le bot aurait fait, les derniers événements et les planètes suivies. |
+| `/ecran` **Écran** | Vue en direct du navigateur du bot, contrôle manuel (jouer soi-même dans la même vue), choix d'univers et exploration de la structure du site. |
+| `/reglages` **Réglages** | 5 onglets : **Compte et univers**, **Constructions**, **Recherches**, **Horaires et rythme**, **Sauvegarde et alertes**. Enregistrement automatique (« Enregistré ✓ »). |
+| `/suivi` **Suivi** | **Journal** lisible (événements importants ; détails techniques en option), **État du jeu** (lecture seule) et **Planètes suivies**. |
+
+Un bandeau permanent indique le mode : **SIMULATION** (vert, le bot ne clique pas) ou **MODE RÉEL** (rouge). Les anciennes adresses `/vision` et `/actions` redirigent vers `/ecran` et `/reglages`. Des pastilles **?** expliquent les réglages moins évidents.
 
 ### Contrôle manuel
 
@@ -44,36 +47,39 @@ Le panneau « Exploration de la structure du site » (désactivé par défaut) e
 
 ### Interrupteur « Bot : ON / OFF »
 
-Un seul interrupteur, dans l'en-tête de chaque page. **ON** : le bot regarde où en est le site et ne fait que ce qui manque :
+Un seul interrupteur, dans l'en-tête de chaque page (et en grand sur l'Accueil). Si des éléments obligatoires manquent (identifiants, univers, quelque chose à faire), une fenêtre les liste avec un bouton « Corriger » et un bouton « Démarrer quand même ». **ON** : le bot regarde où en est le site et ne fait que ce qui manque :
 
 | Écran du site | Ce que fait le bot |
 |---|---|
-| Page de connexion | Se connecte avec les identifiants mémorisés (onglet **Compte** de la page Actions, ou connexion faite une fois à la main sur la page Connexion). |
-| Choix de l'univers | Entre dans l'univers choisi dans l'onglet Compte (cliquer sur un bouton d'univers le mémorise aussi). |
+| Page de connexion | Se connecte avec les identifiants mémorisés (onglet **Compte et univers** de la page Réglages, bouton « Se connecter maintenant » possible, ou connexion faite une fois à la main sur la page Écran). |
+| Choix de l'univers | Entre dans l'univers choisi dans l'onglet Compte et univers (cliquer sur un bouton d'univers le mémorise aussi). |
 | Déjà dans une partie | Saute la connexion et le choix de l'univers, puis travaille. |
 | Session expirée | Se reconnecte tout seul. |
 
 **Garde-fous :** si le site **refuse** les identifiants, le bot n'essaie qu'**une fois** (risque de blocage du compte) et l'indique ; si la connexion n'aboutit pas (contrôle anti-bot ?), 3 essais espacés (1 min, 5 min) puis il demande de se connecter à la main et **reprend seul** dès que le site est connecté ; hors plage horaire, il ne se connecte pas non plus ; le contrôle manuel le met en pause. **OFF** arrête tout (c'est l'arrêt d'urgence).
 
-**Identifiants :** gardés **en mémoire du bot seulement** (jamais sur disque, ni dans le journal, ni dans les réglages exportés, ni renvoyés par l'API). Ils sont oubliés à la déconnexion et perdus au redémarrage du conteneur : il faut alors les ressaisir (onglet Compte). Les conserver au-delà d'un redémarrage est la décision D1 du plan, non prise.
+**Identifiants :** gardés **en mémoire du bot seulement** (jamais sur disque, ni dans le journal, ni dans les réglages exportés, ni renvoyés par l'API). Ils sont oubliés à la déconnexion et perdus au redémarrage du conteneur : il faut alors les ressaisir (Réglages, onglet Compte et univers). Les conserver au-delà d'un redémarrage est la décision D1 du plan, non prise.
 
 
-La page **Actions** pilote le planificateur. Tout y est organisé en **onglets** (Fonctionnement, Plages horaires, Constructions, Recherches, État du jeu, Journal, Réglages) ; la barre du haut, toujours visible, affiche l'état et les boutons **Démarrer** et **Arrêt d'urgence**. Tout est **à blanc par défaut** : le bot lit le jeu et écrit dans le journal ce qu'il *ferait*, sans cliquer. Le mode réel s'active à la main (confirmation) et n'est jamais rétabli après un redémarrage.
+Les réglages sont dans la page **Réglages**. Tout est en **simulation par défaut** : le bot lit le jeu et dit ce qu'il *ferait* (« Il y a 5 min : sur Egide, j'aurais lancé Mine de Fer niveau 41 »), sans cliquer. Le **mode réel** se choisit à la main, depuis l'Accueil, avec une confirmation (avertissement si aucune simulation n'a encore été observée), et n'est jamais rétabli après un redémarrage ni activé par un fichier importé.
+
+Vocabulaire : « fréquence de vérification » (durée aléatoire entre deux passages du bot), « maximum de lancements par jour » ; ces deux réglages et le fuseau horaire sont dans « Avancé » (onglet Horaires et rythme).
 
 | Fonction | Ce que fait le bot |
 |---|---|
 | **Plages horaires** | N'agit que dans les plages choisies (plusieurs plages, jours, fuseau ; plages de nuit possibles). Un cycle en cours s'arrête à la fin de la plage. |
-| **Constructions** | **Toutes les planètes** ou **une seule** (choisie dans une liste). Le joueur compose une **liste d'améliorations par ordre de priorité** (bâtiments choisis dans la liste intégrée des 16, avec un niveau demandé) ; sur chaque planète, le bot lance la **première** réalisable avec les ressources de la planète (niveau inférieur à l'objectif, bouton actif). Une seule construction à la fois par planète ; si l'énergie est négative, les mines sont ignorées. Si rien n'est réalisable, la planète est mise **en attente** et **revérifiée toutes les X minutes** (réglable, 15 par défaut), sans repasser sur les autres planètes ; une planète où une construction vient d'être lancée est revue à sa fin. Le tableau « Planètes suivies » montre l'état et la prochaine vérification de chacune. |
+| **Constructions** | **Toutes les planètes** ou **une seule** (choisie dans une liste). Le joueur compose une **liste d'améliorations par ordre de priorité** (bâtiments choisis dans la liste intégrée des 16, avec un niveau demandé) ; chaque ligne vise soit **« jusqu'au niveau N »** soit **« monter de N niveaux »** (par rapport au niveau vu par le bot la première fois, mémorisé par planète) ; des **listes toutes faites** (les 3 mines ; mines et énergie ; mines, énergie et stockage) donnent un point de départ à modifier. Sur chaque planète, le bot lance la **première** réalisable avec les ressources de la planète (niveau inférieur à l'objectif, bouton actif). Une seule construction à la fois par planète ; si l'énergie est négative, les mines sont ignorées. Si rien n'est réalisable, la planète est mise **en attente** et **revérifiée toutes les X minutes** (réglable, 15 par défaut), sans repasser sur les autres planètes ; une planète où une construction vient d'être lancée est revue à sa fin. Le tableau « Planètes suivies » (page Suivi) montre l'état et la prochaine vérification de chacune. |
 | **Recherches** | Les **23 recherches** du Laboratoire sont intégrées. Même principe avec « Rechercher », sur la planète désignée (ou celle qui a le plus de Fer). |
-| **Lecture de l'état** | Bouton « Lire l'état du jeu » : planètes, ressources, niveaux, coûts, durées, boutons actifs. Sert à vérifier que le bot comprend l'écran. |
+| **Alertes** | Message envoyé à une adresse **https** que vous choisissez (Discord, Slack, Mattermost ou ntfy) quand une amélioration est lancée ou que le bot a besoin de vous (connexion à refaire, contrôle anti-bot, arrêt automatique) ; notifications du navigateur en option. L'adresse est enregistrée à part dans le volume (`/data/notifications.json`, droits 0600), n'est **jamais** réaffichée, exportée ni écrite dans le journal ; les adresses du réseau local sont refusées. Les messages ne contiennent ni identifiant ni mot de passe. Telegram n'est pas géré. |
+| **Lecture de l'état** | Bouton « Lire l'état du jeu » (page Suivi) : planètes, ressources, niveaux, coûts, durées, boutons actifs. Sert à vérifier que le bot comprend l'écran. |
 
-**Sécurités :** plafond de lancements par jour, arrêt d'urgence, contrôle manuel prioritaire, relecture de l'écran avant et après chaque clic (les ressources doivent être débitées), arrêt si deux lancements ne sont pas confirmés ou si une fenêtre inattendue s'ouvre, refus d'agir sur un nombre que le bot ne comprend pas, délais humains.
+**Sécurités :** maximum de lancements par jour, arrêt d'urgence, contrôle manuel prioritaire, relecture de l'écran avant et après chaque clic (les ressources doivent être débitées), arrêt si deux lancements ne sont pas confirmés ou si une fenêtre inattendue s'ouvre, refus d'agir sur un nombre que le bot ne comprend pas, délais humains.
 
 **Réglages :** enregistrés dans le volume Docker `boleryos-data` (`/data/automation.json`, non secret) ; exportables et importables en JSON (un fichier importé ne peut jamais activer le mode réel).
 
 **Pas encore fait :** conservation des identifiants après un redémarrage du conteneur (attend le choix D1 du plan) et expéditions (attendent des captures). Voir [`docs/PLAN.md`](docs/PLAN.md).
 
-**Non vérifié sur le vrai jeu :** la navigation entre les pages Industrie / Installations / Laboratoire et le changement de planète ont été testés sur un faux jeu reconstitué d'après votre export, pas sur Aleryos. Commencez par « Lire l'état du jeu », puis laissez tourner à blanc et relisez le journal avant d'activer le mode réel.
+**Non vérifié sur le vrai jeu :** la navigation entre les pages Industrie / Installations / Laboratoire et le changement de planète ont été testés sur un faux jeu reconstitué d'après votre export, pas sur Aleryos. Commencez par « Lire l'état du jeu », puis laissez tourner en simulation et relisez le journal avant d'activer le mode réel.
 
 ## Données du joueur
 
@@ -121,7 +127,7 @@ Ne mettez jamais un mot de passe réel dans `app/config.py` si le dépôt est pu
 
 ## Connexion et Cloudflare Turnstile
 
-Le site protège la connexion avec Cloudflare Turnstile. Le bot **ne résout pas** de captcha. Pour tester les actions du jeu, utiliser un environnement de test fourni par l'éditeur (`LOGIN_URL` ou règle d'exception). Si Turnstile bloque, le journal l'indique et la page Vision montre l'écran bloquant (le navigateur reste ouvert après un échec).
+Le site protège la connexion avec Cloudflare Turnstile. Le bot **ne résout pas** de captcha. Pour tester les actions du jeu, utiliser un environnement de test fourni par l'éditeur (`LOGIN_URL` ou règle d'exception). Si Turnstile bloque, le journal l'indique et la page Écran montre l'écran bloquant (le navigateur reste ouvert après un échec).
 
 La connexion est considérée comme réussie quand le champ mot de passe disparaît ; l'échec est détecté via un élément `role="alert"` ou un délai dépassé. Ces critères sont à affiner en observant la vraie page après connexion.
 

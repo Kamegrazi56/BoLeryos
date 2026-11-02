@@ -122,3 +122,64 @@ header.top .badge { margin-left: 0; }
 input.inline { width: 90px; display: inline-block; margin: 0 6px; }
 #cons-add-name { width: auto; min-width: 260px; }
 #cons-add-level { width: 150px; }
+
+/* ---------------------------------------------------------------- bandeau de mode */
+.mode-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 6px 20px; font-size: 13px; border-bottom: 1px solid var(--border); }
+.mode-banner.sim { background: rgba(74, 222, 128, .12); color: var(--ok); }
+.mode-banner.live { background: rgba(248, 113, 113, .18); color: var(--err); }
+.mode-banner a { margin-left: auto; color: inherit; text-decoration: underline; }
+
+/* ------------------------------------------------------------------ pages à cartes */
+.page { display: grid; gap: 14px; padding: 16px; max-width: 1100px; margin: 0 auto; }
+.page.wide { max-width: 1280px; }
+.page h2 { font-size: 16px; margin: 0 0 8px; }
+.grid-2 { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.hero { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px; }
+.hero .sentence { flex: 1; min-width: 260px; font-size: 18px; margin: 0; }
+button.power.big { margin: 0; padding: 18px 36px; font-size: 20px; border-width: 3px; }
+.counters { display: flex; flex-wrap: wrap; gap: 8px 24px; color: var(--muted); font-size: 13px; margin: 10px 0 0; }
+.counters strong { color: var(--text); font-size: 15px; }
+.checklist { list-style: none; margin: 0; padding: 0; }
+.checklist li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+.checklist .mark { width: 22px; height: 22px; display: inline-grid; place-items: center; border-radius: 50%; font-weight: 700; font-size: 13px; background: var(--border); }
+.checklist li.ok .mark { background: var(--ok); color: #052212; }
+.checklist li.ko .mark { background: var(--err); color: #230a0a; }
+.checklist li.info .mark { background: var(--border); color: var(--muted); }
+.checklist .detail { color: var(--muted); font-size: 13px; flex: 1; min-width: 200px; }
+.checklist a.button { margin-left: auto; }
+.mode-choice { display: flex; flex-wrap: wrap; gap: 8px; }
+.mode-choice button[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--accent); }
+.mode-choice button.live[aria-pressed="true"] { background: var(--err); color: #230a0a; box-shadow: none; }
+.mode-choice button.sim[aria-pressed="true"] { background: var(--ok); color: #052212; box-shadow: none; }
+.sim-list { list-style: none; margin: 8px 0; padding: 0; }
+.sim-list li { padding: 5px 0; border-bottom: 1px solid var(--border); }
+.sim-list .when { color: var(--muted); margin-right: 8px; }
+.events { list-style: none; margin: 0; padding: 0; font-size: 14px; }
+.events li { padding: 5px 0; border-bottom: 1px solid var(--border); }
+.events li.warn { color: var(--warn); }
+.events li.error { color: var(--err); }
+.events .ts { color: var(--muted); margin-right: 8px; font: 12px ui-monospace, monospace; }
+.empty-state { color: var(--muted); padding: 8px 0; }
+
+/* -------------------------------------------------------- aide « ? » et boîtes de dialogue */
+.help { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-left: 6px; border-radius: 50%; background: var(--border); color: var(--text); font-size: 11px; font-weight: 700; cursor: help; position: relative; vertical-align: middle; }
+.help:hover::after, .help:focus::after { content: attr(data-help); position: absolute; z-index: 20; left: 24px; top: -4px; width: 280px; padding: 8px 10px; border-radius: 6px; background: #000; color: var(--text); border: 1px solid var(--border); font-weight: 400; font-size: 12px; line-height: 1.45; text-align: left; white-space: normal; }
+dialog.modal { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 22px; max-width: 520px; }
+dialog.modal::backdrop { background: rgba(0, 0, 0, .6); }
+dialog.modal ul.missing { padding-left: 18px; }
+dialog.modal ul.missing li { margin: 8px 0; }
+
+/* ------------------------------------------------------------------------ réglages */
+.save-state { margin-left: auto; align-self: center; font-size: 13px; color: var(--muted); min-height: 1.4em; }
+.save-state.ok { color: var(--ok); }
+.save-state.error { color: var(--err); }
+.settings-page { display: flex; flex-direction: column; gap: 10px; padding: 12px; max-width: 1280px; margin: 0 auto; min-height: calc(100vh - 100px); }
+.tabs-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.tabs-row .tabs { flex: 1; }
+details.advanced { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 10px; }
+details.advanced summary { cursor: pointer; color: var(--muted); user-select: none; }
+.preset-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
+.preset-row select { width: auto; }
+.queue-row select { width: auto; min-width: 130px; }
+.queue-row .goal-current { min-width: 120px; }
+.notif-form { display: grid; gap: 10px; max-width: 560px; }

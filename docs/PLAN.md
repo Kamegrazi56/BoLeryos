@@ -33,7 +33,7 @@ Cadre : test de protections anti-bot **avec l'éditeur** (GEEKOS NEXUS), sur un 
 | Interface en direct | Flux d'images poussé par Chrome (CDP), envoyé en binaire. Pleine page. « Contrôle manuel » désactivé par défaut. |
 | Comportement humain | Pauses aléatoires courtes entre les actions, souris progressive, frappe touche par touche. |
 | Hors périmètre | **Aucune résolution de captcha, aucun contournement ni dissimulation du bot** (empreinte, proxys, faux profil d'appareil). Si Turnstile bloque, c'est l'humain qui se connecte. |
-| Actions qui dépensent | **Mode « à blanc » par défaut** : le bot décide et journalise, sans cliquer. Le mode réel s'active explicitement, avec un plafond. |
+| Actions qui dépensent | **Mode « simulation » (à blanc) par défaut** : le bot décide et journalise, sans cliquer. Le mode réel s'active explicitement, avec un plafond. |
 | Connaissance du jeu | On **capture avant de coder** (export de structure, relu par le joueur). On ne devine jamais un sélecteur ni un appel. |
 | Livraison | Branche `claude/bot-login-setup`. Un commit n'est fait que si tous les tests passent. Fusion sur `main` uniquement sur demande. |
 
@@ -96,7 +96,10 @@ Cadre : test de protections anti-bot **avec l'éditeur** (GEEKOS NEXUS), sur un 
 | D9 | Énergie | Si le bilan est négatif : pas d'amélioration de mine ; Centrale Énergétique d'abord si abordable, sinon journal. |
 | D10 | Stockage | Avertissement dans le journal à 95 % de la capacité ; pas d'amélioration automatique des hangars. |
 | D11 | Rythme | Un cycle toutes les 3 à 8 minutes (aléatoire), puis délais humains entre les clics. |
-| D12 | Plafond et mode | 20 améliorations réelles par jour au maximum, arrêt d'urgence toujours visible. À blanc au départ, réel seulement après votre accord. |
+| D12 | Maximum par jour et mode | 20 améliorations réelles par jour au maximum, arrêt d'urgence toujours visible. Simulation au départ, réel seulement après votre accord (jamais restauré, jamais activé par import). |
+| D14 | Interface en 4 pages | **Accueil** (ON/OFF, phrase d'état, « Prêt à démarrer ? », mode, résumé de la simulation, événements), **Écran** (vue en direct, contrôle manuel, exploration), **Réglages** (5 onglets, « Avancé » replié, enregistrement automatique), **Suivi** (journal lisible, état du jeu, planètes suivies). Bandeau de mode permanent. Vocabulaire simple : « Simulation », « fréquence de vérification », « maximum de lancements par jour ». |
+| D15 | Niveaux relatifs | Une ligne de la liste peut viser « jusqu'au niveau N » ou « monter de N niveaux » : niveau de départ lu la première fois que le bot voit le bâtiment sur la planète, mémorisé (`/data/automation-state.json`), objectif = départ + N (il ne glisse pas). Listes toutes faites = regroupements de départ, modifiables. |
+| D16 | Alertes | Webhook https choisi par le joueur (Discord/Slack/Mattermost : JSON ; ntfy : texte) ; événements « amélioration lancée » et « le bot a besoin de moi » ; adresse stockée à part (`/data/notifications.json`, 0600), jamais exportée ni affichée ; adresses locales refusées. Notifications du navigateur en option. Telegram : non fait. |
 
 ## 7. Qualité et sécurité
 

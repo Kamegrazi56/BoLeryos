@@ -53,3 +53,14 @@ def entries(kind: str, discovered: list[str], levels: dict[str, tuple[int, int]]
         low_high = levels.get(norm(name))
         out.append({"name": name, "group": group, "level_min": low_high[0] if low_high else None, "level_max": low_high[1] if low_high else None})
     return out
+
+
+# Raccourcis pour remplir la liste d'améliorations : de simples regroupements de noms, sans prétendre qu'un ordre
+# est « le bon » (le joueur le modifie ensuite). Les niveaux à ajouter sont choisis au moment de l'application.
+MINES = ["Mine de Fer", "Extracteur de Cristal", "Synthétiseur d'Éther"]
+PRESETS = [
+    {"id": "mines", "label": "Les 3 mines", "names": MINES},
+    {"id": "mines_energy", "label": "Les 3 mines et l'énergie", "names": MINES + ["Centrale Énergétique"]},
+    {"id": "mines_energy_storage", "label": "Mines, énergie et stockage", "names": MINES + [
+        "Centrale Énergétique", "Hangar de Fer", "Hangar de Cristal", "Cuve d'Éther"]},
+]

@@ -6,6 +6,7 @@ import copy
 import json
 import os
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -59,9 +60,14 @@ def _targets(raw: Any, where: str, errors: list[str]) -> dict[str, int]:
 
 
 def _queue(raw: Any, errors: list[str]) -> list[dict]:
-    """Liste ordonnée d'améliorations : [{name, level}], sans doublon."""
+    """Liste ordonnée d'améliorations : [{id, name, level, relative}], sans doublon.
+
+    `relative` vrai : `level` est un nombre de niveaux À AJOUTER au niveau de départ (lu la première fois sur chaque
+    planète) ; sinon c'est le niveau à atteindre. `id` identifie l'élément (point de départ conservé quand on le modifie).
+    """
     out: list[dict] = []
     seen: set[str] = set()
+    ids: set[str] = set()
     if not isinstance(raw, list):
         errors.append("constructions.queue : une liste est attendue")
         return out
@@ -70,15 +76,22 @@ def _queue(raw: Any, errors: list[str]) -> list[dict]:
     for item in raw[:40]:
         name = str(item.get("name", "")).strip() if isinstance(item, dict) else ""
         level = item.get("level") if isinstance(item, dict) else None
+        relative = bool(item.get("relative", False)) if isinstance(item, dict) else False
+        low = 1 if relative else 0
         if not name or len(name) > 80:
             errors.append("constructions.queue : nom invalide")
-        elif isinstance(level, bool) or not isinstance(level, (int, float)) or not 0 <= level <= 999:
-            errors.append(f"constructions.queue : niveau invalide pour « {name} » (0 à 999)")
+        elif isinstance(level, bool) or not isinstance(level, (int, float)) or not low <= level <= 999:
+            what = "nombre de niveaux à ajouter (1 à 999)" if relative else "niveau (0 à 999)"
+            errors.append(f"constructions.queue : {what} invalide pour « {name} »")
         elif norm(name) in seen:
             errors.append(f"constructions.queue : « {name} » est en double")
         else:
             seen.add(norm(name))
-            out.append({"name": name, "level": int(level)})
+            item_id = str(item.get("id", ""))[:16] if str(item.get("id", "")).isalnum() else ""
+            if not item_id or item_id in ids:
+                item_id = uuid.uuid4().hex[:8]
+            ids.add(item_id)
+            out.append({"id": item_id, "name": name, "level": int(level), "relative": relative})
     return out
 
 
@@ -223,9 +236,18 @@ class SettingsStore:
         return copy.deepcopy(self._data)
 
     def update(self, data: dict, *, allow_live: bool) -> dict:
+        """Les clés absentes de `data` restent inchangées : une page peut n'envoyer que ce qu'elle modifie."""
+        merged = self.get()
+        for key, value in (data if isinstance(data, dict) else {}).items():
+            if key == "catalog":
+                continue  # entretenu par le bot
+            if key in ("cycle", "schedule", "constructions", "research") and isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = {**merged[key], **value}
+            else:
+                merged[key] = value
         # Le mode réel déjà actif peut rester actif sans nouvelle confirmation.
         cleaned = validate(
-            data, allow_live=allow_live or self._data["mode"] == "live", min_cycle_minutes=self._min_cycle
+            merged, allow_live=allow_live or self._data["mode"] == "live", min_cycle_minutes=self._min_cycle
         )
         cleaned["catalog"] = self._data["catalog"]  # entretenu par le bot, jamais modifié par l'utilisateur
         self._data = cleaned

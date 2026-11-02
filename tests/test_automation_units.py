@@ -127,7 +127,7 @@ def test_store_persists_but_never_restores_live_mode(tmp_path):
     assert store.get()["mode"] == "live"
     again = SettingsStore(str(tmp_path))  # redémarrage
     assert again.loaded_from_disk and again.get()["mode"] == "dry_run"
-    assert again.get()["constructions"]["queue"] == [{"name": "Mine de Fer", "level": 45}]
+    assert _lean(again.get()["constructions"]["queue"]) == [{"name": "Mine de Fer", "level": 45}]
 
 
 def test_store_keeps_live_mode_when_saving_other_fields():
@@ -237,9 +237,14 @@ def test_a_single_planet_must_be_named():
     assert validate({**DEFAULTS, "constructions": {"scope": "all", "planet": "x"}}, allow_live=False)["constructions"]["planet"] == ""
 
 
+def _lean(queue):
+    """La liste sans les identifiants attribués par le serveur."""
+    return [{"name": q["name"], "level": q["level"]} for q in queue]
+
+
 def test_queue_keeps_the_players_order_and_refuses_duplicates_and_bad_levels():
     queue = [{"name": "Centrale Énergétique", "level": 30}, {"name": "Mine de Fer", "level": 45}]
-    assert validate({**DEFAULTS, "constructions": {"queue": queue}}, allow_live=False)["constructions"]["queue"] == queue
+    assert _lean(validate({**DEFAULTS, "constructions": {"queue": queue}}, allow_live=False)["constructions"]["queue"]) == queue
     with pytest.raises(SettingsError, match="double"):
         validate({**DEFAULTS, "constructions": {"queue": [queue[1], {"name": "mine de fer", "level": 3}]}}, allow_live=False)
     with pytest.raises(SettingsError, match="niveau"):
@@ -257,7 +262,7 @@ def test_recheck_timer_is_bounded(value):
 def test_old_settings_are_migrated():
     old = {**DEFAULTS, "constructions": {"enabled": True, "targets": {"Mine de Fer": 45, "Caserne": 20}, "planets": ["6-79-Egide"], "overrides": {"x": {"Mine de Fer": 1}}}}
     cons = validate(old, allow_live=False)["constructions"]
-    assert cons["queue"] == [{"name": "Mine de Fer", "level": 45}, {"name": "Caserne", "level": 20}]
+    assert _lean(cons["queue"]) == [{"name": "Mine de Fer", "level": 45}, {"name": "Caserne", "level": 20}]
     assert (cons["scope"], cons["planet"]) == ("one", "6-79-Egide") and "overrides" not in cons
     several = {**DEFAULTS, "constructions": {"targets": {}, "planets": ["a", "b"]}}
     assert validate(several, allow_live=False)["constructions"]["scope"] == "all"

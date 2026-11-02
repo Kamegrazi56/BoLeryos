@@ -27,6 +27,7 @@ from . import human
 from .automation.runner import AutomationRunner
 from .automation.settings import SettingsStore
 from .config import Settings
+from .notify import Notifier
 from .explore import SNAPSHOT_JS, Recorder, should_skip_host
 
 TURNSTILE_SELECTOR = 'iframe[src*="challenges.cloudflare.com"]'
@@ -117,18 +118,38 @@ class BotSession:
         self.automation = AutomationRunner(
             self, SettingsStore(settings.data_dir, settings.min_cycle_minutes), settings.data_dir
         )
+        self.notifier = Notifier(settings.data_dir, settings.allow_private_webhooks)
         # Exploration de la structure du site (désactivée par défaut)
         self._recorder = Recorder()
         self._snapshot_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------ état
-    def log(self, message: str, level: str = "info") -> None:
+    def log(self, message: str, level: str = "info", event: bool = False, kind: str = "info") -> None:
+        """`event` : fait marquant, affiché dans « Derniers événements » et le journal lisible.
+        `kind` : « launch » (amélioration lancée) ou « attention » (intervention ou arrêt automatique) déclenchent
+        aussi une alerte si l'utilisateur en a configuré une."""
         self._logs.append(
-            {"ts": datetime.now(timezone.utc).strftime("%H:%M:%S"), "level": level, "msg": message}
+            {
+                "ts": datetime.now(timezone.utc).strftime("%H:%M:%S"),
+                "t": time.time(),
+                "level": level,
+                "msg": message,
+                "event": event or kind != "info",
+                "kind": kind,
+            }
         )
+        if kind != "info" and self.notifier.wants(kind):
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:  # hors boucle d'événements : pas d'envoi
+                return
+            self._spawn(self.notifier.send(message))
 
-    def logs(self, limit: int = 50) -> list[dict[str, str]]:
+    def logs(self, limit: int = 50) -> list[dict]:
         return list(self._logs)[-limit:]
+
+    def events(self, limit: int = 10) -> list[dict]:
+        return [e for e in self._logs if e["event"]][-limit:]
 
     def status(self) -> dict[str, str]:
         return {
@@ -168,7 +189,7 @@ class BotSession:
             self._spawn(self._stop_screencast())
             if self._manual:  # personne ne regarde : on rend la main au bot
                 self._manual = False
-                self.log("Contrôle manuel désactivé (plus aucun écran ouvert).")
+                self.log("Contrôle manuel désactivé (plus aucun écran ouvert).", event=True)
 
     def frame(self) -> tuple[int, bytes | None]:
         """Dernière image (JPEG) et son numéro ; le numéro change à chaque nouvelle image."""
@@ -275,7 +296,7 @@ class BotSession:
                 await self._open_home()
                 self._capture_task = asyncio.create_task(self._capture_loop())
             except Exception as exc:  # noqa: BLE001
-                self.log(f"Impossible de démarrer le navigateur ({type(exc).__name__}).", "error")
+                self.log(f"Impossible de démarrer le navigateur ({type(exc).__name__}).", "error", kind="attention")
                 await self._teardown()
 
     async def _start_browser(self) -> None:
@@ -331,11 +352,11 @@ class BotSession:
 
     def set_credentials(self, identifier: str, password: str) -> None:
         self._creds = (identifier, password)
-        self.log(f"Identifiants mémorisés pour la reconnexion automatique ({_mask(identifier)}) : en mémoire seulement.")
+        self.log(f"Identifiants mémorisés pour la reconnexion automatique ({_mask(identifier)}) : en mémoire seulement.", event=True)
 
     def forget_credentials(self) -> None:
         if self._creds:
-            self.log("Identifiants oubliés.")
+            self.log("Identifiants oubliés.", event=True)
         self._creds = None
 
     # ----------------------------------------------------- écran courant du site
@@ -359,10 +380,10 @@ class BotSession:
                 pass
         if screen in ("game", "universes") and self._state is not State.LOGGED_IN:
             self._set(State.LOGGED_IN, "Session détectée : déjà connecté.")
-            self.log("Session détectée : le site est déjà connecté, la connexion est sautée.")
+            self.log("Session détectée : le site est déjà connecté, la connexion est sautée.", event=True)
         elif screen == "login" and self._state is State.LOGGED_IN:
             self._set(State.IDLE, "Session expirée.")
-            self.log("Session expirée : la page de connexion s'affiche à nouveau.", "warn")
+            self.log("Session expirée : la page de connexion s'affiche à nouveau.", "warn", event=True)
         return screen
 
     # ------------------------------------------------------------- connexion
@@ -375,7 +396,7 @@ class BotSession:
             return {**self.status(), "message": "Une automatisation est en cours : coupez le bot (OFF) avant de vous reconnecter."}
         async with self._lock:
             self._set(State.LOGGING_IN, "Connexion en cours…")
-            self.log(f"Connexion demandée pour {_mask(identifier)}{' (automatique)' if supervised else ''}.")
+            self.log(f"Connexion demandée pour {_mask(identifier)}{' (automatique)' if supervised else ''}.", event=True)
             try:
                 await self.ensure_started()
                 if self._page is None or self._page.is_closed():
@@ -387,7 +408,7 @@ class BotSession:
                 self._dirty = True
                 outcome = await self._do_login(identifier, password)
             except Exception as exc:  # noqa: BLE001 - on ne journalise que le type, jamais le contenu
-                self.log(f"Erreur technique pendant la connexion ({type(exc).__name__}).", "error")
+                self.log(f"Erreur technique pendant la connexion ({type(exc).__name__}).", "error", event=True)
                 self._set(State.ERROR, "Erreur technique pendant la connexion.")
                 self.last_login_kind = "technical"
                 return self.status()
@@ -395,11 +416,11 @@ class BotSession:
             if outcome.success:
                 self._creds = (identifier, password)  # en mémoire, pour se reconnecter si la session expire
                 self._set(State.LOGGED_IN, outcome.message)
-                self.log(outcome.message)
+                self.log(outcome.message, event=True)
             else:
                 # Le navigateur reste sur la page pour que la vue en direct montre la cause
                 # (ex. Turnstile). La prochaine tentative repart d'une session vierge.
-                self.log(outcome.message, "error")
+                self.log(outcome.message, "error", event=True)
                 self._set(State.ERROR, outcome.message)
             return self.status()
 
@@ -414,7 +435,7 @@ class BotSession:
                     self.log(f"Erreur pendant la déconnexion ({type(exc).__name__}).", "error")
             self._dirty = False
             self._set(State.IDLE, "Non connecté.")
-            self.log("Déconnexion : session du navigateur effacée.")
+            self.log("Déconnexion : session du navigateur effacée.", event=True)
             return self.status()
 
     async def _do_login(self, identifier: str, password: str) -> _Outcome:
@@ -516,10 +537,10 @@ class BotSession:
         if enabled == self._manual:
             return
         if enabled and self._lock.locked():
-            self.log("Contrôle manuel refusé : une connexion automatique est en cours.", "warn")
+            self.log("Contrôle manuel refusé : une connexion automatique est en cours.", "warn", event=True)
             return
         self._manual = enabled
-        self.log("Contrôle manuel activé : le bot n'agit plus." if enabled else "Contrôle manuel désactivé.")
+        self.log("Contrôle manuel activé : le bot n'agit plus." if enabled else "Contrôle manuel désactivé.", event=True)
 
     async def _set_viewport(self, width: float, height: float) -> None:
         """Adapte la hauteur du navigateur au format de l'écran d'affichage (largeur fixe).
@@ -706,7 +727,7 @@ class BotSession:
                 self.log("Choix d'univers impossible : bouton introuvable.", "error")
                 return self.status()
             names = {u["index"]: u["name"] for u in await self.list_universes()}
-            self.log(f"Choix de l'univers : {names.get(index, index)}.")
+            self.log(f"Choix de l'univers : {names.get(index, index)}.", event=True)
             if index in names:
                 self.automation.store.set_universe(names[index])  # mémorisé : le bot y retournera tout seul
             try:

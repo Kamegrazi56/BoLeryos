@@ -7,6 +7,7 @@ import json
 import os
 import random
 import time
+from collections import deque
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -52,6 +53,9 @@ class AutomationRunner:
         self._unknown_since: float | None = None
         self._universe_attempts = 0
         self._in_game = False
+        self.simulated: deque[dict] = deque(maxlen=30)  # ce que le bot « aurait lancé » en simulation
+        self.simulated_total = 0
+        self._baseline: dict[str, int] = {}  # niveaux de départ des objectifs relatifs : « id|planète » → niveau
         # Constructions : état de chaque planète (en attente de ressources, occupée…) et prochaine vérification
         self._pstate: dict[str, dict] = {}
         self._cons_signature = ""
@@ -69,6 +73,7 @@ class AutomationRunner:
             self._counter = {"date": str(saved["counter"]["date"]), "count": int(saved["counter"]["count"])}
             now = time.time()
             self._busy_until = {k: float(v) for k, v in saved.get("busy", {}).items() if float(v) > now}
+            self._baseline = {str(k): int(v) for k, v in saved.get("baseline", {}).items()}
         except (OSError, ValueError, KeyError, TypeError):
             pass
 
@@ -77,7 +82,7 @@ class AutomationRunner:
             return
         try:
             tmp = self._state_path.with_suffix(".tmp")
-            tmp.write_text(json.dumps({"counter": self._counter, "busy": self._busy_until}), encoding="utf8")
+            tmp.write_text(json.dumps({"counter": self._counter, "busy": self._busy_until, "baseline": self._baseline}), encoding="utf8")
             os.replace(tmp, self._state_path)
         except OSError:
             pass
@@ -133,6 +138,95 @@ class AutomationRunner:
             "planets_state": self.planets_state(),
         }
 
+    # ------------------------------------------------------------ tableau de bord
+    def _record_simulated(self, planet_label: str, decision) -> None:
+        entry = {
+            "t": time.time(), "planet": planet_label.removeprefix("Planète "), "name": decision.card.name,
+            "from": decision.card.level, "to": decision.card.level + 1, "target": decision.target,
+        }
+        last = self.simulated[-1] if self.simulated else None
+        if last and (last["planet"], last["name"], last["from"]) == (entry["planet"], entry["name"], entry["from"]):
+            last["t"] = entry["t"]  # même décision qu'au contrôle précédent : on ne la compte qu'une fois
+            return
+        self.simulated.append(entry)
+        self.simulated_total += 1
+
+    @staticmethod
+    def _duration_text(seconds: float | None) -> str:
+        if seconds is None:
+            return ""
+        return f"{seconds / 60:.0f} min" if seconds >= 90 else f"{seconds:.0f} s"
+
+    def describe(self, cfg: dict | None = None) -> str:
+        """Une phrase qui dit ce que fait le bot en ce moment."""
+        cfg = cfg or self._cfg()
+        if not self._running:
+            return "Le bot est arrêté. Cliquez sur ON pour le démarrer."
+        active, window = self.in_window(cfg)
+        if not active:
+            return f"Le bot est en veille : hors de la plage horaire ({window})."
+        if self.waiting:
+            return f"Le bot attend : {self.waiting}."
+        if self.cycle_running:
+            return "Le bot est en train de vérifier vos planètes."
+        cons, research = cfg["constructions"], cfg["research"]
+        if not ((cons["enabled"] and cons["queue"]) or (research["enabled"] and research["targets"])):
+            return "Le bot est prêt mais n'a rien à faire : activez les constructions ou les recherches dans Réglages."
+        rows = self.planets_state()
+        if not (cons["enabled"] and cons["queue"]):
+            return "Le bot surveille vos recherches."
+        if not rows:
+            return "Le bot n'a pas encore vérifié de planète."
+        counts: dict[str, int] = {}
+        for row in rows:
+            counts[row["status"]] = counts.get(row["status"], 0) + 1
+        labels = {
+            "pending": "{n} en attente de ressources", "busy": "{n} en construction",
+            "would_launch": "{n} où il lancerait une amélioration (simulation)", "done": "{n} avec tous les objectifs atteints",
+            "idle": "{n} sans rien à lancer", "retry": "{n} à réessayer",
+        }
+        parts = [labels[k].format(n=n) for k, n in counts.items() if k in labels]
+        upcoming = [r["next_in_s"] for r in rows if r["status"] in ("pending", "would_launch", "idle", "retry")]
+        nxt = f" Prochaine vérification dans {self._duration_text(min(upcoming))}." if upcoming else ""
+        return f"Le bot surveille {len(rows)} planète(s) : {', '.join(parts)}.{nxt}"
+
+    def readiness(self, cfg: dict | None = None) -> dict:
+        """Liste « Prêt à démarrer ? » : chaque étape, son état et où la corriger."""
+        cfg = cfg or self._cfg()
+        b = self.bot
+        connected = b._state.value == "logged_in"
+        in_game = b._page is not None and not b._page.is_closed() and "/game/" in b._page.url
+        cons, research = cfg["constructions"], cfg["research"]
+        work = []
+        if cons["enabled"] and cons["queue"]:
+            work.append(f"{len(cons['queue'])} amélioration(s) de bâtiment")
+        if research["enabled"] and research["targets"]:
+            work.append(f"{len(research['targets'])} recherche(s)")
+        steps = [
+            {"id": "account", "label": "Identifiants mémorisés", "required": True, "link": "/reglages#account",
+             "ok": b.has_credentials() or connected,
+             "detail": f"mémorisés ({b.credentials_hint()})" if b.has_credentials() else "déjà connecté" if connected else "à saisir : sans eux, le bot ne peut pas se connecter tout seul"},
+            {"id": "universe", "label": "Univers choisi", "required": True, "link": "/reglages#account",
+             "ok": bool(cfg["universe"]) or in_game,
+             "detail": cfg["universe"] or ("déjà dans une partie" if in_game else "à choisir (il apparaît dans la liste dès que le bot a vu la page de choix)")},
+            {"id": "work", "label": "Quelque chose à faire", "required": True, "link": "/reglages#constructions",
+             "ok": bool(work), "detail": " et ".join(work) if work else "ajoutez des améliorations ou des recherches et activez-les"},
+            {"id": "mode", "label": "Mode", "required": False, "link": "/", "ok": True,
+             "detail": "RÉEL : le bot clique et dépense" if cfg["mode"] == "live" else "Simulation : le bot ne clique pas (recommandé pour commencer)"},
+            {"id": "schedule", "label": "Plage horaire", "required": False, "link": "/reglages#schedule", "ok": True,
+             "detail": self.in_window(cfg)[1] if cfg["schedule"]["enabled"] else "aucune restriction"},
+        ]
+        return {"ready": all(step["ok"] for step in steps if step["required"]), "steps": steps}
+
+    def dashboard(self) -> dict:
+        cfg = self._cfg()
+        return {
+            "sentence": self.describe(cfg),
+            "readiness": self.readiness(cfg),
+            "simulated": list(self.simulated)[-10:],
+            "simulated_total": self.simulated_total,
+        }
+
     # -------------------------------------------------------------- contrôle
     async def start(self) -> None:
         if self._running:
@@ -145,11 +239,13 @@ class AutomationRunner:
         self.waiting = ""
         self._pstate.clear()
         self._last_notes.clear()
-        self.bot.log(f"Bot activé (ON) — mode {'RÉEL' if self._cfg()['mode'] == 'live' else 'à blanc'}.")
+        self.simulated.clear()
+        self.simulated_total = 0
+        self.bot.log(f"Bot activé (ON) — mode {'RÉEL' if self._cfg()['mode'] == 'live' else 'simulation'}.", event=True)
         await self.bot.ensure_started()  # le navigateur tourne même si aucun écran de l'interface n'est ouvert
         self._task = asyncio.create_task(self._loop())
 
-    async def stop(self, reason: str = "demande de l'utilisateur") -> None:
+    async def stop(self, reason: str = "demande de l'utilisateur", *, automatic: bool = False) -> None:
         if not self._running and self._task is None:
             return
         self._running = False
@@ -161,7 +257,7 @@ class AutomationRunner:
         self.idle.set()
         self._next_run_at = None
         self.waiting = ""
-        self.bot.log(f"Bot désactivé (OFF) — {reason}.", "warn")
+        self.bot.log(f"Bot désactivé (OFF) — {reason}.", "warn", event=True, kind="attention" if automatic else "info")
 
     async def guard(self) -> None:
         """Point de contrôle appelé avant chaque action : interrompt le cycle si les conditions ne sont plus réunies."""
@@ -194,11 +290,11 @@ class AutomationRunner:
         await asyncio.sleep(seconds)
         self._next_run_at = None
 
-    def _note(self, key: str, message: str, level: str = "info") -> None:
+    def _note(self, key: str, message: str, level: str = "info", event: bool = False, kind: str = "info") -> None:
         """Écrit dans le journal sauf si c'est le même message que la fois précédente pour cette clé."""
         if self._last_notes.get(key) != message:
             self._last_notes[key] = message
-            self.bot.log(message, level)
+            self.bot.log(message, level, event=event, kind=kind)
 
     async def _loop(self) -> None:
         errors = 0
@@ -207,7 +303,7 @@ class AutomationRunner:
             active, text = self.in_window(cfg)
             if self._window_active != active:
                 self._window_active = active
-                self.bot.log(f"Plage horaire : {'active' if active else 'inactive'} ({text}).")
+                self.bot.log(f"Plage horaire : {'active' if active else 'inactive'} ({text}).", event=True)
             poll = self.bot._settings.poll_seconds
             if not active:
                 await self._sleep(poll * 3)
@@ -220,7 +316,7 @@ class AutomationRunner:
                 problem = f"vérification de l'écran impossible ({type(exc).__name__})"
             self.waiting = problem or ""
             if problem:
-                self._note("precondition", f"En attente : {problem}.")
+                self._note("precondition", f"En attente : {problem}.", event=True)
                 await self._sleep(poll)
                 continue
             self._last_notes.pop("precondition", None)
@@ -228,14 +324,14 @@ class AutomationRunner:
                 await self.run_cycle(cfg)
                 errors = 0
             except Interrupted as exc:
-                self.bot.log(f"Cycle interrompu : {exc}.", "warn")
+                self.bot.log(f"Cycle interrompu : {exc}.", "warn", event=True)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
                 errors += 1
-                self.bot.log(f"Erreur pendant le cycle ({type(exc).__name__}) : {str(exc)[:200]}", "error")
+                self.bot.log(f"Erreur pendant le cycle ({type(exc).__name__}) : {str(exc)[:200]}", "error", event=True)
                 if errors >= 3:
-                    await self.stop("3 erreurs consécutives")
+                    await self.stop("3 erreurs consécutives", automatic=True)
                     return
             lo, hi = cfg["cycle"]["min_minutes"], cfg["cycle"]["max_minutes"]
             wait = random.uniform(lo, hi) * 60
@@ -270,7 +366,7 @@ class AutomationRunner:
             if not self._in_game:  # arrivée (ou retour) dans la partie
                 self._in_game = True
                 self._last_notes.pop("idle-cycle", None)
-                b.log("Dans la partie : le bot travaille.")
+                b.log("Dans la partie : le bot travaille.", event=True)
             return None
         if screen == "universes":
             return await self._pick_universe(cfg)
@@ -298,7 +394,7 @@ class AutomationRunner:
         self._universe_attempts += 1
         if self._universe_attempts > 4:
             return "l'entrée dans l'univers n'aboutit pas : entrez-y à la main (contrôle manuel) ; le bot reprendra seul"
-        b.log(f"Page de choix de l'univers : entrée dans « {match['name']} ».")
+        b.log(f"Page de choix de l'univers : entrée dans « {match['name']} ».", event=True)
         await b.enter_universe(match["index"])
         return "entrée dans l'univers en cours"
 
@@ -320,14 +416,14 @@ class AutomationRunner:
         self._login_failures += 1
         if kind == "refused":  # identifiants refusés : ne pas réessayer (risque de blocage du compte)
             self._login_blocked = "connexion refusée par le site : corrigez les identifiants (onglet Compte), puis OFF puis ON"
-            b.log("Reconnexion automatique suspendue : le site a refusé les identifiants.", "error")
+            b.log("Reconnexion automatique suspendue : le site a refusé les identifiants (corrigez-les dans Réglages › Compte).", "error", kind="attention")
         elif self._login_failures >= 3:
             self._login_blocked = "intervention requise (contrôle anti-bot ?) : connectez-vous à la main (page Connexion, contrôle manuel) ; le bot reprendra seul"
-            b.log("Trois tentatives de connexion sans résultat : intervention manuelle requise.", "error")
+            b.log("Trois tentatives de connexion sans résultat : connectez-vous à la main (page Écran, contrôle manuel) ; le bot reprendra seul.", "error", kind="attention")
         else:
             delay = (60, 300)[min(self._login_failures - 1, 1)]
             self._next_login_at = time.monotonic() + delay
-            b.log(f"Connexion sans résultat : nouvelle tentative dans {delay} s.", "warn")
+            b.log(f"Connexion sans résultat : nouvelle tentative dans {delay} s.", "warn", event=True)
         return self._login_blocked or "connexion non aboutie"
 
     # ------------------------------------------------------------------- cycle
@@ -354,7 +450,7 @@ class AutomationRunner:
             planets = await self.driver.list_planets()
             self._known_planets = planets
             self.store.add_catalog("planets", [p.name for p in planets])
-            self.bot.log(f"Cycle : {len(planets)} planète(s) lues ({'réel' if live else 'à blanc'}).")
+            self.bot.log(f"Cycle : {len(planets)} planète(s) lues ({'réel' if live else 'simulation'}).")
             if research_on:
                 await self._research_step(cfg, planets, live)
             if cons["enabled"] and cons["queue"]:
@@ -443,16 +539,18 @@ class AutomationRunner:
         }
         view["planets"] = list(cfg["catalog"]["planets"])
         view["universes"] = list(cfg["catalog"]["universes"])
+        view["presets"] = catalog_module.PRESETS
         return view
 
     async def _launch_decision(self, cfg: dict, live: bool, note_key: str, key: str, decision, cards, planet_label: str) -> str:
         """Journalise la décision et, en mode réel, clique. Retourne « would_launch », « launched », « capped » ou « failed »."""
         section = next(s for s, c in cards if c is decision.card)
         if not live:
-            self._note(note_key, f"[À blanc] {planet_label} : je lancerais {decision.describe()}.")
+            self._record_simulated(planet_label, decision)
+            self._note(note_key, f"[Simulation] {planet_label} : je lancerais {decision.describe()}.", event=True)
             return "would_launch"
         if self.launched_today(cfg) >= cfg["daily_cap"]:
-            self._note("cap", f"Plafond quotidien atteint ({cfg['daily_cap']}) : aucune nouvelle action aujourd'hui.", "warn")
+            self._note("cap", f"Maximum de lancements atteint ({cfg['daily_cap']} par jour) : plus aucune action aujourd'hui.", "warn", event=True)
             return "capped"
         self._last_notes.pop("cap", None)
         self.bot.log(f"{planet_label} : je lance {decision.describe()}.")
@@ -462,12 +560,14 @@ class AutomationRunner:
             self._count_launch(cfg)
             self._mark_busy(key, decision.card)
             self._last_notes.pop(note_key, None)
-            self.bot.log(f"{planet_label} : lancement confirmé ({result.detail}) — {self.launched_today(cfg)}/{cfg['daily_cap']} aujourd'hui.")
+            self.bot.log(
+                f"{planet_label} : {decision.card.name} lancée (niveau {decision.card.level} → {decision.card.level + 1}) — "
+                f"{self.launched_today(cfg)}/{cfg['daily_cap']} aujourd'hui.", event=True, kind="launch")
             return "launched"
         self._unconfirmed_streak += 1
-        self.bot.log(f"{planet_label} : lancement non confirmé ({result.detail}).", "warn")
+        self.bot.log(f"{planet_label} : lancement non confirmé ({result.detail}).", "warn", event=True)
         if self._unconfirmed_streak >= 2:
-            await self.stop("deux lancements consécutifs non confirmés")
+            await self.stop("deux lancements consécutifs non confirmés", automatic=True)
             raise Interrupted("lancements non confirmés")
         return "failed"
 
@@ -481,6 +581,24 @@ class AutomationRunner:
             self._note(f"{label}:{key}", f"{planet_label} : rien à lancer ({outcome.summary()}).")
             return False
         return await self._launch_decision(cfg, live, f"{label}:{key}", key, outcome.decision, cards, planet_label) == "launched"
+
+    def _resolve_queue(self, cons: dict, cards: list[Card], planet_key: str) -> list[tuple[str, int]]:
+        """Objectifs en niveaux absolus. « Monter de N » = niveau de départ de la planète + N ; le niveau de départ est
+        lu la première fois qu'on voit le bâtiment sur la planète, puis conservé."""
+        by_name = {norm(c.name): c for c in cards}
+        resolved: list[tuple[str, int]] = []
+        for item in cons["queue"]:
+            if not item["relative"]:
+                resolved.append((item["name"], item["level"]))
+                continue
+            key = f"{item['id']}|{planet_key}"
+            card = by_name.get(norm(item["name"]))
+            if key not in self._baseline and card is not None and card.level is not None:
+                self._baseline[key] = card.level
+                self._save_state()
+            if key in self._baseline:
+                resolved.append((item["name"], self._baseline[key] + item["level"]))
+        return resolved
 
     async def _read_buildings(self, planet: PlanetInfo, names: list[str]):
         """Ouvre les pages Industrie puis Infrastructures (seulement si nécessaire) et lit les cartes de la planète."""
@@ -503,7 +621,9 @@ class AutomationRunner:
         """Pour chaque planète à vérifier : lance la PREMIÈRE amélioration réalisable de la liste, sinon met la planète
         en attente et la revérifiera dans `recheck_minutes`."""
         cons = cfg["constructions"]
-        queue = [(q["name"], q["level"]) for q in cons["queue"]]
+        names = [q["name"] for q in cons["queue"]]
+        ids = {q["id"] for q in cons["queue"]}
+        self._baseline = {k: v for k, v in self._baseline.items() if k.split("|")[0] in ids}  # éléments retirés de la liste
         scope = self._in_scope(cons, planets)
         if cons["scope"] == "one" and not scope:
             self._note("cons:planet", f"Constructions : planète « {cons['planet']} » introuvable dans la liste des planètes.", "warn")
@@ -518,21 +638,22 @@ class AutomationRunner:
             if self._busy(key):
                 remaining = self._busy_until[key] - time.time()
                 self._set_pstate(key, planet.name, "busy", max(5.0, remaining), "construction en cours")
-                self._note(f"busy:{key}", f"{label} : construction en cours, nouvelle vérification après {datetime.fromtimestamp(self._busy_until[key]):%H:%M}.")
+                self._note(f"busy:{key}", f"{label} : construction en cours, nouvelle vérification après {datetime.fromtimestamp(self._busy_until[key]):%H:%M}.", event=True)
                 continue
             self._last_notes.pop(f"busy:{key}", None)
             try:
                 if not await self.driver.switch_planet(planet):
                     self.bot.log(f"{label} : changement de planète non confirmé, planète ignorée.", "warn")
                     continue
-                cards, resources = await self._read_buildings(planet, [n for n, _ in queue])
+                cards, resources = await self._read_buildings(planet, names)
                 if resources is None:
                     continue
+                queue = self._resolve_queue(cons, [c for _, c in cards], key)
                 outcome = decide_ordered([c for _, c in cards], resources, queue)
                 await self._settle_planet(cfg, live, planet, key, label, outcome, cards, recheck)
             except GameUiError as exc:
                 self.bot.log(f"{label} : {exc}.", "error")
-                await self.stop("écran du jeu inattendu")
+                await self.stop("écran du jeu inattendu", automatic=True)
                 raise Interrupted(str(exc)) from exc
             await human.think(self.bot._settings)
 
@@ -550,10 +671,10 @@ class AutomationRunner:
         elif outcome.pending:
             detail = " ; ".join(outcome.pending[:3])
             self._set_pstate(key, planet.name, "pending", wait, detail)
-            self._note(f"c:{key}", f"{label} : en attente ({detail}) — nouvelle vérification dans {minutes} min.")
+            self._note(f"c:{key}", f"{label} : en attente ({detail}) — nouvelle vérification dans {minutes} min.", event=True)
         elif outcome.reached and not outcome.notes:
             self._set_pstate(key, planet.name, "done", 6 * 3600, "objectifs atteints")
-            self._note(f"c:{key}", f"{label} : tous les objectifs de la liste sont atteints.")
+            self._note(f"c:{key}", f"{label} : tous les objectifs de la liste sont atteints.", event=True)
         else:
             self._set_pstate(key, planet.name, "idle", wait, outcome.summary())
             self._note(f"c:{key}", f"{label} : rien à lancer ({outcome.summary()}) — nouvelle vérification dans {minutes} min.")
@@ -591,7 +712,7 @@ class AutomationRunner:
             await self._decide_and_act(cfg, live, "r", "research", targets, cards, page_state.resources, "Rechercher", label)
         except GameUiError as exc:
             self.bot.log(f"{label} : {exc}.", "error")
-            await self.stop("écran du jeu inattendu")
+            await self.stop("écran du jeu inattendu", automatic=True)
             raise Interrupted(str(exc)) from exc
 
     # ------------------------------------------------------------- diagnostic

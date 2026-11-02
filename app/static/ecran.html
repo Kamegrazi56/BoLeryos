@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BoLeryos | Connexion</title>
+  <title>BoLeryos | Écran</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -11,34 +11,20 @@
   <header class="top">
     <strong>BOLERYOS</strong>
     <nav>
-      <a href="/" class="active">Connexion</a>
-      <a href="/vision">Vision</a>
-      <a href="/actions">Actions</a>
+      <a href="/">Accueil</a>
+      <a href="/ecran">Écran</a>
+      <a href="/reglages">Réglages</a>
+      <a href="/suivi">Suivi</a>
     </nav>
     <button id="power" class="power off" type="button" aria-pressed="false">Bot : OFF</button>
     <span id="badge" class="badge idle">Non connecté</span>
+    <button id="logout" class="secondary" type="button" title="Ferme la session du navigateur du bot et oublie les identifiants mémorisés">Se déconnecter</button>
   </header>
-  <div class="app-grid login">
-    <aside class="card side">
-      <h1 style="font-size:20px; margin-bottom:4px">Connexion au jeu</h1>
-      <form id="login-form" autocomplete="off">
-        <label for="identifier">Identifiant (adresse e-mail du compte)</label>
-        <input id="identifier" name="identifier" type="text" inputmode="email" autocomplete="off" spellcheck="false" required>
-        <label for="password">Mot de passe</label>
-        <input id="password" name="password" type="password" autocomplete="off" required>
-        <div style="margin-top:16px">
-          <button id="submit" type="submit">Se connecter</button>
-        </div>
-        <div id="msg" class="msg" role="status"></div>
-      </form>
-      <p class="hint" style="margin-top:6px">Vos identifiants restent <strong>en mémoire du bot</strong> (jamais écrits sur disque) pour se reconnecter si la session expire. Ils sont oubliés à la déconnexion et au redémarrage du conteneur. Avec l'interrupteur <strong>Bot : ON</strong>, le bot se connecte seul quand la page de connexion s'affiche, et saute cette étape sinon.</p>
-      <h2 style="margin-top:14px">Journal du bot</h2>
-      <div id="log" class="log"></div>
-    </aside>
+  <div class="app-grid vision">
     <section class="card stage">
       <div class="toolbar">
         <span>Page : <span id="page">-</span> · <span id="message"></span></span>
-        <label class="switch"><input type="checkbox" id="manual"> Contrôle manuel</label>
+        <label class="switch" title="Pour jouer vous-même dans cette vue (le bot se met en pause)"><input type="checkbox" id="manual"> Contrôle manuel</label>
       </div>
       <div class="tools">
         <span id="universes" class="universes"></span>
@@ -56,9 +42,12 @@
       </div>
       <div id="screen" class="screen" tabindex="0"><span>Démarrage du navigateur du bot…</span></div>
     </section>
+    <aside class="card side">
+      <h1>Journal du bot</h1>
+      <div id="log" class="log"></div>
+    </aside>
   </div>
-  <script src="/static/power.js"></script>
+  <script src="/static/shell.js"></script>
   <script src="/static/vision.js"></script>
-  <script src="/static/login.js"></script>
 </body>
 </html>

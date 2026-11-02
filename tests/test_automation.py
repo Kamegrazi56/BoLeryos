@@ -121,8 +121,8 @@ def test_dry_run_decides_and_logs_but_never_clicks(game_client, game):
     _configure(game_client, constructions={**MINES, "Centrale Énergétique": 30})
     _cycle(game_client)
     assert game.actions() == []
-    assert _has(game_client, "[À blanc] Planète 8-50-Concorde : je lancerais Centrale Énergétique")
-    assert _has(game_client, "[À blanc] Planète 6-79-Egide : je lancerais Mine de Fer")  # la première de la liste réalisable
+    assert _has(game_client, "[Simulation] Planète 8-50-Concorde : je lancerais Centrale Énergétique")
+    assert _has(game_client, "[Simulation] Planète 6-79-Egide : je lancerais Mine de Fer")  # la première de la liste réalisable
     assert _has(game_client, "Planète 9-169-Strate : en attente")
 
 
@@ -137,7 +137,7 @@ def test_live_mode_launches_the_first_feasible_upgrade_of_the_list_and_confirms_
     _configure(game_client, mode="live", constructions=MINES)  # pas de Centrale visée
     _cycle(game_client)
     assert game.actions() == [{"kind": "building", "planet": "6-79-Egide", "name": "Mine de Fer", "level_after": 41}]
-    assert _has(game_client, "lancement confirmé")
+    assert _has(game_client, "Mine de Fer lancée (niveau 40 → 41)")
     assert game_client.get("/api/automation").json()["status"]["launched_today"] == 1
 
 
@@ -161,7 +161,7 @@ def test_daily_cap_stops_new_launches(game_client, game):
     _configure(game_client, mode="live", cap=1, constructions={**MINES, "Centrale Énergétique": 30})
     _cycle(game_client)
     assert len(game.actions()) == 1
-    assert _has(game_client, "Plafond quotidien atteint")
+    assert _has(game_client, "Maximum de lancements atteint")
 
 
 def test_negative_energy_blocks_mines_but_allows_the_power_plant(game_client, game):
@@ -268,7 +268,7 @@ def test_the_dry_run_decision_is_logged_once_not_at_every_check(game_client):
     for _ in range(3):
         _cycle(game_client)
         _force_due(game_client)
-    assert sum("[À blanc] Planète 6-79-Egide" in line for line in _logs(game_client)) == 1
+    assert sum("[Simulation] Planète 6-79-Egide" in line for line in _logs(game_client)) == 1
 
 
 def test_next_due_in_tells_the_scheduler_when_to_wake_up(game_client):
@@ -293,7 +293,7 @@ def test_scope_and_timer_are_validated_by_the_api(game_client):
 def test_research_runs_on_the_richest_planet_in_live_mode_only(game_client, game):
     _configure(game_client, research={"Technologie laser": 25})
     _cycle(game_client)
-    assert game.actions() == [] and _has(game_client, "[À blanc] Recherches (planète 6-79-Egide)")
+    assert game.actions() == [] and _has(game_client, "[Simulation] Recherches (planète 6-79-Egide)")
     _configure(game_client, mode="live", research={"Technologie laser": 25})
     _cycle(game_client)
     assert game.actions() == [{"kind": "research", "planet": "6-79-Egide", "name": "Technologie laser", "level_after": 23}]
@@ -419,7 +419,7 @@ def test_live_mode_requires_confirmation_through_the_api(game_client):
 
 
 def test_invalid_settings_return_clear_errors(game_client):
-    res = game_client.put("/api/automation/settings", json={"settings": {"daily_cap": 0, "constructions": {"targets": {"Mine": 5000}}}})
+    res = game_client.put("/api/automation/settings", json={"settings": {"daily_cap": 0, "constructions": {"queue": [{"name": "Mine", "level": 5000}]}}})
     assert res.status_code == 422 and len(res.json()["detail"]) >= 2
 
 
@@ -427,7 +427,7 @@ def test_export_is_a_download_without_secrets(game_client):
     _configure(game_client, constructions=MINES)
     res = game_client.get("/api/automation/export")
     assert res.headers["content-disposition"].startswith("attachment")
-    assert res.json()["constructions"]["queue"] == [{"name": n, "level": lvl} for n, lvl in MINES.items()]
+    assert [(q["name"], q["level"]) for q in res.json()["constructions"]["queue"]] == list(MINES.items())
     assert "password" not in res.text.lower()
 
 

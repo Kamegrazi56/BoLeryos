@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, SecretStr
 
@@ -22,6 +22,7 @@ from .automation.runner import Interrupted
 from .automation.settings import SettingsError
 from .bot import BotSession
 from .config import Settings, load_settings
+from .notify import FORMATS, NotifyError
 
 STATIC_DIR = Path(__file__).parent / "static"
 NO_STORE = {"Cache-Control": "no-store"}
@@ -53,6 +54,13 @@ class AutomationSettingsRequest(BaseModel):
 class CredentialsRequest(BaseModel):
     identifier: str = Field(min_length=1, max_length=254)
     password: SecretStr = Field(min_length=1, max_length=256)
+
+
+class NotificationsRequest(BaseModel):
+    # None : conserver l'adresse actuelle ; chaîne vide : la supprimer.
+    url: str | None = Field(default=None, max_length=500)
+    format: str = "json"
+    events: dict[str, bool] = Field(default_factory=dict)
 
 
 class RecordingRequest(BaseModel):
@@ -197,6 +205,57 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         bot.forget_credentials()
         return JSONResponse({"has_credentials": False, "hint": ""}, headers=NO_STORE)
 
+    @app.post("/api/account/login")
+    async def api_account_login(request: Request):
+        """Connexion immédiate avec les identifiants mémorisés (sans passer par l'interrupteur)."""
+        _check_origin(request)
+        if not bot._creds:
+            raise HTTPException(409, "Aucun identifiant en mémoire : saisissez-les d'abord.")
+        identifier, password = bot._creds
+        return JSONResponse(await bot.login(identifier, password), headers=NO_STORE)
+
+    # --- Tableau de bord, événements, alertes -----------------------------------------
+    @app.get("/api/dashboard")
+    async def api_dashboard():
+        return JSONResponse(
+            {**bot.status(), **bot.automation.dashboard(), "events": bot.events(8)}, headers=NO_STORE
+        )
+
+    @app.get("/api/events")
+    async def api_events(after: float = 0.0, limit: int = 20):
+        events = [e for e in bot.events(200) if e["t"] > after][-max(1, min(limit, 100)):]
+        return JSONResponse(events, headers=NO_STORE)
+
+    @app.get("/api/notifications")
+    async def api_notifications():
+        return JSONResponse(bot.notifier.public_config(), headers=NO_STORE)
+
+    @app.put("/api/notifications")
+    async def api_notifications_put(body: NotificationsRequest, request: Request):
+        _check_origin(request)
+        if body.format not in FORMATS:
+            raise HTTPException(422, "Format inconnu.")
+        try:
+            bot.notifier.configure(url=body.url, fmt=body.format, events=body.events)
+        except NotifyError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        bot.log("Alertes configurées." if bot.notifier.configured else "Alertes désactivées.", event=True)
+        return JSONResponse(bot.notifier.public_config(), headers=NO_STORE)
+
+    @app.delete("/api/notifications")
+    async def api_notifications_delete(request: Request):
+        _check_origin(request)
+        bot.notifier.clear()
+        return JSONResponse(bot.notifier.public_config(), headers=NO_STORE)
+
+    @app.post("/api/notifications/test")
+    async def api_notifications_test(request: Request):
+        _check_origin(request)
+        if not bot.notifier.configured:
+            raise HTTPException(409, "Aucune adresse d'alerte configurée.")
+        ok = await bot.notifier.send("BoLeryos : message de test. Les alertes fonctionnent.")
+        return JSONResponse({"ok": ok, **bot.notifier.public_config()}, headers=NO_STORE)
+
     # --- Automatisation ---------------------------------------------------------
     @app.get("/api/automation")
     async def api_automation():
@@ -307,9 +366,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         return handler
 
-    app.add_api_route("/", page("login.html"), methods=["GET"], include_in_schema=False)
-    app.add_api_route("/vision", page("vision.html"), methods=["GET"], include_in_schema=False)
-    app.add_api_route("/actions", page("actions.html"), methods=["GET"], include_in_schema=False)
+    app.add_api_route("/", page("home.html"), methods=["GET"], include_in_schema=False)
+    app.add_api_route("/ecran", page("ecran.html"), methods=["GET"], include_in_schema=False)
+    app.add_api_route("/reglages", page("reglages.html"), methods=["GET"], include_in_schema=False)
+    app.add_api_route("/suivi", page("suivi.html"), methods=["GET"], include_in_schema=False)
+
+    def redirect(target: str):
+        async def handler():
+            return RedirectResponse(target)
+
+        return handler
+
+    # Anciennes adresses : les favoris continuent de fonctionner.
+    app.add_api_route("/vision", redirect("/ecran"), methods=["GET"], include_in_schema=False)
+    app.add_api_route("/actions", redirect("/reglages"), methods=["GET"], include_in_schema=False)
     app.mount("/static", NoStoreStaticFiles(directory=STATIC_DIR), name="static")
 
     if settings.ui_user and settings.ui_password:

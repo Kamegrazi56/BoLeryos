@@ -7,15 +7,21 @@ BAD = {"identifier": "joueur.test@example.com", "password": "mauvais-mdp-secret"
 
 
 def test_pages_are_served(client):
-    for path in ("/", "/vision", "/actions"):
+    for path in ("/", "/ecran", "/reglages", "/suivi"):
         res = client.get(path)
         assert res.status_code == 200
         assert res.headers["cache-control"] == "no-store"
 
 
+def test_old_page_addresses_redirect_to_the_new_pages(client):
+    for old, new in (("/vision", "/ecran"), ("/actions", "/reglages")):
+        res = client.get(old, follow_redirects=False)
+        assert res.status_code in (301, 302, 307, 308) and res.headers["location"] == new
+
+
 def test_static_files_are_never_cached(client):
     """Sinon un navigateur garde un ancien vision.js avec le nouveau serveur (écran noir)."""
-    for path in ("/static/vision.js", "/static/login.js", "/static/style.css"):
+    for path in ("/static/vision.js", "/static/shell.js", "/static/home.js", "/static/reglages.js", "/static/suivi.js", "/static/style.css"):
         res = client.get(path)
         assert res.status_code == 200
         assert res.headers["cache-control"] == "no-store"
