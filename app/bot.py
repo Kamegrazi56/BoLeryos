@@ -89,6 +89,7 @@ class BotSession:
         self._settings = settings
         self._lock = asyncio.Lock()  # connexion / déconnexion
         self._start_lock = asyncio.Lock()  # démarrage du navigateur
+        self._boot: asyncio.Future | None = None  # démarrage du navigateur en cours
         self._pw: Playwright | None = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
@@ -289,15 +290,21 @@ class BotSession:
         async with self._start_lock:
             if self._page is not None and not self._page.is_closed():
                 return
-            try:
-                await self._teardown()
-                self.log("Démarrage du navigateur du bot…")
-                await self._start_browser()
-                await self._open_home()
-                self._capture_task = asyncio.create_task(self._capture_loop())
-            except Exception as exc:  # noqa: BLE001
-                self.log(f"Impossible de démarrer le navigateur ({type(exc).__name__}).", "error", kind="attention")
-                await self._teardown()
+            # Le démarrage du navigateur est protégé : si l'appelant est annulé (arrêt de la connexion automatique,
+            # fermeture de l'application), il va quand même au bout ou se nettoie, au lieu de laisser un Chromium à moitié lancé.
+            self._boot = asyncio.ensure_future(self._boot_browser())
+            await asyncio.shield(self._boot)
+
+    async def _boot_browser(self) -> None:
+        try:
+            await self._teardown()
+            self.log("Démarrage du navigateur du bot…")
+            await self._start_browser()
+            await self._open_home()
+            self._capture_task = asyncio.create_task(self._capture_loop())
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"Impossible de démarrer le navigateur ({type(exc).__name__}).", "error", kind="attention")
+            await self._teardown()
 
     async def _start_browser(self) -> None:
         s = self._settings
@@ -425,8 +432,9 @@ class BotSession:
             return self.status()
 
     async def logout(self) -> dict[str, str]:
-        await self.automation.stop("déconnexion")
         self._creds = None  # se déconnecter, c'est aussi oublier les identifiants
+        await self.automation.stop_keeper()
+        await self.automation.stop("déconnexion")
         async with self._lock:
             if self._page is not None:
                 try:
@@ -757,6 +765,10 @@ class BotSession:
         self._page = self._context = self._browser = self._pw = None
 
     async def shutdown(self) -> None:
+        await self.automation.stop_keeper()
         await self.automation.stop("arrêt du bot")
+        boot = self._boot
+        if boot is not None and not boot.done():  # un démarrage de navigateur est en cours : on l'attend avant de tout fermer
+            await asyncio.gather(boot, return_exceptions=True)
         async with self._start_lock, self._lock:
             await self._teardown()

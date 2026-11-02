@@ -49,6 +49,9 @@ class AutomationRunner:
         self.waiting = ""  # raison de l'attente affichée dans l'interface
         self._login_failures = 0
         self._login_blocked = ""  # raison si les tentatives automatiques sont suspendues
+        self.connection = ""  # état de la connexion automatique (indépendante de l'interrupteur ON/OFF)
+        self._keeper: asyncio.Task | None = None
+        self._ready_lock = asyncio.Lock()
         self._next_login_at = 0.0
         self._unknown_since: float | None = None
         self._universe_attempts = 0
@@ -133,6 +136,7 @@ class AutomationRunner:
             "last_cycle": self.last_cycle,
             "persistent": self.store.persistent,
             "waiting": self.waiting if self._running else "",
+            "connection": self.connection if self.bot.has_credentials() else "",
             "has_credentials": self.bot.has_credentials(),
             "universe": cfg["universe"],
             "planets_state": self.planets_state(),
@@ -161,7 +165,8 @@ class AutomationRunner:
         """Une phrase qui dit ce que fait le bot en ce moment."""
         cfg = cfg or self._cfg()
         if not self._running:
-            return "Le bot est arrêté. Cliquez sur ON pour le démarrer."
+            link = f" {self.connection[0].upper()}{self.connection[1:]}." if self.bot.has_credentials() and self.connection else ""
+            return f"Le bot est arrêté.{link} Cliquez sur ON pour qu'il travaille."
         active, window = self.in_window(cfg)
         if not active:
             return f"Le bot est en veille : hors de la plage horaire ({window})."
@@ -342,6 +347,10 @@ class AutomationRunner:
 
     # ------------------------------------------------------------ superviseur de connexion
     async def _ensure_ready(self, cfg: dict) -> str | None:
+        async with self._ready_lock:  # la boucle principale et la connexion automatique ne agissent jamais en même temps
+            return await self._ensure_ready_locked(cfg)
+
+    async def _ensure_ready_locked(self, cfg: dict) -> str | None:
         """Regarde où en est le site et ne fait que ce qui manque : connexion, choix de l'univers, ou rien.
 
         Retourne None quand le bot est dans une partie et peut agir, sinon la raison de l'attente.
@@ -366,7 +375,7 @@ class AutomationRunner:
             if not self._in_game:  # arrivée (ou retour) dans la partie
                 self._in_game = True
                 self._last_notes.pop("idle-cycle", None)
-                b.log("Dans la partie : le bot travaille.", event=True)
+                b.log("Dans la partie : le bot travaille." if self._running else "Connecté à la partie.", event=True)
             return None
         if screen == "universes":
             return await self._pick_universe(cfg)
@@ -381,13 +390,52 @@ class AutomationRunner:
             await b._page.goto(b._settings.login_url, wait_until="domcontentloaded", timeout=30_000)
         return "écran du site non reconnu"
 
+    # ------------------------------------------------- connexion automatique (sans interrupteur)
+    def reset_connection(self) -> None:
+        """Nouveaux identifiants ou nouvelle demande : les blocages de connexion précédents tombent."""
+        self._login_failures, self._login_blocked, self._next_login_at = 0, "", 0.0
+        self._universe_attempts = 0
+
+    def ensure_keeper(self) -> None:
+        """Dès que des identifiants sont en mémoire, le bot se connecte et choisit l'univers tout seul, puis garde la
+        connexion (reconnexion si la session expire), que l'interrupteur soit sur ON ou sur OFF."""
+        if self._keeper is None or self._keeper.done():
+            self._keeper = asyncio.create_task(self._keep_connected())
+
+    async def stop_keeper(self) -> None:
+        task, self._keeper = self._keeper, None
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        self.connection = ""
+
+    async def _keep_connected(self) -> None:
+        poll = self.bot._settings.poll_seconds
+        while self.bot.has_credentials():
+            if self._running and self.in_window()[0]:  # la boucle principale (ON, dans la plage) s'en charge
+                await asyncio.sleep(poll)
+                continue
+            try:
+                problem = await self._ensure_ready(self._cfg())
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                problem = f"vérification de l'écran impossible ({type(exc).__name__})"
+            self.connection = problem or "connecté, dans la partie"
+            if problem:
+                self._note("connection", f"Connexion automatique : {problem}.", event=True)
+            else:
+                self._last_notes.pop("connection", None)
+            await asyncio.sleep(poll)
+        self.connection = ""  # plus d'identifiants en mémoire : plus rien à maintenir
+
     async def _pick_universe(self, cfg: dict) -> str | None:
         b = self.bot
         universes = await b.list_universes()
         self.store.add_catalog("universes", [u["name"] for u in universes])
         wanted = cfg["universe"]
         if not wanted:
-            return "choisissez un univers (onglet Compte, ou bouton d'univers sur la page Vision)"
+            return "choisissez un univers (Réglages › Compte et univers, ou bouton d'univers sur la page Écran)"
         match = next((u for u in universes if norm(u["name"]) == norm(wanted)), None)
         if match is None:
             return f"univers « {wanted} » indisponible sur la page de choix"
@@ -403,7 +451,7 @@ class AutomationRunner:
         if self._login_blocked:
             return self._login_blocked
         if not b.has_credentials():
-            return "identifiants requis (onglet Compte)"
+            return "identifiants requis (Réglages › Compte et univers)"
         wait = self._next_login_at - time.monotonic()
         if wait > 0:
             return f"nouvelle tentative de connexion dans {wait:.0f} s"
@@ -415,10 +463,10 @@ class AutomationRunner:
         kind = b.last_login_kind
         self._login_failures += 1
         if kind == "refused":  # identifiants refusés : ne pas réessayer (risque de blocage du compte)
-            self._login_blocked = "connexion refusée par le site : corrigez les identifiants (onglet Compte), puis OFF puis ON"
+            self._login_blocked = "connexion refusée par le site : corrigez les identifiants (Réglages › Compte et univers)"
             b.log("Reconnexion automatique suspendue : le site a refusé les identifiants (corrigez-les dans Réglages › Compte).", "error", kind="attention")
         elif self._login_failures >= 3:
-            self._login_blocked = "intervention requise (contrôle anti-bot ?) : connectez-vous à la main (page Connexion, contrôle manuel) ; le bot reprendra seul"
+            self._login_blocked = "intervention requise (contrôle anti-bot ?) : connectez-vous à la main (page Écran, contrôle manuel) ; le bot reprendra seul"
             b.log("Trois tentatives de connexion sans résultat : connectez-vous à la main (page Écran, contrôle manuel) ; le bot reprendra seul.", "error", kind="attention")
         else:
             delay = (60, 300)[min(self._login_failures - 1, 1)]

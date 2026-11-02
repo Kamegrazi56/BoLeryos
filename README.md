@@ -45,6 +45,10 @@ Le panneau « Exploration de la structure du site » (désactivé par défaut) e
 
 ## Automatisation
 
+### Connexion automatique (comme TBot)
+
+Dans **Réglages › Compte et univers**, saisissez l'identifiant, le mot de passe et l'univers (champ avec suggestions), puis **« Enregistrer et se connecter »** : le bot se connecte **tout seul**, entre dans l'univers indiqué et **reste connecté** (il se reconnecte si la session expire), sans toucher à l'interrupteur. Le champ « Connexion : … » montre l'avancement en direct. L'interrupteur ON/OFF ne sert qu'à faire **travailler** le bot (constructions, recherches) ; les plages horaires limitent ce travail, pas la connexion. « Oublier le compte » ou « Se déconnecter » (page Écran) arrête la connexion automatique.
+
 ### Interrupteur « Bot : ON / OFF »
 
 Un seul interrupteur, dans l'en-tête de chaque page (et en grand sur l'Accueil). Si des éléments obligatoires manquent (identifiants, univers, quelque chose à faire), une fenêtre les liste avec un bouton « Corriger » et un bouton « Démarrer quand même ». **ON** : le bot regarde où en est le site et ne fait que ce qui manque :
@@ -56,7 +60,7 @@ Un seul interrupteur, dans l'en-tête de chaque page (et en grand sur l'Accueil)
 | Déjà dans une partie | Saute la connexion et le choix de l'univers, puis travaille. |
 | Session expirée | Se reconnecte tout seul. |
 
-**Garde-fous :** si le site **refuse** les identifiants, le bot n'essaie qu'**une fois** (risque de blocage du compte) et l'indique ; si la connexion n'aboutit pas (contrôle anti-bot ?), 3 essais espacés (1 min, 5 min) puis il demande de se connecter à la main et **reprend seul** dès que le site est connecté ; hors plage horaire, il ne se connecte pas non plus ; le contrôle manuel le met en pause. **OFF** arrête tout (c'est l'arrêt d'urgence).
+**Garde-fous :** (valables pour la connexion automatique, ON ou OFF) si le site **refuse** les identifiants, le bot n'essaie qu'**une fois** (risque de blocage du compte) et l'indique ; si la connexion n'aboutit pas (contrôle anti-bot ?), 3 essais espacés (1 min, 5 min) puis il demande de se connecter à la main et **reprend seul** dès que le site est connecté ; le contrôle manuel le met en pause. **OFF** arrête tout (c'est l'arrêt d'urgence).
 
 **Identifiants :** gardés **en mémoire du bot seulement** (jamais sur disque, ni dans le journal, ni dans les réglages exportés, ni renvoyés par l'API). Ils sont oubliés à la déconnexion et perdus au redémarrage du conteneur : il faut alors les ressaisir (Réglages, onglet Compte et univers). Les conserver au-delà d'un redémarrage est la décision D1 du plan, non prise.
 

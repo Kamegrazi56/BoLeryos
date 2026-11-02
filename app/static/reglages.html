@@ -34,24 +34,22 @@
 
     <section class="tabpanel card" id="panel-account" role="tabpanel" aria-labelledby="tab-account">
       <p id="acct-status" class="status-line">Chargement…</p>
+      <p id="conn-status" class="status-line" role="status" aria-live="polite"></p>
       <div class="fields">
         <label>Identifiant (adresse e-mail du compte) <input id="acct-id" type="text" autocomplete="off" spellcheck="false"></label>
         <label>Mot de passe <input id="acct-pw" type="password" autocomplete="off"></label>
+        <label>Univers <span data-help-text="Le nom de l'univers tel qu'il est affiché sur la page « Choisissez votre univers ». Une fois connecté, le bot clique dessus. Des suggestions apparaissent dès que le bot a vu cette page."></span>
+          <input id="universe" type="text" list="universe-list" autocomplete="off" spellcheck="false" placeholder="ex. Asterion"></label>
+        <datalist id="universe-list"></datalist>
       </div>
       <div class="row">
-        <button id="acct-save" type="button">Mémoriser</button>
-        <button id="acct-login" type="button" class="secondary">Se connecter maintenant</button>
-        <button id="acct-forget" type="button" class="secondary">Oublier</button>
+        <button id="acct-save" type="button">Enregistrer et se connecter</button>
+        <button id="acct-login" type="button" class="secondary">Relancer la connexion</button>
+        <button id="acct-forget" type="button" class="secondary">Oublier le compte</button>
         <span id="acct-msg" class="hint" role="status"></span>
       </div>
-      <p class="hint">Les identifiants sont gardés <strong>en mémoire du bot seulement</strong> : jamais écrits sur disque, ni dans le journal, ni dans les réglages exportés. Ils sont perdus au redémarrage du conteneur (il faut alors les ressaisir) et oubliés à la déconnexion. Utilisez de préférence un compte de test.</p>
-
-      <h2>Univers <span data-help-text="Quand le bot arrive sur la page « Choisissez votre univers », il clique sur celui-ci."></span></h2>
-      <label class="field">Univers où entrer automatiquement <select id="universe"></select></label>
-      <p class="hint">La liste se remplit dès que le bot a vu la page de choix ; cliquer sur un bouton d'univers dans l'onglet Écran le mémorise aussi.</p>
-
-      <h2>Ce que fait « Bot : ON »</h2>
-      <p class="hint">Le bot regarde l'écran : page de connexion → il se connecte (identifiants mémorisés) ; choix de l'univers → il entre dans l'univers choisi ; déjà dans une partie → il saute ces étapes et travaille. Si la session expire, il se reconnecte. Si le site refuse les identifiants, il n'insiste pas ; si un contrôle anti-bot l'arrête, il vous demande de vous connecter à la main (onglet Écran) puis reprend seul.</p>
+      <p class="hint">Dès que les identifiants sont enregistrés, le bot <strong>se connecte tout seul</strong>, entre dans l'univers indiqué et <strong>reste connecté</strong> (il se reconnecte si la session expire), que l'interrupteur soit sur ON ou sur OFF. ON sert seulement à lui faire <em>travailler</em> (constructions, recherches). Si le site refuse les identifiants, le bot n'insiste pas ; si un contrôle anti-bot l'arrête, il vous demande de vous connecter à la main (page Écran, contrôle manuel) puis reprend seul.</p>
+      <p class="hint">Les identifiants sont gardés <strong>en mémoire du bot seulement</strong> : jamais écrits sur disque, ni dans le journal, ni dans les réglages exportés. Ils sont perdus au redémarrage du conteneur (il faut alors les ressaisir) et oubliés par « Oublier le compte » et par « Se déconnecter » (page Écran). Utilisez de préférence un compte de test.</p>
     </section>
 
     <section class="tabpanel card" id="panel-constructions" role="tabpanel" aria-labelledby="tab-constructions" hidden>

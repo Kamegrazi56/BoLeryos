@@ -185,7 +185,8 @@ def test_an_expired_session_is_reconnected_automatically(world_client, game):
 
 
 # ------------------------------------------------------------------ plage, contrôle manuel
-def test_outside_the_time_window_it_does_not_even_log_in(world_client, game):
+def test_outside_the_time_window_the_bot_stays_connected_but_does_not_work(world_client, game):
+    """La plage horaire limite le travail du bot, pas sa connexion (qui suit les identifiants saisis)."""
     c = world_client
     now = datetime.now(ZoneInfo("Europe/Paris"))
     window = {"enabled": True, "timezone": "Europe/Paris",
@@ -194,17 +195,18 @@ def test_outside_the_time_window_it_does_not_even_log_in(world_client, game):
     _settings(c, universe="Asterion", schedule=window)
     _on(c)
     assert _until(lambda: _has(c, "Plage horaire : inactive"))
+    assert _until(lambda: "dans la partie" in _status(c)["connection"])
     time.sleep(1.5)
-    assert game.info()["login_attempts"] == 0
+    assert game.info()["login_attempts"] == 1 and not _has(c, "Cycle :")
     _off(c)
 
 
 def test_manual_control_pauses_the_supervisor(world_client, game):
     c = world_client
+    bot = c.app.state.bot
+    bot._manual = True  # avant de saisir les identifiants : la connexion automatique démarrerait aussitôt
     _creds(c)
     _settings(c, universe="Asterion")
-    bot = c.app.state.bot
-    bot._manual = True
     _on(c)
     assert _until(lambda: _has(c, "En attente : contrôle manuel"))
     assert game.info()["login_attempts"] == 0
@@ -226,3 +228,70 @@ def test_on_starts_the_browser_even_when_no_screen_is_open(settings, game):
         _on(c)
         assert c.app.state.bot._page is not None
         _off(c)
+
+
+# ------------------------------------------------- connexion automatique, sans l'interrupteur
+def test_saving_the_account_connects_and_enters_the_universe_without_switching_on(world_client, game):
+    c = world_client
+    _settings(c, universe="Asterion")
+    _creds(c)
+    assert _until(lambda: "/game/" in c.get("/api/status").json()["page"]), _logs(c)[-8:]
+    assert game.info() == {"logged_in": True, "login_attempts": 1}
+    assert _status(c)["running"] is False  # jamais passé sur ON
+    assert _until(lambda: "dans la partie" in _status(c)["connection"])
+    assert "Connecté" in c.get("/api/dashboard").json()["sentence"] or "connecté" in c.get("/api/dashboard").json()["sentence"]
+    assert _has(c, "Connecté à la partie.") and not _has(c, "Cycle :")  # il ne travaille pas tant qu'il est sur OFF
+
+
+def test_without_an_universe_the_bot_waits_on_the_choice_page_then_enters_once_it_is_typed(world_client, game):
+    c = world_client
+    _creds(c)  # pas d'univers choisi
+    assert _until(lambda: "choisissez un univers" in _status(c)["connection"]), _status(c)
+    assert "Asterion" in c.get("/api/automation").json()["catalog"]["universes"]  # suggestions disponibles
+    _settings(c, universe="Asterion")
+    assert _until(lambda: "/game/" in c.get("/api/status").json()["page"])
+
+
+def test_session_expiry_is_repaired_while_the_switch_is_off(world_client, game):
+    c = world_client
+    _settings(c, universe="Asterion")
+    _creds(c)
+    assert _until(lambda: "dans la partie" in _status(c)["connection"])
+    game.logout()
+    c.portal.call(c.app.state.bot._page.reload)
+    assert _until(lambda: game.info()["login_attempts"] == 2 and "dans la partie" in _status(c)["connection"]), _logs(c)[-8:]
+
+
+def test_refused_credentials_are_tried_only_once_and_forgetting_stops_the_connection(world_client, game):
+    c = world_client
+    _settings(c, universe="Asterion")
+    _creds(c, BAD)
+    assert _until(lambda: "refusée" in _status(c)["connection"]), _status(c)
+    time.sleep(1.0)
+    assert game.info()["login_attempts"] == 1
+    assert c.delete("/api/account/credentials").status_code == 200
+    assert _until(lambda: _status(c)["connection"] == "")
+    assert c.post("/api/account/login").status_code == 409
+
+
+def test_the_connection_is_kept_when_the_switch_goes_on_then_off(world_client, game):
+    c = world_client
+    _settings(c, universe="Asterion")
+    _creds(c)
+    assert _until(lambda: "dans la partie" in _status(c)["connection"])
+    _on(c)
+    assert _until(lambda: _has(c, "Cycle :"))
+    _off(c)
+    assert _status(c)["running"] is False and c.get("/api/status").json()["state"] == "logged_in"
+    assert game.info()["login_attempts"] == 1
+
+
+def test_logout_forgets_the_account_and_stops_the_connection(world_client, game):
+    c = world_client
+    _settings(c, universe="Asterion")
+    _creds(c)
+    assert _until(lambda: "dans la partie" in _status(c)["connection"])
+    assert c.post("/api/logout").status_code == 200
+    time.sleep(1.0)
+    assert _status(c)["connection"] == "" and not c.get("/api/account").json()["has_credentials"]
+    assert game.info()["login_attempts"] == 1

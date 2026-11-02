@@ -157,15 +157,49 @@ def test_account_tab_keeps_credentials_in_memory_and_never_shows_them_again(ui):
     page.wait_for_function("document.querySelector('#acct-msg').textContent.includes('Aucun identifiant')", timeout=5000)
 
 
-def test_universe_is_chosen_in_a_list_and_saved(ui):
+def test_universe_is_typed_with_suggestions_and_saved(ui):
     page, _, app = ui
     app.state.bot.automation.store.add_catalog("universes", ["Asterion", "Kael"])
     page.reload()
-    page.wait_for_function("document.querySelectorAll('#universe option').length == 3")
+    page.wait_for_function("document.querySelectorAll('#universe-list option').length == 2")
     page.click("#tab-account")
-    assert page.locator("#universe option").all_inner_texts() == ["Aucun : me demander", "Asterion", "Kael"]
-    _edit(page, lambda: page.select_option("#universe", "Asterion"))
-    assert _saved(app)["universe"] == "Asterion"
+    assert page.locator("#universe-list option").evaluate_all("o => o.map(x => x.value)") == ["Asterion", "Kael"]
+    _edit(page, lambda: (page.fill("#universe", "Kael"), page.press("#universe", "Tab")))
+    assert _saved(app)["universe"] == "Kael"
+
+
+def test_entering_the_account_makes_the_bot_connect_by_itself_without_the_switch(settings, game):
+    """Comme TBot : identifiants + univers saisis dans Réglages, et le bot se connecte tout seul (interrupteur sur OFF)."""
+    from dataclasses import replace as _replace
+
+    game.reset(require_auth=True)
+    app = create_app(_replace(settings, login_url=game.url + "/", login_timeout=15.0))
+    port = _free_port()
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    for _ in range(100):
+        if server.started:
+            break
+        time.sleep(0.05)
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(executable_path=settings.chromium_path, args=["--no-sandbox"])
+            page = browser.new_page(viewport={"width": 1400, "height": 900})
+            page.goto(f"http://127.0.0.1:{port}/reglages#account")
+            page.wait_for_selector("#acct-id")
+            page.fill("#acct-id", "joueur.test@example.com")
+            page.fill("#acct-pw", "good-password")
+            page.fill("#universe", "Asterion")
+            page.click("#acct-save")
+            page.wait_for_function("document.querySelector('#conn-status').textContent.includes('dans la partie')", timeout=90000)
+            assert "Connecté" in page.inner_text("#conn-status")
+            assert app.state.bot.automation.summary()["running"] is False  # l'interrupteur n'a jamais été touché
+            assert "/game/" in app.state.bot._page.url and game.info()["logged_in"] is True
+            browser.close()
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
 
 
 def test_buildings_and_research_come_from_built_in_lists_without_any_name_field(ui):

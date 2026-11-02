@@ -303,10 +303,10 @@ function renderAll() {
 }
 function renderUniverse() {
   const names = [...new Set([...(catalog.universes || []), model.universe].filter(Boolean))];
-  $("universe").replaceChildren(el("option", { value: "", textContent: "Aucun : me demander" }), ...names.map((n) => el("option", { value: n, textContent: n })));
-  $("universe").value = model.universe || "";
+  $("universe-list").replaceChildren(...names.map((n) => el("option", { value: n })));
+  if (document.activeElement !== $("universe")) $("universe").value = model.universe || "";
 }
-$("universe").addEventListener("change", () => { model.universe = $("universe").value; scheduleSave(); });
+$("universe").addEventListener("change", () => { model.universe = $("universe").value.trim(); scheduleSave(); });
 
 const bind = (id, apply) => {
   const node = $(id);
@@ -332,26 +332,28 @@ async function refreshAccount() {
     );
   } catch { /* idem */ }
 }
+/** État de la connexion automatique, mis à jour en direct (événement émis par shell.js). */
+const STATE_TEXT = { idle: "Non connecté", logging_in: "Connexion en cours…", logged_in: "Connecté", error: "Connexion échouée" };
+window.addEventListener("boleryos:status", (event) => {
+  const { state, automation: a } = event.detail;
+  const parts = [STATE_TEXT[state] || state];
+  if (a.connection) parts.push(a.connection);
+  $("conn-status").replaceChildren("Connexion : ", el("strong", { textContent: parts.join(" — ") }));
+});
 $("acct-save").addEventListener("click", async () => {
   const identifier = $("acct-id").value.trim(), password = $("acct-pw").value;
   if (!identifier || !password) { $("acct-msg").textContent = "Renseignez l'identifiant et le mot de passe."; return; }
+  model.universe = $("universe").value.trim();
+  await save(); // l'univers est enregistré avant que le bot ne se connecte
   const res = await fetch("/api/account/credentials", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ identifier, password }) });
   $("acct-pw").value = ""; // jamais conservé dans la page
-  $("acct-msg").textContent = res.ok ? "Mémorisés." : "Refusé.";
+  $("acct-msg").textContent = res.ok ? "Enregistré : le bot se connecte." : "Refusé.";
   refreshAccount();
 });
 $("acct-login").addEventListener("click", async () => {
-  $("acct-msg").textContent = "Connexion en cours…";
-  $("acct-login").disabled = true;
-  try {
-    const res = await fetch("/api/account/login", { method: "POST" });
-    const data = await res.json();
-    $("acct-msg").textContent = res.ok ? (data.message || "Connexion lancée.") : detailText(data, "Connexion impossible.");
-  } catch {
-    $("acct-msg").textContent = "Connexion impossible.";
-  } finally {
-    $("acct-login").disabled = false;
-  }
+  const res = await fetch("/api/account/login", { method: "POST" });
+  const data = await res.json();
+  $("acct-msg").textContent = res.ok ? data.message : detailText(data, "Impossible.");
 });
 $("acct-forget").addEventListener("click", async () => {
   await fetch("/api/account/credentials", { method: "DELETE" });

@@ -197,22 +197,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def api_account_credentials(body: CredentialsRequest, request: Request):
         _check_origin(request)
         bot.set_credentials(body.identifier.strip(), body.password.get_secret_value())
+        # Comme TBot : une fois les identifiants saisis, le bot se connecte et choisit l'univers tout seul.
+        bot.automation.reset_connection()
+        bot.automation.ensure_keeper()
         return JSONResponse({"has_credentials": True, "hint": bot.credentials_hint()}, headers=NO_STORE)
 
     @app.delete("/api/account/credentials")
     async def api_account_forget(request: Request):
         _check_origin(request)
         bot.forget_credentials()
+        await bot.automation.stop_keeper()
         return JSONResponse({"has_credentials": False, "hint": ""}, headers=NO_STORE)
 
     @app.post("/api/account/login")
     async def api_account_login(request: Request):
-        """Connexion immédiate avec les identifiants mémorisés (sans passer par l'interrupteur)."""
+        """Relance tout de suite la connexion automatique (après une erreur ou une intervention manuelle)."""
         _check_origin(request)
-        if not bot._creds:
+        if not bot.has_credentials():
             raise HTTPException(409, "Aucun identifiant en mémoire : saisissez-les d'abord.")
-        identifier, password = bot._creds
-        return JSONResponse(await bot.login(identifier, password), headers=NO_STORE)
+        bot.automation.reset_connection()
+        bot.automation.ensure_keeper()
+        return JSONResponse({**bot.status(), "message": "Connexion relancée."}, headers=NO_STORE)
 
     # --- Tableau de bord, événements, alertes -----------------------------------------
     @app.get("/api/dashboard")
@@ -271,10 +276,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.put("/api/automation/settings")
     async def api_automation_settings(body: AutomationSettingsRequest, request: Request):
         _check_origin(request)
+        previous_universe = bot.automation.store.get()["universe"]
         try:
             saved = bot.automation.store.update(body.settings, allow_live=body.confirm_live)
         except SettingsError as exc:
             raise HTTPException(422, detail=exc.errors) from exc
+        if saved["universe"] != previous_universe:  # nouvel univers demandé : le bot réessaie tout de suite
+            bot.automation.reset_connection()
         if saved["mode"] == "live" and body.confirm_live:
             bot.log("Mode RÉEL confirmé : le bot cliquera sur « Améliorer » / « Rechercher » quand les règles le permettent.", "warn")
         return JSONResponse(

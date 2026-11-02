@@ -195,18 +195,6 @@ def test_a_manual_stop_is_not_an_alert(game_client):
 
 
 # ------------------------------------------------------------------------- connexion directe
-def test_login_now_needs_remembered_credentials(game_client):
+def test_relaunching_the_connection_needs_remembered_credentials(game_client):
     res = game_client.post("/api/account/login")
     assert res.status_code == 409 and "identifiant" in res.json()["detail"].lower()
-
-
-def test_login_now_uses_remembered_credentials(settings, game):
-    from fastapi.testclient import TestClient
-
-    from app.main import create_app
-
-    with TestClient(create_app(replace(settings))) as client:
-        client.post("/api/account/credentials", json={"identifier": "joueur.test@example.com", "password": "good-password"})
-        res = client.post("/api/account/login")
-        assert res.status_code == 200 and res.json()["state"] == "logged_in", res.text
-        assert "good-password" not in res.text
