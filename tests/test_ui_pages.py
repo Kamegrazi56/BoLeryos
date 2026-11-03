@@ -10,7 +10,7 @@ from playwright.sync_api import sync_playwright
 from app.main import create_app
 from tests.conftest import _free_port
 
-TABS = ["account", "constructions", "research", "schedule", "settings"]
+TABS = ["account", "constructions", "research", "production", "priority", "schedule", "settings"]
 PAGES = ["/", "/ecran", "/reglages", "/suivi"]
 
 
@@ -99,11 +99,11 @@ def test_old_addresses_still_work(ui):
 
 
 # ------------------------------------------------------------------------------- réglages
-def test_settings_are_in_five_tabs_and_only_one_panel_shows_at_a_time(ui):
+def test_settings_are_in_seven_tabs_and_only_one_panel_shows_at_a_time(ui):
     page, errors, _ = ui
     assert [t.get_attribute("data-tab") for t in page.locator("[role=tab]").all()] == TABS
     assert page.locator("[role=tab]").all_inner_texts() == [
-        "Compte et univers", "Constructions", "Recherches", "Horaires et rythme", "Sauvegarde et alertes"]
+        "Compte et univers", "Constructions", "Recherches", "Production", "Priorités", "Horaires et rythme", "Sauvegarde et alertes"]
     for tab in TABS:
         page.click(f"#tab-{tab}")
         visible = [t for t in TABS if page.locator(f"#panel-{t}").is_visible()]
@@ -498,3 +498,73 @@ def test_screen_page_keeps_live_view_and_manual_control(ui):
     page.goto(page.base + "/ecran")
     assert page.locator("#screen").is_visible() and page.locator("#manual").is_visible()
     assert page.locator("#log").count() == 1 and errors == []
+
+
+# ---------------------------------------------------------------------------------- production
+def _add_prod(page, section, name, mode="once", amount=None, maxi=False):
+    page.select_option("#prod-add-section", section)
+    page.select_option("#prod-add-name", name)
+    page.select_option("#prod-add-mode", mode)
+    if maxi:
+        page.check("#prod-add-max")
+    else:
+        page.fill("#prod-add-amount", str(amount))
+    page.click("#prod-add")
+
+
+def test_production_tab_builds_lines_from_built_in_lists_with_three_behaviours(ui):
+    page, _, app = ui
+    page.click("#tab-production")
+    assert page.locator("#prod-add-section option").all_inner_texts() == [
+        "Population", "Chantier spatial : vaisseaux", "Chantier spatial : composants", "Appareils spécialisés", "Défenses"]
+    names = page.locator("#prod-add-name option").all_text_contents()[1:]
+    assert names[:3] == ["Rempart de Fer", "Spectre du Rift", "Surchargeur Plasmique"] and "Mineur" in names
+    assert "Liste vide" in page.inner_text("#prod-queue")
+    _add_prod(page, "population", "Rempart de Fer", "once", 50)
+    _add_prod(page, "defense", "Éclateur Ionique", "stock", 200)
+    _add_prod(page, "specialized", "Drone Terrestre", "repeat", maxi=True)
+    _wait_saved(page)
+    queue = _saved(app)["production"]["queue"]
+    assert [(q["section"], q["name"], q["mode"], q["amount"], q["max"]) for q in queue] == [
+        ("population", "Rempart de Fer", "once", 50, False), ("defense", "Éclateur Ionique", "stock", 200, False),
+        ("specialized", "Drone Terrestre", "repeat", 1, True)]
+    assert all(q["id"] for q in queue)
+    assert "Rempart de Fer" not in page.locator("#prod-add-name option").all_text_contents()  # déjà dans la liste
+    # « maximum » n'existe pas pour un objectif de stock
+    page.select_option("#prod-add-mode", "stock")
+    assert page.locator("#prod-add-max").is_disabled()
+    page.locator("#prod-queue .queue-row").nth(2).locator("select").select_option("stock")
+    _wait_saved(page)
+    third = _saved(app)["production"]["queue"][2]
+    assert third["mode"] == "stock" and third["max"] is False
+
+
+def test_production_lines_can_be_reordered_edited_and_removed_and_scope_chosen(ui):
+    page, _, app = ui
+    page.click("#tab-production")
+    _add_prod(page, "population", "Pilote", "once", 5)
+    _add_prod(page, "population", "Mineur", "once", 7)
+    page.locator("#prod-queue .queue-row").nth(1).locator("button[title^='Monter']").click()
+    _edit(page, lambda: page.locator("#prod-queue .queue-row").nth(0).locator("input[type=number]").fill("9"))
+    queue = _saved(app)["production"]["queue"]
+    assert [(q["name"], q["amount"]) for q in queue] == [("Mineur", 9), ("Pilote", 5)]
+    _edit(page, lambda: page.locator("#prod-queue .queue-row").nth(1).locator("button[title='Retirer de la liste']").click())
+    assert [q["name"] for q in _saved(app)["production"]["queue"]] == ["Mineur"]
+    app.state.bot.automation.store.add_catalog("planets", ["6-79-Egide"])
+    page.reload()
+    page.wait_for_function("document.querySelectorAll('#prod-planet option').length > 1")
+    page.click("#tab-production")
+    _edit(page, lambda: page.check("#pscope-one"))
+    assert _saved(app)["production"]["scope"] == "one" and _saved(app)["production"]["planet"] == "6-79-Egide"
+    _edit(page, lambda: page.check("#prod-enabled"))
+    assert _saved(app)["production"]["enabled"] is True
+
+
+def test_priority_tab_orders_the_blocks(ui):
+    page, _, app = ui
+    page.click("#tab-priority")
+    rows = page.locator("#priority-list .queue-row")
+    assert rows.nth(0).get_attribute("data-block") == "constructions" and rows.count() == 6
+    _edit(page, lambda: rows.nth(4).locator("button[title^='Plus']").click())
+    _edit(page, lambda: page.locator("#priority-list .queue-row").nth(3).locator("button[title^='Plus']").click())
+    assert _saved(app)["priority"] == ["constructions", "research", "specialized", "population", "shipyard", "defense"]

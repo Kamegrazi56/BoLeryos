@@ -57,3 +57,26 @@ def parse_duration(text: str) -> float:
 def norm(name: str) -> str:
     """Forme de comparaison d'un nom du jeu (apostrophes typographiques, casse, espaces)."""
     return " ".join(str(name).replace("’", "'").replace("‘", "'").casefold().split())
+
+
+def display_step(text: str) -> float | None:
+    """Plus petite variation visible d'un montant affiché : « 3,201 G » → 1 000 000 ; « 58,035 M » → 1 000 ; « 11 014 » → 1.
+
+    Sert à savoir si un débit est assez grand pour se voir à l'écran (le jeu arrondit les gros stocks).
+    """
+    cleaned = str(text).replace(" ", " ").replace(" ", " ").strip()
+    match = _AMOUNT_RE.match(cleaned)
+    if not match:
+        return None
+    _, number, suffix = match.groups()
+    number = number.replace(" ", "")
+    decimals = 0
+    has_comma, has_dot = "," in number, "." in number
+    if has_comma and has_dot:
+        decimals = len(number[max(number.rfind(","), number.rfind(".")) + 1:])
+    elif has_comma or has_dot:
+        sep = "," if has_comma else "."
+        parts = number.split(sep)
+        if len(parts) == 2 and not (suffix is None and len(parts[1]) == 3 and len(parts[0]) <= 3):
+            decimals = len(parts[1])  # décimale (même règle que parse_amount)
+    return MULTIPLIERS[suffix or ""] * 10 ** -decimals

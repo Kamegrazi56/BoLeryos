@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .numbers import parse_amount, parse_duration
+from .numbers import display_step, parse_amount, parse_duration
 
 ACTION_LABELS = ("Améliorer", "Rechercher", "Ressources insuffisantes")
 
@@ -96,6 +96,11 @@ class Resources:
     cristal: float | None = None
     ether: float | None = None
     energie: float | None = None
+    # Plus petite variation visible de chaque stock (« 3,201 G » : 1 M) : un petit débit peut passer inaperçu.
+    steps: dict[str, float] = field(default_factory=dict)
+
+    def step(self, label: str) -> float | None:
+        return self.steps.get(label)
 
     def stock(self, label: str) -> float | None:
         return {"Fer": self.fer, "Cristal": self.cristal, "Éther": self.ether}[label]
@@ -128,6 +133,10 @@ def _amount(raw: str | None) -> float | None:
 def parse_page(raw: dict) -> PageState:
     res = raw.get("resources", {})
     resources = Resources(_amount(res.get("fer")), _amount(res.get("cristal")), _amount(res.get("ether")), _amount(res.get("energie")))
+    for key, label in (("fer", "Fer"), ("cristal", "Cristal"), ("ether", "Éther")):
+        step = display_step(res[key]) if res.get(key) else None
+        if step is not None:
+            resources.steps[label] = step
     cards: list[Card] = []
     for c in raw.get("cards", []):
         bad: list[str] = []

@@ -33,6 +33,32 @@ def _buildings():
     ]
 
 
+def _prod_items():
+    """Éléments de production d'une planète : population (par onglet), appareils, défenses, composants, vaisseaux."""
+    def it(section, name, costs, owned=0, tab=""):
+        return {"section": section, "tab": tab, "name": name, "costs": costs, "owned": owned, "queue": 0}
+
+    rempart = {"Fer": 2616, "Cristal": 5233, "Éther": 218}
+    items = [
+        it("population", "Rempart de Fer", rempart, 3182, "Assaut"),
+        it("population", "Spectre du Rift", {"Fer": 4361, "Cristal": 2616, "Éther": 218}, 999, "Assaut"),
+        it("population", "Pilote", {"Fer": 1000, "Cristal": 1000}, 10, "Logistique"),
+        it("population", "Technicien", {"Fer": 500, "Cristal": 500, "Éther": 50}, 21331, "Logistique"),
+        it("population", "Mineur", {"Fer": 300, "Cristal": 200}, 5, "Administration"),
+        it("specialized", "Sonde Spatiale", {"Cristal": 872, "Éther": 43}, 3987),
+        it("specialized", "Drone Terrestre", {"Fer": 436, "Cristal": 436}, 10382),
+        it("specialized", "Grand Transporteur", {"Fer": 5233, "Cristal": 5233, "Éther": 872}, 9000),
+        it("defense", "Sentinelle de Rempart", {"Fer": 2093, "Cristal": 251}, 19962),
+        it("defense", "Faisceau de Verrouillage", {"Fer": 4186, "Cristal": 3349}, 436),
+        it("defense", "Éclateur Ionique", {"Fer": 10047, "Cristal": 8373, "Éther": 418}, 8694),
+        it("component", "Chasseur", {"Fer": 436, "Cristal": 87, "Éther": 43}, 0),
+        it("component", "Destroyer", {"Fer": 479710, "Cristal": 104664, "Éther": 71520}, 91),
+        it("ship", "Anode", {"Fer": 410152, "Cristal": 100311, "Éther": 95959}, 47),
+        it("ship", "Plasmatique", {"Fer": 1.5e9, "Cristal": 1e6, "Éther": 1e6}, 0),
+    ]
+    return items
+
+
 def initial_state():
     stocks = [
         {"Fer": 58.0e6, "Cristal": 22.36e6, "Éther": 19.8e6},
@@ -52,8 +78,9 @@ def initial_state():
         "login_attempts": 0,
         "actions": [],
         "research_busy": False,
+        "ship_mode": "assemblages",  # mode de production affiché sur les cartes de vaisseaux (« Construction » à choisir)
         "planets": [
-            {"name": n, "coords": c, "energy": e, "stocks": copy.deepcopy(s), "busy": False, "buildings": _buildings()}
+            {"name": n, "coords": c, "energy": e, "stocks": copy.deepcopy(s), "busy": False, "buildings": _buildings(), "prod": _prod_items()}
             for (n, c, e), s in zip(planets, stocks)
         ],
         "tech": [
@@ -102,12 +129,58 @@ function card(p, it, kind, busy) {
   return `<div class="card"><div class="top"><div class="badge"><span>${it.level}</span></div><div class="abs"><h3>${it.name}</h3></div></div>`
     + `<div class="body">${costs}${dur}<button class="act" data-name="${it.name}" data-kind="${kind}" ${ok ? '' : 'disabled'}>${label}</button></div></div>`;
 }
+const kfmt = (v) => v >= 1e9 ? (v / 1e9).toFixed(3).replace('.', ',') + ' G' : v >= 1e6 ? (v / 1e6).toFixed(3).replace('.', ',') + ' M' : v >= 1000 ? (v / 1000).toFixed(3).replace('.', ',') + ' K' : String(Math.round(v));
+const ui = {tab: 'Assaut', ship: 'Assemblages'};
+const CK = {Fer: 'F', Cristal: 'C', 'Éther': 'E'};
+const costLeaves = (c) => Object.entries(c).map(([k, v]) => `<span>${CK[k]}: ${kfmt(v)}</span>`).join('');
+function prodCard(it, verb) {
+  const short = it.name === 'Faisceau de Verrouillage' ? 'Faisceau de Verrou' : it.name;
+  return `<div class="card"><div class="badge"><span>${int(it.owned)}</span></div><h3>${it.name}</h3><div><span>ATQ</span><span>14</span></div>`
+    + `<div>${costLeaves(it.costs)}</div><div class="ctl"><input type="number" placeholder="Qté" aria-label="Quantité pour ${short}">`
+    + `<button type="button" data-max="1" aria-label="Quantité maximale pour ${short}">MAX</button>`
+    + `<button type="button" class="prod" data-section="${it.section}" data-name="${it.name}" aria-label="${verb} ${short}">${verb}</button></div></div>`;
+}
+function prodMain(p, s) {
+  const items = (section) => p.prod.filter((i) => i.section === section);
+  if (s === 'staff') {
+    const queue = p.prod.filter((i) => i.queue > 0).map((i) => `<div><span>${i.name}</span><span>x${i.queue}</span></div>`).join('');
+    const tabs = ['Assaut', 'Logistique', 'Administration', 'Hôpital'].map((t) => `<button role="tab" class="tab" data-tab="${t}">${t}</button>`).join('');
+    const cards = items('population').filter((i) => i.tab === ui.tab).map((i) => prodCard(i, 'Recruter')).join('');
+    return '<h2>Population</h2><div>' + tabs + '</div><div data-testid="queue-operation-units"><span>Production d’unités</span>' + queue + '</div>'
+      + '<div data-testid="population-grid"><div class="card"><div class="badge"><span>2 507 383</span></div><h3>Soldat</h3></div>' + cards + '</div>';
+  }
+  if (s === 'specialized') {
+    return '<h2>Appareils spécialisés</h2><div data-testid="special-unit-grid"><div class="card"><h3>Résonateur de Trame (RT)</h3><span>Flux</span><span>3 987</span></div>'
+      + items('specialized').map((i) => prodCard(i, 'Lancer')).join('') + '</div>';
+  }
+  if (s === 'defense') {
+    return '<h2>DÉFENSE</h2><div data-testid="defense-grid"><div class="card"><h3>Iris des Piliers</h3><button type="button">Activer +1</button></div>'
+      + items('defense').map((i) => prodCard(i, 'Lancer')).join('') + '</div>';
+  }
+  const tabs = ['Assemblages', 'Réparation', 'Composants', 'Modèle', 'Recyclage'].map((t) => `<button type="button" class="stab" data-stab="${t}">${t}</button>`).join('');
+  if (ui.ship === 'Composants') {
+    const rows = items('component').map((i) => `<div data-testid="component-production-row"><div data-testid="component-row-layout"><span>${i.name}</span>`
+      + `<span>×${i.owned}</span><div data-testid="component-row-cost">${costLeaves(i.costs)}</div>`
+      + `<div data-testid="component-row-controls"><input type="number" placeholder="Qté"><button type="button" data-max="1">MAX</button>`
+      + `<button type="button" class="prod" data-section="component" data-name="${i.name}"></button></div></div></div>`).join('');
+    return '<h2>Chantier spatial</h2><div>' + tabs + '</div><div data-testid="component-stock-summary"><span>Gestion des stocks</span></div><div>' + rows + '</div>';
+  }
+  const cost = (c) => Object.entries(c).map(([k, v]) => `<span aria-label="${k.toUpperCase()} : ${kfmt(v)}">${kfmt(v)}</span>`).join('');
+  const ships = items('ship').map((i) => `<article data-testid="ship-assembly-card"><button type="button"><span>${i.name}</span><span>En service : <b>${i.owned}</b></span><span>MILITAIRE</span></button>`
+    + `<section data-testid="ship-production-control"><button type="button" class="mode" data-mode="construction">Construction</button><button type="button" class="mode" data-mode="assemblages">Assemblages</button>`
+    + `<div>${cost(i.costs)}</div><div data-testid="ship-production-quantity-row"><button type="button" aria-label="Qté -">-</button><input type="number" placeholder="1" aria-label="Qté">`
+    + `<button type="button" aria-label="Qté +">+</button><button type="button" data-max="1">MAX</button><button type="button" class="prod" data-section="ship" data-name="${i.name}">Lancer</button></div></section></article>`).join('');
+  const catalogue = '<article data-testid="ship-assembly-card"><button type="button"><span>Intercepteur</span><span>Inactif</span></button><button type="button">Ajouter à mes modèles</button></article>';
+  return '<h2>Chantier spatial</h2><div>' + tabs + '</div><div data-testid="ship-assembly-grid">' + ships + '</div><div data-testid="shipyard-catalog-grid">' + catalogue + '</div>';
+}
 function render() {
   if (!state) return;
   const p = state.planets[state.active], s = sec();
   const title = {buildings: 'Industrie', facilities: 'Installations', tech: 'Laboratoire'}[s] || 'Vue';
+  const isProd = ['staff', 'shipyard', 'specialized', 'defense'].includes(s);
   let cards = '';
-  if (s === 'tech') cards = state.tech.map((t) => card(p, t, 'tech', state.research_busy)).join('');
+  if (isProd) cards = '';
+  else if (s === 'tech') cards = state.tech.map((t) => card(p, t, 'tech', state.research_busy)).join('');
   else cards = p.buildings.filter((b) => b.section === s).map((b) => card(p, b, 'build', p.busy)).join('');
   const planets = state.planets.map((pl, i) => `<button class="pl" data-i="${i}"><span>${pl.name}</span><span>${pl.coords}</span>`
     + `<span>${md(pl.stocks.Fer)}</span><span>${md(pl.stocks.Cristal)}</span><span>${md(pl.stocks['Éther'])}</span></button>`).join('');
@@ -118,8 +191,10 @@ function render() {
     + `<div class="res"><div><span>${big(p.stocks.Fer)}</span><span>FER</span></div><div><span>${big(p.stocks.Cristal)}</span><span>CRISTAL</span></div>`
     + `<div><span>${big(p.stocks['Éther'])}</span><span>ÉTHER</span></div><div><span>${int(p.energy)}</span><span>ÉNERGIE</span></div>`
     + '<div><span>4 808</span><span>ASTRIUM</span></div><div><span>492</span><span>ÉCHOS</span></div></div>'
-    + `<main><h2>${title}</h2><div class="grid">${cards}</div></main>`
+    + (isProd ? `<main>${prodMain(p, s)}</main>` : `<main><h2>${title}</h2><div class="grid">${cards}</div></main>`)
     + '<nav><button class="nav" data-s="facilities"><span class="sr-only">Installations</span></button><button class="nav" data-s="tech"><span class="sr-only">Laboratoire</span></button>'
+    + '<button class="nav" data-s="staff"><span class="sr-only">Population</span></button><button class="nav" data-s="shipyard"><span class="sr-only">Chantier spatial</span></button>'
+    + '<button class="nav" data-s="specialized"><span class="sr-only">Appareils spécialisés</span></button><button class="nav" data-s="defense"><span class="sr-only">Défenses</span></button>'
     + '<button><span class="sr-only">Vue d’ensemble</span></button></nav>'
     + `<div id="overlay" ${overlayOpen ? '' : 'hidden'}><button id="close-ov">Fermer</button><button>Arrêter la rotation</button>${planets}</div>`
     + (state.popup ? '<div role="dialog"><button>Confirmer</button></div>' : '');
@@ -129,6 +204,22 @@ function render() {
   document.querySelectorAll('.pl').forEach((b) => b.onclick = async () => {
     await fetch('/api/select', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({index: +b.dataset.i})});
     if (state.close_on_select) overlayOpen = false;
+    await load();
+  });
+  document.querySelectorAll('.tab').forEach((b) => b.onclick = () => { ui.tab = b.dataset.tab; render(); });
+  document.querySelectorAll('.stab').forEach((b) => b.onclick = () => { ui.ship = b.dataset.stab; render(); });
+  document.querySelectorAll('.mode').forEach((b) => b.onclick = async () => {
+    await fetch('/api/ship_mode', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({mode: b.dataset.mode})});
+    await load();
+  });
+  document.querySelectorAll('button[data-max]').forEach((b) => b.onclick = async () => {
+    const holder = b.parentElement; const input = holder.querySelector('input'); const prod = holder.querySelector('.prod');
+    const r = await (await fetch('/api/affordable', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({section: prod.dataset.section, name: prod.dataset.name})})).json();
+    input.value = r.count;
+  });
+  document.querySelectorAll('.prod').forEach((b) => b.onclick = async () => {
+    const input = b.parentElement.querySelector('input'); if (!input || !input.value) return;
+    await fetch('/api/produce', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({section: b.dataset.section, name: b.dataset.name, qty: +input.value})});
     await load();
   });
   document.querySelectorAll('.act').forEach((b) => b.onclick = async () => {
@@ -211,6 +302,57 @@ def create_mock_game() -> FastAPI:
             g["popup"] = True
         return {"ok": True}
 
+    def _prod_item(section: str, name: str):
+        planet = app.state.game["planets"][app.state.game["active"]]
+        item = next((i for i in planet["prod"] if i["section"] == section and i["name"] == name), None)
+        if item is None:
+            raise HTTPException(404)
+        return planet, item
+
+    def _afford(planet, item) -> int:
+        return int(min(planet["stocks"][k] // v for k, v in item["costs"].items() if v > 0))
+
+    @app.post("/api/ship_mode")
+    async def ship_mode(request: Request):
+        app.state.game["ship_mode"] = (await request.json())["mode"]
+        return {"ok": True}
+
+    @app.post("/api/affordable")
+    async def affordable(request: Request):
+        body = await request.json()
+        planet, item = _prod_item(body["section"], body["name"])
+        return {"count": _afford(planet, item)}
+
+    @app.post("/api/produce")
+    async def produce(request: Request):
+        g, body = app.state.game, await request.json()
+        planet, item = _prod_item(body["section"], body["name"])
+        qty = int(body["qty"])
+        if qty < 1 or qty > _afford(planet, item):
+            raise HTTPException(409, "ressources insuffisantes")
+        if body["section"] == "ship" and g["ship_mode"] != "construction":
+            raise HTTPException(409, "mode Assemblages : composants requis")
+        if not g["no_debit"]:
+            for k, v in item["costs"].items():
+                planet["stocks"][k] -= v * qty
+        if body["section"] == "population":
+            item["queue"] += qty  # la population est entraînée : elle apparaît dans la file d'attente
+        else:
+            item["owned"] += qty
+        g["actions"].append({"kind": "production", "section": body["section"], "planet": planet["name"], "name": item["name"],
+                             "qty": qty, "mode": g["ship_mode"] if body["section"] == "ship" else None})
+        if g["popup_after_click"]:
+            g["popup"] = True
+        return {"ok": True}
+
+    @app.post("/api/_prod")
+    async def set_prod(request: Request):
+        body = await request.json()
+        planet = app.state.game["planets"][int(body["index"])]
+        item = next(i for i in planet["prod"] if i["name"] == body["name"])
+        item.update({k: body[k] for k in ("owned", "queue") if k in body})
+        return {"ok": True}
+
     # --- crochets de test -------------------------------------------------------
     @app.post("/api/_reset")
     async def reset(request: Request):
@@ -248,6 +390,9 @@ def create_mock_game() -> FastAPI:
         g["research_busy"] = False
         for p in g["planets"]:
             p["busy"] = False
+            for item in p["prod"]:  # la population en file d'attente est terminée
+                item["owned"] += item["queue"]
+                item["queue"] = 0
         return {"ok": True}
 
     @app.get("/api/_actions")

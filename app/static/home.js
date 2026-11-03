@@ -40,7 +40,7 @@ function renderSimulation(items, total, live) {
   }
   list.replaceChildren(...items.slice().reverse().map((s) => el("li", {},
     el("span", { className: "when", textContent: ago(s.t) + " :" }),
-    `sur ${s.planet}, j'aurais lancé ${s.name} niveau ${s.to}`)));
+    s.qty ? `sur ${s.planet}, j'aurais lancé ${s.qty === "MAX" ? "le maximum de" : s.qty + " ×"} ${s.name}` : `sur ${s.planet}, j'aurais lancé ${s.name} niveau ${s.to}`)));
 }
 
 function renderEvents(events) {

@@ -64,3 +64,65 @@ PRESETS = [
     {"id": "mines_energy_storage", "label": "Mines, énergie et stockage", "names": MINES + [
         "Centrale Énergétique", "Hangar de Fer", "Hangar de Cristal", "Cuve d'Éther"]},
 ]
+
+
+# --------------------------------------------------------------------------------- production
+# Pages où l'on produit « un nombre » d'éléments (relevées sur le jeu). Les modèles de vaisseaux sont créés par le
+# joueur : ils ne peuvent pas être intégrés d'avance, le bot les découvre en lisant la page Chantier spatial.
+PRODUCTION_SECTIONS = [
+    {"id": "population", "label": "Population", "block": "population", "page": "staff"},
+    {"id": "ships", "label": "Chantier spatial : vaisseaux", "block": "shipyard", "page": "shipyard"},
+    {"id": "components", "label": "Chantier spatial : composants", "block": "shipyard", "page": "shipyard"},
+    {"id": "specialized", "label": "Appareils spécialisés", "block": "specialized", "page": "specialized"},
+    {"id": "defense", "label": "Défenses", "block": "defense", "page": "defense"},
+]
+PRODUCTION_SECTION_IDS = [s["id"] for s in PRODUCTION_SECTIONS]
+
+# Ordre d'exécution par défaut des « blocs » (les ressources vont d'abord au premier) : réglable par le joueur.
+PRIORITY_BLOCKS = ["constructions", "research", "population", "shipyard", "specialized", "defense"]
+BLOCK_LABELS = {
+    "constructions": "Constructions (bâtiments)", "research": "Recherches", "population": "Population",
+    "shipyard": "Chantier spatial (vaisseaux et composants)", "specialized": "Appareils spécialisés", "defense": "Défenses",
+}
+
+# Population : onglet du jeu → unités (le « Soldat » de base n'a pas de bouton de recrutement).
+POPULATION: list[tuple[str, list[str]]] = [
+    ("Assaut", ["Rempart de Fer", "Spectre du Rift", "Surchargeur Plasmique", "Faucheur Cinétique"]),
+    ("Logistique", ["Pilote", "Technicien", "Informaticien"]),
+    ("Administration", ["Scientifique", "Ingénieur", "Mineur"]),
+]
+SPECIALIZED = [
+    "Sonde Spatiale", "Drone Terrestre", "Petit Transporteur", "Grand Transporteur", "Recycleur I", "Recycleur II",
+    "Foreuse orbitale",
+]
+DEFENSE = [
+    "Sentinelle de Rempart", "Faisceau de Verrouillage", "Éclateur Ionique", "Forge Plasmique", "Relais de Rupture",
+    "Égide de Trame", "Lance du Trône", "Bastion d'Orbite",
+]
+COMPONENTS: list[tuple[str, list[str]]] = [
+    ("Infrastructures", ["Chasseur", "Intercepteur", "Transporteur", "Escorteur", "Navette", "Frégate", "Corvette", "Croiseur",
+                         "Croiseur lourd", "Cuirassé", "Destroyer"]),
+    ("Hangars", ["Hangar léger", "Hangar moyen", "Hangar lourd"]),
+    ("Armement", ["Station de tir", "Canon laser", "Missile IEM", "Canon à plasma", "Rayon plasma", "Disrupteur",
+                  "Canon des Monarques", "Rayon des Monarques"]),
+    ("Blindages", ["Coque à faible densité", "Coque à densité moyenne", "Coque haute densité", "Coque des Monarques"]),
+    ("Boucliers", ["Petit bouclier", "Grand bouclier", "Bouclier des Monarques"]),
+    ("Propulsion", ["Turboréacteur", "Statoréacteur", "Propulseur à propergol", "Propulseur hybride", "Propulseur ionique",
+                    "Propulseur photonique", "Propulseur nuc. therm.", "Réacteur antimatière"]),
+]
+
+
+def production_entries(discovered_ships: list[str]) -> dict[str, list[dict]]:
+    """Éléments proposés par section : [{name, group}]."""
+    ships = [{"name": n, "group": "Mes modèles (lus dans le jeu)"} for n in sorted(discovered_ships)]
+    return {
+        "population": [{"name": n, "group": g} for g, names in POPULATION for n in names],
+        "ships": ships,
+        "components": [{"name": n, "group": g} for g, names in COMPONENTS for n in names],
+        "specialized": [{"name": n, "group": "Appareils spécialisés"} for n in SPECIALIZED],
+        "defense": [{"name": n, "group": "Défenses"} for n in DEFENSE],
+    }
+
+
+def section_of_block(block: str) -> list[str]:
+    return [s["id"] for s in PRODUCTION_SECTIONS if s["block"] == block]

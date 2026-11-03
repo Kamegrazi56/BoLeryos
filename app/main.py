@@ -63,6 +63,10 @@ class NotificationsRequest(BaseModel):
     events: dict[str, bool] = Field(default_factory=dict)
 
 
+class ProductionResetRequest(BaseModel):
+    id: str | None = Field(default=None, max_length=16)  # None : toutes les commandes uniques
+
+
 class RecordingRequest(BaseModel):
     enabled: bool
 
@@ -301,6 +305,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _check_origin(request)
         await bot.automation.stop("arrêt demandé")
         return JSONResponse(bot.automation.summary(), headers=NO_STORE)
+
+    @app.post("/api/automation/production/reset")
+    async def api_production_reset(body: ProductionResetRequest, request: Request):
+        """Réactive une commande unique « faite » (ou toutes) : elle sera relancée au prochain passage."""
+        _check_origin(request)
+        count = bot.automation.reset_production_done(body.id)
+        return JSONResponse({"reset": count, "status": bot.automation.summary()}, headers=NO_STORE)
 
     @app.post("/api/automation/read-state")
     async def api_automation_read_state(request: Request):

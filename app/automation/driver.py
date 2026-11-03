@@ -13,10 +13,29 @@ from typing import Awaitable, Callable
 
 from .. import human
 from .numbers import norm
+from .production import READ_PRODUCTION_JS, ProdCard, parse_prod_card
 from .state import READ_PAGE_JS, READ_PLANETS_JS, Card, PageState, PlanetInfo, parse_page, parse_planets
 
 # Boutons de la navigation du jeu qui mènent à une page (libellés lus dans la barre du bas).
-NAV_LABEL = {"facilities": "Installations", "tech": "Laboratoire"}
+NAV_LABEL = {
+    "facilities": "Installations", "tech": "Laboratoire", "staff": "Population", "shipyard": "Chantier spatial",
+    "specialized": "Appareils spécialisés", "defense": "Défenses",
+}
+# Pages de production : élément qui prouve que la page est affichée (pas de carte « Améliorer » sur ces pages).
+READY_SELECTOR = {
+    "staff": '[data-testid="population-grid"]',
+    "shipyard": '[data-testid="ship-assembly-grid"], [data-testid="component-stock-summary"]',
+    "specialized": '[data-testid="special-unit-grid"]',
+    "defense": '[data-testid="defense-grid"]',
+}
+# Section de production → (page du jeu, nature des cartes lues, libellé de l'onglet interne à ouvrir si besoin).
+PRODUCTION_PAGE = {
+    "population": ("staff", "population", None),
+    "ships": ("shipyard", "ships", "Assemblages"),
+    "components": ("shipyard", "components", "Composants"),
+    "specialized": ("specialized", "other", None),
+    "defense": ("defense", "other", None),
+}
 
 
 class GameUiError(Exception):
@@ -27,6 +46,15 @@ class GameUiError(Exception):
 class LaunchResult:
     confirmed: bool
     detail: str
+    qty: int | None = None  # quantité réellement saisie (utile avec MAX)
+    verified: bool = True  # False : le clic est parti mais le débit est trop petit pour se voir à l'écran
+
+
+@dataclass
+class ProdPage:
+    cards: list[ProdCard]
+    resources: object
+    planet: str
 
 
 class GameDriver:
@@ -134,21 +162,27 @@ class GameDriver:
         return False
 
     # ----------------------------------------------------------- navigation
+    async def _section_ready(self, section: str) -> bool:
+        selector = READY_SELECTOR.get(section)
+        if selector:
+            return await self.page.locator(selector).count() > 0
+        return bool((await self.read_page(attempts=1)).cards)
+
     async def _wait_section(self, section: str, timeout: float) -> bool:
         for _ in range(int(timeout / 0.4)):
-            if self.current_section() == section and (await self.read_page(attempts=1)).cards:
+            if self.current_section() == section and await self._section_ready(section):
                 return True
             await asyncio.sleep(0.4)
         return False
 
     async def open_section(self, section: str) -> bool:
         """Ouvre une page du jeu : clic sur la navigation si elle existe, sinon navigation interne, sinon rechargement."""
-        if self.current_section() == section and (await self.read_page(attempts=1)).cards:
+        if self.current_section() == section and await self._section_ready(section):
             return True
         await self.guard()
         label = NAV_LABEL.get(section)
         if label:
-            nav = self.page.locator("button, a").filter(has_text=re.compile(rf"^\s*{label}\s*$")).first
+            nav = self.page.locator("button:visible, a:visible").filter(has_text=re.compile(rf"^\s*{label}\s*$")).first
             if await nav.count():
                 await human.click(self.page, nav, self.settings)
                 if await self._wait_section(section, 6):
@@ -195,3 +229,120 @@ class GameDriver:
             if was is not None and now is not None and was - now >= 0.5 * cost:
                 return LaunchResult(True, f"{label} débité")
         return LaunchResult(False, "les ressources n'ont pas été débitées")
+
+    # ------------------------------------------------------------ production
+    async def _read_production_cards(self, kind: str) -> list[ProdCard]:
+        raw = await self.page.evaluate(READ_PRODUCTION_JS, kind)
+        return [parse_prod_card(c) for c in raw["cards"]]
+
+    async def _open_tab(self, label: str, *, role: str) -> None:
+        tab = self.page.get_by_role(role, name=label, exact=True).filter(visible=True).first  # type: ignore[arg-type]
+        if not await tab.count():
+            raise GameUiError(f"onglet « {label} » introuvable")
+        await self.guard()
+        await human.click(self.page, tab, self.settings)
+        await asyncio.sleep(0.8)
+
+    async def read_production(self, section: str, tab: str | None = None, want: str | None = None, force_tab: bool = False) -> ProdPage:
+        """Ouvre la page de production et lit ses cartes. `tab` : onglet de la population (Assaut, Logistique…) ;
+        `want` : nom attendu — si absent de la vue affichée, on ouvre l'onglet interne puis on relit."""
+        page_name, kind, subtab = PRODUCTION_PAGE[section]
+        if not await self.open_section(page_name):
+            raise GameUiError(f"page « {page_name} » inaccessible")
+        cards = await self._read_production_cards(kind)
+        present = lambda: (want is None and not force_tab) or (want is not None and any(norm(c.name) == norm(want) for c in cards))  # noqa: E731
+        if (force_tab or not present()) and (tab or subtab):
+            if tab:
+                await self._open_tab(tab, role="tab")
+            else:
+                await self._open_tab(subtab, role="button")  # type: ignore[arg-type]
+            for _ in range(5):
+                cards = await self._read_production_cards(kind)
+                if (cards if force_tab else present()):
+                    break
+                await asyncio.sleep(0.5)
+        state = await self.read_page(attempts=2)
+        return ProdPage(cards=cards, resources=state.resources, planet=state.planet)
+
+    def _production_card_locator(self, section: str, index: int):
+        if section == "ships":
+            return self.page.locator('[data-testid="ship-assembly-card"]').filter(
+                has=self.page.locator('[data-testid="ship-production-control"]')).nth(index)
+        if section == "components":
+            return self.page.locator('[data-testid="component-production-row"]').nth(index)
+        raise ValueError(section)
+
+    async def produce(self, section: str, tab: str | None, name: str, qty: int | None) -> LaunchResult:
+        """Saisit la quantité (ou clique sur MAX), clique sur « Recruter » / « Lancer », puis vérifie le débit."""
+        before = await self.read_production(section, tab, want=name)
+        index = next((i for i, c in enumerate(before.cards) if norm(c.name) == norm(name)), None)
+        if index is None:
+            return LaunchResult(False, "élément introuvable")
+        fresh = before.cards[index]
+        if not fresh.has_controls or not fresh.can_produce:
+            return LaunchResult(False, "le bouton n'est plus actif")
+        page = self.page
+        if section in ("ships", "components"):
+            card = self._production_card_locator(section, index)
+        else:
+            title = page.locator("h3").filter(has_text=re.compile(rf"^\s*{re.escape(fresh.name)}\s*$")).first
+            card = title.locator("xpath=ancestor::*[.//input[@type='number']][1]")
+        quantity = card.locator("input[type=number]").first
+        if section == "ships":
+            construction = card.get_by_role("button", name="Construction", exact=True).first
+            if await construction.count():
+                await human.click(page, construction, self.settings)  # mode « Construction » demandé par le joueur
+                await asyncio.sleep(0.6)  # la carte se redessine après le changement de mode
+        await self.guard()
+        await human.think(self.settings)
+        if qty is None:
+            maxi = card.get_by_role("button", name=re.compile(r"^(MAX|Quantité maximale)")).first
+            if not await maxi.count():
+                return LaunchResult(False, "bouton MAX introuvable")
+            await human.click(page, maxi, self.settings)
+        else:
+            await human.click(page, quantity, self.settings)
+            await quantity.fill(str(qty))
+        await asyncio.sleep(0.3)
+        typed = await quantity.input_value()
+        try:
+            planned = int(re.sub(r"\D", "", typed)) if typed else 0
+        except ValueError:
+            planned = 0
+        if planned < 1 or (qty is not None and planned != qty):
+            return LaunchResult(False, f"la quantité saisie n'est pas celle demandée (« {typed} »)")
+        if section == "components":
+            go = card.locator('[data-testid="component-row-controls"] button').last
+        elif section == "ships":
+            go = card.get_by_role("button", name="Lancer", exact=True).first
+        else:
+            go = card.get_by_role("button", name=re.compile(r"^(Recruter|Lancer)\b")).first
+        if not await go.count() or not await go.is_enabled():
+            return LaunchResult(False, "bouton de production introuvable ou désactivé", planned)
+        await self.guard()
+        await human.click(page, go, self.settings)
+        await asyncio.sleep(1.2)
+        dialog = page.locator("[role=dialog], [aria-modal=true]").first
+        if await dialog.count() and await dialog.is_visible():
+            raise GameUiError("une fenêtre inattendue s'est ouverte après le clic (capture de la page nécessaire)")
+        after = await self.read_page(attempts=2)
+        # 1) un débit visible : le jeu arrondit les gros stocks, un petit débit peut passer inaperçu
+        invisible = True
+        for label, unit in fresh.costs.items():
+            expected = unit * planned
+            step = before.resources.step(label)
+            was, now = before.resources.stock(label), after.resources.stock(label)
+            if unit <= 0 or was is None or now is None or step is None or expected < 2 * step:
+                continue
+            invisible = False
+            if was - now >= 0.5 * expected:
+                return LaunchResult(True, f"{label} débité", planned)
+        if not invisible:
+            return LaunchResult(False, "les ressources n'ont pas été débitées", planned)
+        # 2) débit trop petit pour se voir : on regarde si le stock ou la file d'attente de l'élément a augmenté
+        again = await self._read_production_cards(PRODUCTION_PAGE[section][1])
+        seen = next((c for c in again if norm(c.name) == norm(name)), None)
+        if seen is not None and seen.owned is not None and fresh.owned is not None and seen.owned + seen.queued > fresh.owned + fresh.queued:
+            return LaunchResult(True, "stock ou file d'attente en hausse", planned)
+        return LaunchResult(True, "débit trop petit pour être vérifié à l'écran", planned, verified=False)
+

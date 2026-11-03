@@ -2,10 +2,11 @@
 const { el, fmt, table, help } = window.ui;
 const $ = (id) => document.getElementById(id);
 const DAYS = ["L", "M", "M", "J", "V", "S", "D"];
-const TABS = ["account", "constructions", "research", "schedule", "settings"];
+const TABS = ["account", "constructions", "research", "production", "priority", "schedule", "settings"];
 
 let model = null; // réglages en cours d'édition (source de vérité de l'interface)
-let catalog = { buildings: [], research: [], planets: [], universes: [], presets: [] };
+let catalog = { buildings: [], research: [], planets: [], universes: [], presets: [], production: {}, production_sections: [], blocks: [] };
+let prodDone = {};
 let saveTimer = null;
 let saving = Promise.resolve();
 let catalogKey = "";
@@ -54,8 +55,15 @@ function adoptIds(saved) {
     mine.forEach((item, i) => { item.id = theirs[i].id; });
   }
 }
+function adoptProductionIds(saved) {
+  const mine = model.production.queue, theirs = saved.production.queue;
+  if (mine.length === theirs.length && mine.every((item, i) => item.name === theirs[i].name && item.section === theirs[i].section)) {
+    mine.forEach((item, i) => { item.id = theirs[i].id; });
+  }
+}
 async function doSave() {
   if (model.constructions.scope === "one" && !model.constructions.planet) return; // en attente du choix de la planète
+  if (model.production.scope === "one" && !model.production.planet) return;
   const body = JSON.parse(JSON.stringify(model));
   delete body.catalog; // entretenu par le bot
   delete body.mode; // le mode se change depuis l'Accueil, avec confirmation
@@ -69,6 +77,7 @@ async function doSave() {
   if (!res.ok) return say(detailText(data, "Réglages refusés."), "error");
   catalog = data.catalog;
   adoptIds(data.settings);
+  adoptProductionIds(data.settings);
   say("Enregistré ✓", "ok");
 }
 const save = () => { clearTimeout(saveTimer); saving = saving.then(doSave).catch(() => say("Enregistrement impossible.", "error")); return saving; };
@@ -245,6 +254,149 @@ function renderResearchPlanet() {
 }
 $("res-planet").addEventListener("change", () => { model.research.funding_planet = $("res-planet").value; scheduleSave(); });
 
+
+// ---------------------------------------------------------------------------------- production
+const MODE_LABEL = { once: "Commande unique", stock: "Objectif de stock", repeat: "Répéter à chaque passage" };
+const sectionLabel = (id) => (catalog.production_sections.find((s) => s.id === id) || { label: id }).label;
+
+function renderProdScope() {
+  const c = model.production;
+  $("pscope-all").checked = c.scope === "all";
+  $("pscope-one").checked = c.scope === "one";
+  const names = [...new Set([...catalog.planets, c.planet].filter(Boolean))];
+  $("prod-planet").replaceChildren(
+    el("option", { value: "", textContent: names.length ? "Choisir une planète…" : "Aucune planète connue" }),
+    ...names.map((n) => el("option", { value: n, textContent: n })),
+  );
+  $("prod-planet").value = c.planet;
+  $("prod-planet").disabled = c.scope !== "one";
+  $("prod-planet-hint").textContent = c.scope === "one" && !c.planet ? "Choisissez la planète concernée." : "";
+}
+document.querySelectorAll('input[name="prod-scope"]').forEach((radio) => radio.addEventListener("change", () => {
+  const c = model.production;
+  c.scope = radio.value;
+  c.planet = c.scope === "all" ? "" : c.planet || catalog.planets[0] || "";
+  renderProdScope();
+  scheduleSave();
+}));
+$("prod-planet").addEventListener("change", () => { model.production.planet = $("prod-planet").value; renderProdScope(); scheduleSave(); });
+
+function renderProdAddNames() {
+  const section = $("prod-add-section").value;
+  const entries = (catalog.production[section] || []).filter((e) => !model.production.queue.some((q) => q.section === section && q.name === e.name));
+  const select = $("prod-add-name");
+  const keep = select.value;
+  select.replaceChildren(el("option", { value: "", textContent: entries.length ? "Choisir…" : "Aucun élément disponible" }));
+  let group = null, optgroup = null;
+  entries.forEach((e) => {
+    if (e.group !== group) { group = e.group; optgroup = el("optgroup", { label: group }); select.append(optgroup); }
+    optgroup.append(el("option", { value: e.name, textContent: e.name }));
+  });
+  select.value = keep;
+  $("prod-ships-hint").textContent = section === "ships" && !(catalog.production.ships || []).length
+    ? "Vos modèles de vaisseaux apparaissent après « Lire l'état du jeu » (page Suivi, onglet État du jeu)."
+    : "";
+}
+$("prod-add-section").addEventListener("change", renderProdAddNames);
+$("prod-add-mode").addEventListener("change", () => {
+  if ($("prod-add-mode").value === "stock") $("prod-add-max").checked = false;
+  $("prod-add-max").disabled = $("prod-add-mode").value === "stock";
+});
+$("prod-add-max").addEventListener("change", () => { $("prod-add-amount").disabled = $("prod-add-max").checked; });
+
+function renderProdQueue() {
+  const queue = model.production.queue;
+  const list = $("prod-queue");
+  list.replaceChildren();
+  queue.forEach((item, i) => {
+    const mode = el("select", { ariaLabel: `Comportement pour ${item.name}` }, ...Object.entries(MODE_LABEL).map(([v, t]) => el("option", { value: v, textContent: t })));
+    mode.value = item.mode;
+    const amount = el("input", { type: "number", min: 1, max: 1e12, ariaLabel: `Quantité pour ${item.name}`, disabled: item.max });
+    amount.value = item.max ? "" : item.amount;
+    const maxBox = el("input", { type: "checkbox", checked: item.max, disabled: item.mode === "stock", ariaLabel: `Maximum pour ${item.name}` });
+    mode.addEventListener("change", () => {
+      item.mode = mode.value;
+      if (item.mode === "stock") item.max = false;
+      renderProdQueue();
+      scheduleSave();
+    });
+    amount.addEventListener("input", () => {
+      if (amount.value === "") return;
+      item.amount = Math.max(1, Math.min(1e12, Math.floor(Number(amount.value))));
+      scheduleSave();
+    });
+    maxBox.addEventListener("change", () => { item.max = maxBox.checked; renderProdQueue(); scheduleSave(); });
+    const button = (text, title, onClick, disabled = false) => {
+      const b = el("button", { type: "button", className: "secondary small", textContent: text, title, disabled });
+      b.addEventListener("click", onClick);
+      return b;
+    };
+    const move = (d) => () => { [queue[i], queue[i + d]] = [queue[i + d], queue[i]]; renderProdQueue(); scheduleSave(); };
+    const done = prodDone[item.id];
+    const status = el("span", { className: "goal-current" });
+    if (item.mode === "once" && done) {
+      status.append(`faite sur ${done} planète(s) `);
+      const again = button("Relancer", "La commande sera refaite au prochain passage", async () => {
+        await fetch("/api/automation/production/reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: item.id }) });
+        refreshCatalog(false);
+      });
+      status.append(again);
+    }
+    list.append(el("li", { className: "queue-row" },
+      el("span", { className: "rank", textContent: String(i + 1) }),
+      el("span", { className: "goal-name", textContent: item.name, title: sectionLabel(item.section) }),
+      el("span", { className: "hint", textContent: sectionLabel(item.section) }),
+      mode, amount, el("label", { className: "day" }, maxBox, "max"), status,
+      button("↑", "Monter (plus prioritaire)", move(-1), i === 0),
+      button("↓", "Descendre", move(1), i === queue.length - 1),
+      button("×", "Retirer de la liste", () => { queue.splice(i, 1); renderProdQueue(); scheduleSave(); }),
+    ));
+  });
+  if (!queue.length) list.append(el("li", { className: "empty-state", textContent: "Liste vide : choisissez un type de production et un élément ci-dessous." }));
+  renderProdAddNames();
+}
+$("prod-add").addEventListener("click", () => {
+  const section = $("prod-add-section").value, name = $("prod-add-name").value, mode = $("prod-add-mode").value;
+  const max = $("prod-add-max").checked, raw = $("prod-add-amount").value;
+  if (!section || !name || (!max && raw === "")) return;
+  model.production.queue.push({ section, name, mode, max, amount: max ? 1 : Math.max(1, Math.min(1e12, Math.floor(Number(raw)))) });
+  $("prod-add-amount").value = "";
+  renderProdQueue();
+  scheduleSave();
+});
+
+function renderPriority() {
+  const order = model.priority;
+  const label = (id) => (catalog.blocks.find((b) => b.id === id) || { label: id }).label;
+  const list = $("priority-list");
+  list.replaceChildren(...order.map((id, i) => {
+    const button = (text, title, onClick, disabled) => {
+      const b = el("button", { type: "button", className: "secondary small", textContent: text, title, disabled });
+      b.addEventListener("click", onClick);
+      return b;
+    };
+    const move = (d) => () => { [order[i], order[i + d]] = [order[i + d], order[i]]; renderPriority(); scheduleSave(); };
+    const row = el("li", { className: "queue-row" },
+      el("span", { className: "rank", textContent: String(i + 1) }),
+      el("span", { className: "goal-name", textContent: label(id) }),
+      button("↑", "Plus prioritaire", move(-1), i === 0),
+      button("↓", "Moins prioritaire", move(1), i === order.length - 1));
+    row.dataset.block = id;
+    return row;
+  }));
+}
+$("prod-enabled").addEventListener("change", () => { model.production.enabled = $("prod-enabled").checked; scheduleSave(); });
+$("prod-recheck").addEventListener("input", () => { if ($("prod-recheck").value !== "") { model.production.recheck_minutes = Number($("prod-recheck").value); scheduleSave(); } });
+
+function renderProduction() {
+  $("prod-enabled").checked = model.production.enabled;
+  $("prod-recheck").value = model.production.recheck_minutes;
+  $("prod-add-section").replaceChildren(...catalog.production_sections.map((s) => el("option", { value: s.id, textContent: s.label })));
+  renderProdScope();
+  renderProdQueue();
+  renderPriority();
+}
+
 // ------------------------------------------------------------------------ plages horaires
 function renderTimezones() {
   let zones = [];
@@ -282,7 +434,7 @@ $("add-window").addEventListener("click", () => {
 });
 
 // ------------------------------------------------------------------------------ formulaire
-const catalogSignature = () => JSON.stringify([catalog.buildings.map((e) => e.name), catalog.research.map((e) => e.name), catalog.planets, catalog.universes]);
+const catalogSignature = () => JSON.stringify([catalog.buildings.map((e) => e.name), catalog.research.map((e) => e.name), catalog.planets, catalog.universes, (catalog.production.ships || []).map((e) => e.name)]);
 function renderAll() {
   $("cap").value = model.daily_cap;
   $("cycle-min").value = model.cycle.min_minutes;
@@ -299,6 +451,7 @@ function renderAll() {
   renderGoals($("res-goals"), catalog.research, model.research.targets);
   renderResearchPlanet();
   renderUniverse();
+  renderProduction();
   catalogKey = catalogSignature();
 }
 function renderUniverse() {
@@ -456,6 +609,10 @@ async function refreshCatalog(force = false) {
   try {
     const data = await (await fetch("/api/automation")).json();
     catalog = data.catalog;
+    const doneNow = JSON.stringify(data.status.production_done || {});
+    const doneChanged = doneNow !== JSON.stringify(prodDone);
+    prodDone = data.status.production_done || {};
+    if (doneChanged && model && !(document.activeElement && document.activeElement.matches("input, select"))) renderProdQueue();
     $("persist").textContent = data.status.persistent
       ? "Réglages enregistrés sur le serveur (volume /data) : ils survivent à un redémarrage."
       : "Aucun volume /data : les réglages sont perdus au redémarrage (exportez-les pour les conserver).";

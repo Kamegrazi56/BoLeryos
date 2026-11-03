@@ -57,12 +57,26 @@ function renderPlanets(rows) {
   box.replaceChildren(table(["Planète", "État", "Détail", "Prochaine vérification"], rows.map((r) => [r.planet, PLANET_STATUS[r.status] || r.status, r.detail, `dans ${waitText(r.next_in_s)}`])));
 }
 
+const PROD_STATUS = {
+  pending: "en attente de ressources", launched: "production lancée", would_launch: "réalisable (simulation)",
+  done: "tout est fait", idle: "rien à lancer", retry: "à réessayer",
+};
+function renderProduction(rows) {
+  const box = $("prod-pending");
+  if (!rows || !rows.length) {
+    box.replaceChildren(el("p", { className: "empty-state", textContent: "Aucune production suivie pour l'instant. Elles apparaissent ici une fois le bot démarré (ON) avec des lignes dans Réglages › Production." }));
+    return;
+  }
+  box.replaceChildren(table(["Bloc", "Planète", "État", "Détail", "Prochaine vérification"], rows.map((r) => [r.label, r.planet, PROD_STATUS[r.status] || r.status, r.detail, `dans ${waitText(r.next_in_s)}`])));
+}
+
 async function refresh() {
   try {
     const data = await (await fetch("/api/status?limit=400")).json();
     logs = data.logs;
     renderLog();
     renderPlanets(data.automation.planets_state);
+    renderProduction(data.automation.production_state);
   } catch { /* le bot redémarre : on réessaie */ }
 }
 
@@ -78,6 +92,14 @@ $("read-state").addEventListener("click", async () => {
     el("h2", { textContent: `Planètes (${data.planets.length})` }),
     table(["Nom", "Coordonnées", "Fer", "Cristal", "Éther"], data.planets.map((p) => [p.name, p.coords, ...p.stocks.map(fmt)])),
   );
+  for (const p of Object.values(data.production || {})) {
+    out.append(el("h2", { textContent: `${p.label}${p.planet ? " — planète " + p.planet : ""}` }));
+    if (p.error) { out.append(el("p", { className: "hint", textContent: `Non lue : ${p.error}` })); continue; }
+    out.append(table(["Nom", "Stock lu", "En file d'attente", "Coût d'une unité", "Bouton"], p.cards.map((c) => [
+      c.name, c.owned ?? "illisible", c.queued, Object.entries(c.costs).map(([k, v]) => `${k} ${fmt(v)}`).join(", "),
+      !c.has_controls ? "absent" : c.can_produce ? "actif" : "inactif",
+    ])));
+  }
   for (const [key, s] of Object.entries(data.sections)) {
     const r = s.resources;
     out.append(

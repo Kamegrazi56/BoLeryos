@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from .catalog import PRIORITY_BLOCKS, PRODUCTION_SECTION_IDS
 from .numbers import norm
 from .schedule import parse_hhmm
 
@@ -33,7 +34,11 @@ DEFAULTS: dict[str, Any] = {
         "recheck_minutes": 15.0,  # une planète où une amélioration attend des ressources est revérifiée toutes les X min
     },
     "research": {"enabled": False, "targets": {}, "funding_planet": ""},
-    "catalog": {"buildings": [], "research": [], "planets": [], "universes": []},
+    # Production d'un nombre d'éléments : population, vaisseaux, composants, appareils spécialisés, défenses.
+    "production": {"enabled": False, "scope": "all", "planet": "", "recheck_minutes": 15.0, "queue": []},
+    # Ordre dans lequel le bot sert ses « blocs » : le premier prend les ressources avant les suivants.
+    "priority": list(PRIORITY_BLOCKS),
+    "catalog": {"buildings": [], "research": [], "planets": [], "universes": [], "ships": []},
 }
 
 
@@ -92,6 +97,72 @@ def _queue(raw: Any, errors: list[str]) -> list[dict]:
                 item_id = uuid.uuid4().hex[:8]
             ids.add(item_id)
             out.append({"id": item_id, "name": name, "level": int(level), "relative": relative})
+    return out
+
+
+PRODUCTION_MODES = ("once", "stock", "repeat")
+MAX_AMOUNT = 10**12
+
+
+def _production_queue(raw: Any, errors: list[str]) -> list[dict]:
+    """Lignes de production : [{id, section, name, mode, amount, max}].
+
+    mode « once » : commande unique (faite une fois, puis marquée « faite ») ; « stock » : avoir au moins `amount`
+    exemplaires (le bot ne lance que la différence) ; « repeat » : relancer `amount` (ou le maximum) à chaque passage.
+    `max` vrai : le bot clique sur le bouton MAX du jeu (impossible avec « stock »).
+    """
+    out: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    ids: set[str] = set()
+    if not isinstance(raw, list):
+        errors.append("production.queue : une liste est attendue")
+        return out
+    if len(raw) > 60:
+        errors.append("production.queue : 60 lignes au plus")
+    for item in raw[:60]:
+        if not isinstance(item, dict):
+            errors.append("production.queue : ligne invalide")
+            continue
+        section = str(item.get("section", ""))
+        name = str(item.get("name", "")).strip()
+        mode = str(item.get("mode", "once"))
+        is_max = bool(item.get("max", False))
+        amount = item.get("amount", 1)
+        if section not in PRODUCTION_SECTION_IDS:
+            errors.append("production.queue : section inconnue")
+        elif not name or len(name) > 80:
+            errors.append("production.queue : nom invalide")
+        elif mode not in PRODUCTION_MODES:
+            errors.append(f"production.queue : mode inconnu pour « {name} »")
+        elif is_max and mode == "stock":
+            errors.append(f"production.queue : « {name} » : le maximum n'a pas de sens pour un objectif de stock")
+        elif not is_max and (isinstance(amount, bool) or not isinstance(amount, (int, float)) or not 1 <= amount <= MAX_AMOUNT):
+            errors.append(f"production.queue : quantité invalide pour « {name} » (1 à {MAX_AMOUNT})")
+        elif (section, norm(name)) in seen:
+            errors.append(f"production.queue : « {name} » est en double")
+        else:
+            seen.add((section, norm(name)))
+            item_id = str(item.get("id", ""))[:16] if str(item.get("id", "")).isalnum() else ""
+            if not item_id or item_id in ids:
+                item_id = uuid.uuid4().hex[:8]
+            ids.add(item_id)
+            out.append({"id": item_id, "section": section, "name": name, "mode": mode,
+                        "amount": 1 if is_max else int(amount), "max": is_max})
+    return out
+
+
+def _priority(raw: Any, errors: list[str]) -> list[str]:
+    """Ordre des blocs : une liste des 6 blocs connus ; les blocs oubliés sont ajoutés à la fin."""
+    if not isinstance(raw, list) or any(not isinstance(b, str) for b in raw):
+        errors.append("priority : une liste de blocs est attendue")
+        return list(PRIORITY_BLOCKS)
+    unknown = [b for b in raw if b not in PRIORITY_BLOCKS]
+    if unknown:
+        errors.append(f"priority : bloc inconnu ({unknown[0]})")
+    out: list[str] = []
+    for block in [*raw, *PRIORITY_BLOCKS]:
+        if block in PRIORITY_BLOCKS and block not in out:
+            out.append(block)
     return out
 
 
@@ -185,6 +256,32 @@ def validate(data: dict, *, allow_live: bool, min_cycle_minutes: float = 1.0) ->
     else:
         errors.append("constructions : un objet est attendu")
 
+    prod = data.get("production", merged["production"])
+    if isinstance(prod, dict):
+        scope = prod.get("scope", "all")
+        planet = str(prod.get("planet", "")).strip()[:80]
+        if scope not in ("all", "one"):
+            errors.append("production.scope : « all » ou « one »")
+        elif scope == "one" and not planet:
+            errors.append("production : choisissez la planète concernée")
+        try:
+            recheck = float(prod.get("recheck_minutes", merged["production"]["recheck_minutes"]))
+            if recheck < min_cycle_minutes or recheck > 1440:
+                raise ValueError
+        except (TypeError, ValueError):
+            recheck = merged["production"]["recheck_minutes"]
+            errors.append(f"production : revérification toutes les {min_cycle_minutes:g} à 1440 minutes")
+        merged["production"] = {
+            "enabled": bool(prod.get("enabled", False)),
+            "scope": scope if scope in ("all", "one") else "all",
+            "planet": planet if scope == "one" else "",
+            "recheck_minutes": recheck,
+            "queue": _production_queue(prod.get("queue", []), errors),
+        }
+    else:
+        errors.append("production : un objet est attendu")
+    merged["priority"] = _priority(data.get("priority", merged["priority"]), errors)
+
     res = data.get("research", merged["research"])
     if isinstance(res, dict):
         merged["research"] = {
@@ -199,7 +296,7 @@ def validate(data: dict, *, allow_live: bool, min_cycle_minutes: float = 1.0) ->
     if isinstance(catalog, dict):
         merged["catalog"] = {
             key: sorted({str(n).strip() for n in catalog.get(key, []) if str(n).strip()})[:200]
-            for key in ("buildings", "research", "planets", "universes")
+            for key in ("buildings", "research", "planets", "universes", "ships")
         }
 
     if errors:
@@ -241,7 +338,7 @@ class SettingsStore:
         for key, value in (data if isinstance(data, dict) else {}).items():
             if key == "catalog":
                 continue  # entretenu par le bot
-            if key in ("cycle", "schedule", "constructions", "research") and isinstance(value, dict) and isinstance(merged.get(key), dict):
+            if key in ("cycle", "schedule", "constructions", "research", "production") and isinstance(value, dict) and isinstance(merged.get(key), dict):
                 merged[key] = {**merged[key], **value}
             else:
                 merged[key] = value

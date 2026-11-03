@@ -26,6 +26,8 @@
         <button role="tab" id="tab-account" data-tab="account" aria-controls="panel-account">Compte et univers</button>
         <button role="tab" id="tab-constructions" data-tab="constructions" aria-controls="panel-constructions">Constructions</button>
         <button role="tab" id="tab-research" data-tab="research" aria-controls="panel-research">Recherches</button>
+        <button role="tab" id="tab-production" data-tab="production" aria-controls="panel-production">Production</button>
+        <button role="tab" id="tab-priority" data-tab="priority" aria-controls="panel-priority">Priorités</button>
         <button role="tab" id="tab-schedule" data-tab="schedule" aria-controls="panel-schedule">Horaires et rythme</button>
         <button role="tab" id="tab-settings" data-tab="settings" aria-controls="panel-settings">Sauvegarde et alertes</button>
       </div>
@@ -91,6 +93,44 @@
       <p class="hint">Indiquez le <strong>niveau demandé</strong> pour chaque recherche (vide = ne rien lancer). Une recherche à la fois ; elle est payée par la planète choisie ci-dessous.</p>
       <label class="field">Planète qui finance <select id="res-planet"></select></label>
       <div id="res-goals" class="goals"></div>
+    </section>
+
+    <section class="tabpanel card" id="panel-production" role="tabpanel" aria-labelledby="tab-production" hidden>
+      <label class="switch"><input type="checkbox" id="prod-enabled"> Lancer des productions (population, vaisseaux, composants, appareils, défenses)</label>
+
+      <h2>Planètes concernées</h2>
+      <div class="scope">
+        <label class="switch"><input type="radio" name="prod-scope" id="pscope-all" value="all"> Toutes les planètes</label>
+        <label class="switch"><input type="radio" name="prod-scope" id="pscope-one" value="one"> Une seule planète :</label>
+        <select id="prod-planet" aria-label="Planète concernée par la production"></select>
+      </div>
+      <p id="prod-planet-hint" class="hint"></p>
+
+      <h2>Productions souhaitées <span data-help-text="Pour chaque ligne : un nombre choisi, ou « maximum » (le bot clique sur le bouton MAX du jeu). Le bot ne lance une quantité que si les ressources de la planète la couvrent en entier. Chaque ligne s'applique à chaque planète concernée."></span></h2>
+      <ol id="prod-queue" class="queue"></ol>
+      <div class="row">
+        <select id="prod-add-section" aria-label="Type de production"></select>
+        <select id="prod-add-name" aria-label="Élément à produire"></select>
+        <select id="prod-add-mode" aria-label="Comportement">
+          <option value="once">Commande unique</option>
+          <option value="stock">Objectif de stock</option>
+          <option value="repeat">Répéter à chaque passage</option>
+        </select>
+        <input id="prod-add-amount" type="number" min="1" max="1000000000000" placeholder="quantité">
+        <label class="switch"><input type="checkbox" id="prod-add-max"> Maximum</label>
+        <button id="prod-add" type="button" class="small">Ajouter à la liste</button>
+      </div>
+      <p class="hint"><strong>Commande unique</strong> : lancée une fois par planète, puis marquée « faite » (bouton « Relancer » pour la refaire). <strong>Objectif de stock</strong> : le bot veille à en avoir au moins N (stock + file d'attente) et ne commande que la différence. <strong>Répéter</strong> : relancé à chaque passage du bot, tant que les ressources le permettent. Chaque lancement compte dans le maximum de lancements par jour.</p>
+      <p id="prod-ships-hint" class="hint"></p>
+
+      <h2>Revérification</h2>
+      <label class="field">Revérifier toutes les <input id="prod-recheck" type="number" min="1" max="1440" step="1" class="inline"> minutes <span data-help-text="Une planète dont la production n'est pas réalisable (ressources insuffisantes) ou qui répète une production est revérifiée toutes les X minutes."></span></label>
+    </section>
+
+    <section class="tabpanel card" id="panel-priority" role="tabpanel" aria-labelledby="tab-priority" hidden>
+      <h2>Qui passe en premier ?</h2>
+      <p class="hint">À chaque passage, le bot traite ces blocs <strong>de haut en bas</strong> : celui du haut dépense les ressources en premier, ceux du dessous ne disposent que de ce qui reste. Utile surtout avec « maximum », qui dépense tout ce qui est disponible.</p>
+      <ol id="priority-list" class="queue"></ol>
     </section>
 
     <section class="tabpanel card" id="panel-schedule" role="tabpanel" aria-labelledby="tab-schedule" hidden>

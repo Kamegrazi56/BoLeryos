@@ -88,6 +88,9 @@ class GameHandle:
     def set_stocks(self, index: int, **stocks) -> None:
         httpx.post(self.url + "/api/_stocks", json={"index": index, "stocks": stocks}, timeout=5).raise_for_status()
 
+    def set_prod(self, index: int, name: str, **values) -> None:
+        httpx.post(self.url + "/api/_prod", json={"index": index, "name": name, **values}, timeout=5).raise_for_status()
+
     def logout(self) -> None:
         httpx.post(self.url + "/api/_logout", timeout=5).raise_for_status()
 
