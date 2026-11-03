@@ -177,3 +177,14 @@ def test_universe_choice_is_refused_in_manual_mode(client, mock_url):
         assert _until(lambda: client.get("/api/status").json()["manual"])
         res = client.post("/api/universe", json={"index": 0}).json()
         assert "contrôle manuel" in res["message"]
+
+
+def test_page_capture_limit_is_500_and_reaching_it_is_reported_not_silent():
+    from app.explore import MAX_SNAPSHOTS
+
+    assert MAX_SNAPSHOTS == 500
+    rec = Recorder()
+    snap = {"title": "t", "viewport": {}, "elements": [], "texts": []}
+    assert all(rec.add_snapshot(f"https://x.com/p{i}", snap) for i in range(MAX_SNAPSHOTS))
+    assert rec.add_snapshot("https://x.com/one-more", snap) is False
+    assert len(rec.snapshots) == MAX_SNAPSHOTS

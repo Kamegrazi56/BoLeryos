@@ -28,7 +28,7 @@ SKIP_HOST_PARTS = (
     "sentry", "googletagmanager", "openai.com",
 )
 MAX_REQUESTS = 400
-MAX_SNAPSHOTS = 40
+MAX_SNAPSHOTS = 500
 MAX_SHAPES_PER_DIRECTION = 60
 MAX_DEPTH = 6
 
@@ -245,9 +245,10 @@ class Recorder:
             bucket[key] = {"count": 1, "frame": description}
 
     # ------------------------------------------------------------------- pages
-    def add_snapshot(self, url: str, snapshot: dict) -> None:
+    def add_snapshot(self, url: str, snapshot: dict) -> bool:
+        """Retourne False quand la limite de pages est atteinte (rien n'est alors enregistré)."""
         if len(self.snapshots) >= MAX_SNAPSHOTS:
-            return
+            return False
         elements = []
         for el in snapshot.get("elements", []):
             clean = {k: (mask_text(v, 80) if isinstance(v, str) else v) for k, v in el.items()}
@@ -263,6 +264,7 @@ class Recorder:
                 "texts": texts,
             }
         )
+        return True
 
     # ------------------------------------------------------------------ export
     def export(self, cookies: list[dict], storage: dict[str, list[str]]) -> dict:

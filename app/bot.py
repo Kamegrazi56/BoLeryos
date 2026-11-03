@@ -28,7 +28,7 @@ from .automation.runner import AutomationRunner
 from .automation.settings import SettingsStore
 from .config import Settings
 from .notify import Notifier
-from .explore import SNAPSHOT_JS, Recorder, should_skip_host
+from .explore import MAX_SNAPSHOTS, SNAPSHOT_JS, Recorder, should_skip_host
 
 TURNSTILE_SELECTOR = 'iframe[src*="challenges.cloudflare.com"]'
 COOKIE_REFUSE_NAME = "tout refuser"
@@ -672,7 +672,9 @@ class BotSession:
             return False
         try:
             data = await page.evaluate(SNAPSHOT_JS)
-            self._recorder.add_snapshot(page.url, data)
+            if not self._recorder.add_snapshot(page.url, data):
+                self.log(f"Limite de {MAX_SNAPSHOTS} pages capturées atteinte : exportez puis effacez pour continuer.", "warn", event=True)
+                return False
             self.log(f"Page capturée : {self._page_label()} ({len(data['elements'])} éléments).")
             return True
         except Exception:  # noqa: BLE001
