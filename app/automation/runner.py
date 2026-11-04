@@ -18,6 +18,7 @@ from . import catalog as catalog_module
 from .decide import Outcome, decide, decide_ordered
 from .driver import GameDriver, GameUiError
 from .numbers import norm
+from . import expedition as expedition_module
 from . import production as production_module
 from .schedule import is_active, local_now, next_change, windows_from_settings
 from .settings import SettingsStore, normalized_targets
@@ -183,7 +184,7 @@ class AutomationRunner:
         if self.cycle_running:
             return "Le bot est en train de vérifier vos planètes."
         cons, research, prod = cfg["constructions"], cfg["research"], cfg["production"]
-        production_on = prod["enabled"] and bool(prod["queue"])
+        production_on = bool(self._production_blocks(cfg))
         if not ((cons["enabled"] and cons["queue"]) or (research["enabled"] and research["targets"]) or production_on):
             return "Le bot est prêt mais n'a rien à faire : activez les constructions, les recherches ou la production dans Réglages."
         rows = self.planets_state()
@@ -218,6 +219,8 @@ class AutomationRunner:
             work.append(f"{len(research['targets'])} recherche(s)")
         if prod["enabled"] and prod["queue"]:
             work.append(f"{len(prod['queue'])} ligne(s) de production")
+        if cfg["expeditions"]["enabled"] and cfg["expeditions"]["queue"]:
+            work.append(f"{len(cfg['expeditions']['queue'])} ligne(s) d'expédition")
         steps = [
             {"id": "account", "label": "Identifiants mémorisés", "required": True, "link": "/reglages#account",
              "ok": b.has_credentials() or connected,
@@ -499,7 +502,7 @@ class AutomationRunner:
             if signature != self._cons_signature:  # réglages modifiés : on repart d'un état propre
                 self._cons_signature = signature
                 self._pstate.clear()
-            prod_sig = json.dumps(cfg["production"], sort_keys=True)
+            prod_sig = json.dumps([cfg["production"], cfg["expeditions"]], sort_keys=True)
             if prod_sig != self._prod_signature:
                 self._prod_signature = prod_sig
                 self._prodstate.clear()
@@ -521,6 +524,8 @@ class AutomationRunner:
                 elif block == "constructions":
                     if cons["enabled"] and cons["queue"]:
                         await self._constructions_step(cfg, planets, live)
+                elif block == "expeditions":
+                    await self._expeditions_step(cfg, planets, live)
                 else:
                     await self._production_step(cfg, planets, live, block)
             self.last_cycle = f"{datetime.now():%H:%M:%S} ({time.monotonic() - started:.0f} s)"
@@ -557,15 +562,15 @@ class AutomationRunner:
 
     def next_due_in(self, cfg: dict) -> float | None:
         """Secondes avant la prochaine revérification d'une planète (None si rien n'est programmé)."""
-        cons, prod = cfg["constructions"], cfg["production"]
+        cons = cfg["constructions"]
         waits = []
         if cons["enabled"] and cons["queue"] and self._known_planets:
             for planet in self._in_scope(cons, self._known_planets):
                 state = self._pstate.get(norm(planet.name))
                 waits.append(max(0.0, state["next"] - time.time()) if state else 60.0)
-        if prod["enabled"] and prod["queue"] and self._known_planets:
-            for block in self._production_blocks(cfg):
-                for planet in self._in_scope(prod, self._known_planets):
+        if self._known_planets:
+            for block, block_cfg in self._production_blocks(cfg):
+                for planet in self._in_scope(block_cfg, self._known_planets):
                     state = self._prodstate.get(f"{block}|{norm(planet.name)}")
                     waits.append(max(0.0, state["next"] - time.time()) if state else 60.0)
         return min(waits) if waits else None
@@ -614,6 +619,8 @@ class AutomationRunner:
         view["presets"] = catalog_module.PRESETS
         view["production"] = catalog_module.production_entries(cfg["catalog"]["ships"])
         view["production_sections"] = catalog_module.PRODUCTION_SECTIONS
+        view["expedition_ways"] = [{"id": k, "label": v} for k, v in catalog_module.EXPEDITION_WAYS.items()]
+        view["expedition_units"] = catalog_module.expedition_units(cfg["catalog"]["ships"])
         view["blocks"] = [{"id": b, "label": catalog_module.BLOCK_LABELS[b]} for b in catalog_module.PRIORITY_BLOCKS]
         return view
 
@@ -791,22 +798,30 @@ class AutomationRunner:
             raise Interrupted(str(exc)) from exc
 
     # ------------------------------------------------------------------ production
-    def _production_blocks(self, cfg: dict) -> list[str]:
-        """Blocs (population, shipyard, specialized, defense) qui ont au moins une ligne, dans l'ordre de priorité."""
-        sections = {item["section"] for item in cfg["production"]["queue"]}
-        return [b for b in cfg["priority"] if b in ("population", "shipyard", "specialized", "defense")
-                and sections & set(catalog_module.section_of_block(b))]
+    def _production_blocks(self, cfg: dict) -> list[tuple[str, dict]]:
+        """(bloc, réglages du bloc) des productions et expéditions activées qui ont des lignes, dans l'ordre de priorité."""
+        prod, exp = cfg["production"], cfg["expeditions"]
+        sections = {item["section"] for item in prod["queue"]} if prod["enabled"] else set()
+        out = []
+        for block in cfg["priority"]:
+            if block == "expeditions":
+                if exp["enabled"] and exp["queue"]:
+                    out.append((block, exp))
+            elif block in ("population", "shipyard", "specialized", "defense") and sections & set(catalog_module.section_of_block(block)):
+                out.append((block, prod))
+        return out
 
     def _production_due(self, cfg: dict) -> bool:
-        prod = cfg["production"]
-        if not prod["enabled"] or not prod["queue"]:
+        blocks = self._production_blocks(cfg)
+        if not blocks:
             return False
         if not self._known_planets:
             return True
-        scope = self._in_scope(prod, self._known_planets)
-        if not scope:
-            return True
-        return any(self._prod_planet_due(b, p) for b in self._production_blocks(cfg) for p in scope)
+        for block, block_cfg in blocks:
+            scope = self._in_scope(block_cfg, self._known_planets)
+            if not scope or any(self._prod_planet_due(block, p) for p in scope):
+                return True
+        return False
 
     def _prod_planet_due(self, block: str, planet: PlanetInfo) -> bool:
         state = self._prodstate.get(f"{block}|{norm(planet.name)}")
@@ -966,6 +981,78 @@ class AutomationRunner:
             raise Interrupted("lancements non confirmés")
         return "failed", f"{name} : lancement non confirmé"
 
+    def _record_simulated_text(self, planet_label: str, text: str, name: str) -> None:
+        entry = {"t": time.time(), "planet": planet_label.removeprefix("Planète "), "name": name, "from": None, "to": None,
+                 "qty": None, "text": text}
+        last = self.simulated[-1] if self.simulated else None
+        if last and (last["planet"], last.get("text")) == (entry["planet"], text):
+            last["t"] = entry["t"]
+            return
+        self.simulated.append(entry)
+        self.simulated_total += 1
+
+    async def _expeditions_step(self, cfg: dict, planets: list[PlanetInfo], live: bool) -> None:
+        """Remplit les places d'exploration voulues (SIMULATION seulement pour l'instant : aucun lancement n'est codé)."""
+        exp = cfg["expeditions"]
+        if not exp["enabled"] or not exp["queue"]:
+            return
+        if live:
+            self._note("exp:live", "Expéditions : le lancement réel n'est pas encore disponible (captures manquantes) : "
+                       "le bot lit la page et simule seulement.", "warn", event=True)
+        scope = self._in_scope(exp, planets)
+        if exp["scope"] == "one" and not scope:
+            self._note("exp:planet", f"Expéditions : planète « {exp['planet']} » introuvable dans la liste des planètes.", "warn")
+            return
+        self._last_notes.pop("exp:planet", None)
+        recheck = exp["recheck_minutes"] * 60
+        due = [p for p in scope if self._prod_planet_due("expeditions", p)]
+        random.shuffle(due)
+        ways = list(dict.fromkeys(line["way"] for line in exp["queue"]))
+        for planet in due:
+            await self.guard()
+            label = f"Planète {planet.name}"
+            try:
+                if not await self.driver.switch_planet(planet):
+                    self.bot.log(f"{label} : changement de planète non confirmé, planète ignorée.", "warn")
+                    continue
+                pages = {}
+                for way in ways:
+                    await self.guard()
+                    pages[way] = await self.driver.read_expedition(way)
+                    if way == "flotte":
+                        self.store.add_catalog("ships", [pages[way].names[k] for k in pages[way].names
+                                                          if k not in {norm(n) for n in catalog_module.SPECIALIZED}])
+            except GameUiError as exc:
+                self.bot.log(f"{label} : {exc}.", "error")
+                await self.stop("écran du jeu inattendu", automatic=True)
+                raise Interrupted(str(exc)) from exc
+            plan = expedition_module.plan_expeditions(exp["queue"], pages, exp["active_target"])
+            statuses: list[tuple[str, str]] = []
+            for launch in plan.launches:
+                text = launch.describe()
+                self._record_simulated_text(label, text, "Exploration")
+                self._note(f"x:{planet.name}:{text}", f"[Simulation] {label} : je lancerais {text}.", event=True)
+                statuses.append(("would", f"à blanc : {text}"))
+            if not plan.launches:
+                reason = " ; ".join(plan.notes) or "rien à lancer"
+                self._note(f"x:{planet.name}", f"{label} : pas d'exploration à lancer ({reason}).")
+                statuses.append(("wait" if plan.free_slots else "idle", reason))
+            self._settle_production("expeditions", planet, statuses, recheck)
+            await human.think(self.bot._settings)
+
+    async def _read_expedition_state(self) -> dict[str, dict]:
+        """Lecture seule de Opérations › Exploration (compteurs et unités disponibles), pour chaque voie."""
+        out: dict[str, dict] = {}
+        for way, label in catalog_module.EXPEDITION_WAYS.items():
+            try:
+                page = await self.driver.read_expedition(way)
+                out[way] = {"label": label, "active": page.active, "active_max": page.active_max, "daily": page.daily,
+                            "daily_max": page.daily_max, "unreadable": page.unreadable,
+                            "units": [{"name": page.names[k], "available": v} for k, v in page.available.items()]}
+            except GameUiError as exc:
+                out[way] = {"label": label, "error": str(exc), "units": []}
+        return out
+
     async def _read_production_state(self) -> dict[str, dict]:
         """Lecture seule des pages de production : ce que le bot comprend (stock, coût d'une unité, bouton actif)."""
         out: dict[str, dict] = {}
@@ -1015,7 +1102,8 @@ class AutomationRunner:
                     kind = "research" if section == "tech" else "buildings"
                     self._catalog(kind, state.cards, state.planet)
                     sections[section] = {"title": state.section, "planet": state.planet, "resources": asdict(state.resources), "cards": [asdict(c) for c in state.cards]}
-            return {"planets": [asdict(p) for p in planets], "sections": sections, "production": await self._read_production_state()}
+            return {"planets": [asdict(p) for p in planets], "sections": sections, "production": await self._read_production_state(),
+                    "expeditions": await self._read_expedition_state()}
         finally:
             self.driver.guard = previous
             self.cycle_running = False

@@ -79,10 +79,11 @@ PRODUCTION_SECTIONS = [
 PRODUCTION_SECTION_IDS = [s["id"] for s in PRODUCTION_SECTIONS]
 
 # Ordre d'exécution par défaut des « blocs » (les ressources vont d'abord au premier) : réglable par le joueur.
-PRIORITY_BLOCKS = ["constructions", "research", "population", "shipyard", "specialized", "defense"]
+PRIORITY_BLOCKS = ["constructions", "research", "population", "shipyard", "specialized", "defense", "expeditions"]
 BLOCK_LABELS = {
     "constructions": "Constructions (bâtiments)", "research": "Recherches", "population": "Population",
     "shipyard": "Chantier spatial (vaisseaux et composants)", "specialized": "Appareils spécialisés", "defense": "Défenses",
+    "expeditions": "Expéditions (exploration)",
 }
 
 # Population : onglet du jeu → unités (le « Soldat » de base n'a pas de bouton de recrutement).
@@ -126,3 +127,18 @@ def production_entries(discovered_ships: list[str]) -> dict[str, list[dict]]:
 
 def section_of_block(block: str) -> list[str]:
     return [s["id"] for s in PRODUCTION_SECTIONS if s["block"] == block]
+
+
+# ------------------------------------------------------------------------------------ expéditions
+# Page Opérations › Exploration. « piliers » : unités au sol (terrestre) ; « flotte » : vaisseaux (spatial).
+EXPEDITION_WAYS = {"piliers": "Piliers (terrestre)", "flotte": "Flotte (spatial)"}
+EXPEDITION_UNIT_MODES = ("number", "max", "percent")
+
+
+def expedition_units(discovered_ships: list[str]) -> dict[str, list[dict]]:
+    """Unités proposées par voie : unités au sol et appareils pour les Piliers ; modèles (lus dans le jeu) et appareils
+    pour la Flotte."""
+    ground = [{"name": "Soldat", "group": "Assaut"}] + [{"name": n, "group": g} for g, names in POPULATION for n in names]
+    devices = [{"name": n, "group": "Appareils spécialisés"} for n in SPECIALIZED]
+    ships = [{"name": n, "group": "Mes modèles (lus dans le jeu)"} for n in sorted(discovered_ships)]
+    return {"piliers": ground + devices, "flotte": ships + devices}

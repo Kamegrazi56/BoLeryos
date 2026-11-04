@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .catalog import PRIORITY_BLOCKS, PRODUCTION_SECTION_IDS
+from .catalog import EXPEDITION_UNIT_MODES, EXPEDITION_WAYS, PRIORITY_BLOCKS, PRODUCTION_SECTION_IDS
 from .numbers import norm
 from .schedule import parse_hhmm
 
@@ -36,6 +36,8 @@ DEFAULTS: dict[str, Any] = {
     "research": {"enabled": False, "targets": {}, "funding_planet": ""},
     # Production d'un nombre d'éléments : population, vaisseaux, composants, appareils spécialisés, défenses.
     "production": {"enabled": False, "scope": "all", "planet": "", "recheck_minutes": 15.0, "queue": []},
+    # Expéditions (Opérations › Exploration) : combien en garder d'actives, et leur composition.
+    "expeditions": {"enabled": False, "scope": "all", "planet": "", "recheck_minutes": 15.0, "active_target": 1, "queue": []},
     # Ordre dans lequel le bot sert ses « blocs » : le premier prend les ressources avant les suivants.
     "priority": list(PRIORITY_BLOCKS),
     "catalog": {"buildings": [], "research": [], "planets": [], "universes": [], "ships": []},
@@ -148,6 +150,68 @@ def _production_queue(raw: Any, errors: list[str]) -> list[dict]:
             ids.add(item_id)
             out.append({"id": item_id, "section": section, "name": name, "mode": mode,
                         "amount": 1 if is_max else int(amount), "max": is_max})
+    return out
+
+
+MAX_HOURS = 24
+
+
+def _expedition_units(raw: Any, name_for_error: str, errors: list[str]) -> list[dict]:
+    out: list[dict] = []
+    seen: set[str] = set()
+    if not isinstance(raw, list) or not raw:
+        errors.append(f"expeditions.queue : « {name_for_error} » : choisissez au moins une unité")
+        return out
+    for unit in raw[:30]:
+        name = str(unit.get("name", "")).strip() if isinstance(unit, dict) else ""
+        mode = unit.get("mode", "number") if isinstance(unit, dict) else ""
+        value = unit.get("value", 1) if isinstance(unit, dict) else None
+        if not name or len(name) > 80:
+            errors.append("expeditions.queue : nom d'unité invalide")
+        elif mode not in EXPEDITION_UNIT_MODES:
+            errors.append(f"expeditions.queue : mode inconnu pour « {name} »")
+        elif norm(name) in seen:
+            errors.append(f"expeditions.queue : « {name} » est en double dans une composition")
+        elif mode == "max":
+            seen.add(norm(name))
+            out.append({"name": name, "mode": "max", "value": 1})
+        else:
+            low, high = (1, MAX_AMOUNT) if mode == "number" else (1, 100)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not low <= value <= high:
+                errors.append(f"expeditions.queue : quantité invalide pour « {name} » ({low} à {high}{' %' if mode == 'percent' else ''})")
+            else:
+                seen.add(norm(name))
+                out.append({"name": name, "mode": mode, "value": int(value)})
+    return out
+
+
+def _expedition_queue(raw: Any, errors: list[str]) -> list[dict]:
+    """Lignes d'expédition : [{id, way, hours, units:[{name, mode, value}]}] (mode : number | max | percent)."""
+    out: list[dict] = []
+    ids: set[str] = set()
+    if not isinstance(raw, list):
+        errors.append("expeditions.queue : une liste est attendue")
+        return out
+    if len(raw) > 20:
+        errors.append("expeditions.queue : 20 lignes au plus")
+    for item in raw[:20]:
+        if not isinstance(item, dict):
+            errors.append("expeditions.queue : ligne invalide")
+            continue
+        way, hours = item.get("way"), item.get("hours", 1)
+        label = EXPEDITION_WAYS.get(way, "?")
+        if way not in EXPEDITION_WAYS:
+            errors.append("expeditions.queue : voie inconnue (piliers ou flotte)")
+            continue
+        if isinstance(hours, bool) or not isinstance(hours, (int, float)) or not 1 <= hours <= MAX_HOURS:
+            errors.append(f"expeditions.queue : durée invalide ({label}) : 1 à {MAX_HOURS} heures")
+            continue
+        units = _expedition_units(item.get("units"), label, errors)
+        item_id = str(item.get("id", ""))[:16] if str(item.get("id", "")).isalnum() else ""
+        if not item_id or item_id in ids:
+            item_id = uuid.uuid4().hex[:8]
+        ids.add(item_id)
+        out.append({"id": item_id, "way": way, "hours": int(hours), "units": units})
     return out
 
 
@@ -280,6 +344,35 @@ def validate(data: dict, *, allow_live: bool, min_cycle_minutes: float = 1.0) ->
         }
     else:
         errors.append("production : un objet est attendu")
+    exp = data.get("expeditions", merged["expeditions"])
+    if isinstance(exp, dict):
+        scope = exp.get("scope", "all")
+        planet = str(exp.get("planet", "")).strip()[:80]
+        if scope not in ("all", "one"):
+            errors.append("expeditions.scope : « all » ou « one »")
+        elif scope == "one" and not planet:
+            errors.append("expeditions : choisissez la planète de départ")
+        try:
+            recheck = float(exp.get("recheck_minutes", merged["expeditions"]["recheck_minutes"]))
+            if recheck < min_cycle_minutes or recheck > 1440:
+                raise ValueError
+        except (TypeError, ValueError):
+            recheck = merged["expeditions"]["recheck_minutes"]
+            errors.append(f"expeditions : revérification toutes les {min_cycle_minutes:g} à 1440 minutes")
+        target = exp.get("active_target", 1)
+        if isinstance(target, bool) or not isinstance(target, (int, float)) or not 1 <= target <= 50:
+            errors.append("expeditions : nombre d'explorations à garder actives : 1 à 50")
+            target = 1
+        merged["expeditions"] = {
+            "enabled": bool(exp.get("enabled", False)),
+            "scope": scope if scope in ("all", "one") else "all",
+            "planet": planet if scope == "one" else "",
+            "recheck_minutes": recheck,
+            "active_target": int(target),
+            "queue": _expedition_queue(exp.get("queue", []), errors),
+        }
+    else:
+        errors.append("expeditions : un objet est attendu")
     merged["priority"] = _priority(data.get("priority", merged["priority"]), errors)
 
     res = data.get("research", merged["research"])
@@ -338,7 +431,7 @@ class SettingsStore:
         for key, value in (data if isinstance(data, dict) else {}).items():
             if key == "catalog":
                 continue  # entretenu par le bot
-            if key in ("cycle", "schedule", "constructions", "research", "production") and isinstance(value, dict) and isinstance(merged.get(key), dict):
+            if key in ("cycle", "schedule", "constructions", "research", "production", "expeditions") and isinstance(value, dict) and isinstance(merged.get(key), dict):
                 merged[key] = {**merged[key], **value}
             else:
                 merged[key] = value

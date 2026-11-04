@@ -92,6 +92,12 @@ $("read-state").addEventListener("click", async () => {
     el("h2", { textContent: `Planètes (${data.planets.length})` }),
     table(["Nom", "Coordonnées", "Fer", "Cristal", "Éther"], data.planets.map((p) => [p.name, p.coords, ...p.stocks.map(fmt)])),
   );
+  for (const x of Object.values(data.expeditions || {})) {
+    out.append(el("h2", { textContent: `Expéditions : ${x.label}` }));
+    if (x.error) { out.append(el("p", { className: "hint", textContent: `Non lue : ${x.error}` })); continue; }
+    out.append(el("p", { className: "hint", textContent: `Explorations actives ${x.active ?? "?"}/${x.active_max ?? "?"} · quotidiennes ${x.daily ?? "?"}/${x.daily_max ?? "?"}` }));
+    out.append(table(["Unité", "Disponibles"], x.units.map((u) => [u.name, u.available])));
+  }
   for (const p of Object.values(data.production || {})) {
     out.append(el("h2", { textContent: `${p.label}${p.planet ? " — planète " + p.planet : ""}` }));
     if (p.error) { out.append(el("p", { className: "hint", textContent: `Non lue : ${p.error}` })); continue; }

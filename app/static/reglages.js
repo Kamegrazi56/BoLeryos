@@ -2,10 +2,10 @@
 const { el, fmt, table, help } = window.ui;
 const $ = (id) => document.getElementById(id);
 const DAYS = ["L", "M", "M", "J", "V", "S", "D"];
-const TABS = ["account", "constructions", "research", "production", "priority", "schedule", "settings"];
+const TABS = ["account", "constructions", "research", "production", "expeditions", "priority", "schedule", "settings"];
 
 let model = null; // réglages en cours d'édition (source de vérité de l'interface)
-let catalog = { buildings: [], research: [], planets: [], universes: [], presets: [], production: {}, production_sections: [], blocks: [] };
+let catalog = { buildings: [], research: [], planets: [], universes: [], presets: [], production: {}, production_sections: [], blocks: [], expedition_ways: [], expedition_units: {} };
 let prodDone = {};
 let saveTimer = null;
 let saving = Promise.resolve();
@@ -61,9 +61,14 @@ function adoptProductionIds(saved) {
     mine.forEach((item, i) => { item.id = theirs[i].id; });
   }
 }
+function adoptExpeditionIds(saved) {
+  const mine = model.expeditions.queue, theirs = saved.expeditions.queue;
+  if (mine.length === theirs.length && mine.every((item, i) => item.way === theirs[i].way)) mine.forEach((item, i) => { item.id = theirs[i].id; });
+}
 async function doSave() {
   if (model.constructions.scope === "one" && !model.constructions.planet) return; // en attente du choix de la planète
   if (model.production.scope === "one" && !model.production.planet) return;
+  if (model.expeditions.scope === "one" && !model.expeditions.planet) return;
   const body = JSON.parse(JSON.stringify(model));
   delete body.catalog; // entretenu par le bot
   delete body.mode; // le mode se change depuis l'Accueil, avec confirmation
@@ -78,6 +83,7 @@ async function doSave() {
   catalog = data.catalog;
   adoptIds(data.settings);
   adoptProductionIds(data.settings);
+  adoptExpeditionIds(data.settings);
   say("Enregistré ✓", "ok");
 }
 const save = () => { clearTimeout(saveTimer); saving = saving.then(doSave).catch(() => say("Enregistrement impossible.", "error")); return saving; };
@@ -397,6 +403,101 @@ function renderProduction() {
   renderPriority();
 }
 
+// -------------------------------------------------------------------------------------- expéditions
+const UNIT_MODE = { number: "nombre", max: "maximum", percent: "% des disponibles" };
+const wayLabel = (id) => (catalog.expedition_ways.find((w) => w.id === id) || { label: id }).label;
+
+function renderExpScope() {
+  const c = model.expeditions;
+  $("escope-all").checked = c.scope === "all";
+  $("escope-one").checked = c.scope === "one";
+  const names = [...new Set([...catalog.planets, c.planet].filter(Boolean))];
+  $("exp-planet").replaceChildren(
+    el("option", { value: "", textContent: names.length ? "Choisir une planète…" : "Aucune planète connue" }),
+    ...names.map((n) => el("option", { value: n, textContent: n })),
+  );
+  $("exp-planet").value = c.planet;
+  $("exp-planet").disabled = c.scope !== "one";
+}
+document.querySelectorAll('input[name="exp-scope"]').forEach((radio) => radio.addEventListener("change", () => {
+  const c = model.expeditions;
+  c.scope = radio.value;
+  c.planet = c.scope === "all" ? "" : c.planet || catalog.planets[0] || "";
+  renderExpScope();
+  scheduleSave();
+}));
+$("exp-planet").addEventListener("change", () => { model.expeditions.planet = $("exp-planet").value; renderExpScope(); scheduleSave(); });
+$("exp-enabled").addEventListener("change", () => { model.expeditions.enabled = $("exp-enabled").checked; scheduleSave(); });
+$("exp-target").addEventListener("input", () => {
+  if ($("exp-target").value !== "") { model.expeditions.active_target = Math.max(1, Math.min(50, Math.floor(Number($("exp-target").value)))); scheduleSave(); }
+});
+$("exp-recheck").addEventListener("input", () => { if ($("exp-recheck").value !== "") { model.expeditions.recheck_minutes = Number($("exp-recheck").value); scheduleSave(); } });
+
+function renderExpQueue() {
+  const queue = model.expeditions.queue;
+  const list = $("exp-queue");
+  list.replaceChildren();
+  const button = (text, title, onClick, disabled = false) => {
+    const b = el("button", { type: "button", className: "secondary small", textContent: text, title, disabled });
+    b.addEventListener("click", onClick);
+    return b;
+  };
+  queue.forEach((line, i) => {
+    const hours = el("input", { type: "number", min: 1, max: 24, ariaLabel: "Durée en heures" });
+    hours.value = line.hours;
+    hours.addEventListener("input", () => { if (hours.value !== "") { line.hours = Math.max(1, Math.min(24, Math.floor(Number(hours.value)))); scheduleSave(); } });
+    const units = el("ul", { className: "unit-list" });
+    line.units.forEach((u, k) => {
+      const value = el("input", { type: "number", min: 1, max: u.mode === "percent" ? 100 : 1e12, disabled: u.mode === "max", ariaLabel: `Quantité de ${u.name}` });
+      value.value = u.mode === "max" ? "" : u.value;
+      value.addEventListener("input", () => { if (value.value !== "") { u.value = Math.max(1, Math.floor(Number(value.value))); scheduleSave(); } });
+      const mode = el("select", { ariaLabel: `Mode pour ${u.name}` }, ...Object.entries(UNIT_MODE).map(([v, t]) => el("option", { value: v, textContent: t })));
+      mode.value = u.mode;
+      mode.addEventListener("change", () => { u.mode = mode.value; if (u.mode === "percent") u.value = Math.min(u.value, 100); renderExpQueue(); scheduleSave(); });
+      units.append(el("li", {}, el("span", { className: "goal-name", textContent: u.name }), mode, value,
+        button("×", "Retirer cette unité", () => { if (line.units.length > 1) { line.units.splice(k, 1); renderExpQueue(); scheduleSave(); } }, line.units.length < 2)));
+    });
+    const choices = (catalog.expedition_units[line.way] || []).filter((e) => !line.units.some((u) => u.name === e.name));
+    const pick = el("select", { ariaLabel: "Unité à ajouter" }, el("option", { value: "", textContent: choices.length ? "Ajouter une unité…" : "Aucune autre unité" }),
+      ...choices.map((e) => el("option", { value: e.name, textContent: e.name })));
+    pick.addEventListener("change", () => {
+      if (!pick.value) return;
+      line.units.push({ name: pick.value, mode: "number", value: 1 });
+      renderExpQueue();
+      scheduleSave();
+    });
+    const move = (d) => () => { [queue[i], queue[i + d]] = [queue[i + d], queue[i]]; renderExpQueue(); scheduleSave(); };
+    list.append(el("li", { className: "queue-row exp-row" },
+      el("span", { className: "rank", textContent: String(i + 1) }),
+      el("span", { className: "goal-name", textContent: wayLabel(line.way) }),
+      el("label", { className: "day" }, "durée", hours, "h"),
+      units, pick,
+      button("↑", "Monter (plus prioritaire)", move(-1), i === 0),
+      button("↓", "Descendre", move(1), i === queue.length - 1),
+      button("×", "Retirer de la liste", () => { queue.splice(i, 1); renderExpQueue(); scheduleSave(); })));
+  });
+  if (!queue.length) list.append(el("li", { className: "empty-state", textContent: "Liste vide : ajoutez une expédition ci-dessous." }));
+  $("exp-hint").textContent = !(catalog.expedition_units.flotte || []).some((u) => u.group.startsWith("Mes modèles"))
+    ? "Vos modèles de vaisseaux (voie Flotte) apparaissent après « Lire l'état du jeu » (page Suivi, onglet État du jeu)."
+    : "";
+}
+$("exp-add").addEventListener("click", () => {
+  const way = $("exp-add-way").value;
+  const first = (catalog.expedition_units[way] || [])[0];
+  if (!way || !first) return;
+  model.expeditions.queue.push({ way, hours: 1, units: [{ name: first.name, mode: "number", value: 1 }] });
+  renderExpQueue();
+  scheduleSave();
+});
+function renderExpeditions() {
+  $("exp-enabled").checked = model.expeditions.enabled;
+  $("exp-target").value = model.expeditions.active_target;
+  $("exp-recheck").value = model.expeditions.recheck_minutes;
+  $("exp-add-way").replaceChildren(...catalog.expedition_ways.map((w) => el("option", { value: w.id, textContent: w.label })));
+  renderExpScope();
+  renderExpQueue();
+}
+
 // ------------------------------------------------------------------------ plages horaires
 function renderTimezones() {
   let zones = [];
@@ -452,6 +553,7 @@ function renderAll() {
   renderResearchPlanet();
   renderUniverse();
   renderProduction();
+  renderExpeditions();
   catalogKey = catalogSignature();
 }
 function renderUniverse() {

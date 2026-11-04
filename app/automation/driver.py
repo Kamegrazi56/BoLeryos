@@ -13,13 +13,14 @@ from typing import Awaitable, Callable
 
 from .. import human
 from .numbers import norm
+from .expedition import READ_EXPEDITION_JS, ExpeditionPage, parse_expedition_page
 from .production import READ_PRODUCTION_JS, ProdCard, parse_prod_card
 from .state import READ_PAGE_JS, READ_PLANETS_JS, Card, PageState, PlanetInfo, parse_page, parse_planets
 
 # Boutons de la navigation du jeu qui mènent à une page (libellés lus dans la barre du bas).
 NAV_LABEL = {
     "facilities": "Installations", "tech": "Laboratoire", "staff": "Population", "shipyard": "Chantier spatial",
-    "specialized": "Appareils spécialisés", "defense": "Défenses",
+    "specialized": "Appareils spécialisés", "defense": "Défenses", "operations": "Opérations",
 }
 # Pages de production : élément qui prouve que la page est affichée (pas de carte « Améliorer » sur ces pages).
 READY_SELECTOR = {
@@ -163,6 +164,8 @@ class GameDriver:
 
     # ----------------------------------------------------------- navigation
     async def _section_ready(self, section: str) -> bool:
+        if section == "operations":  # pas d'élément repérable par identifiant : les boutons de mission font foi
+            return await self.page.get_by_role("button", name=re.compile(r"^\s*exploration\s*$", re.I)).count() > 0
         selector = READY_SELECTOR.get(section)
         if selector:
             return await self.page.locator(selector).count() > 0
@@ -346,3 +349,24 @@ class GameDriver:
             return LaunchResult(True, "stock ou file d'attente en hausse", planned)
         return LaunchResult(True, "débit trop petit pour être vérifié à l'écran", planned, verified=False)
 
+
+    # ------------------------------------------------------------ expéditions (lecture seule)
+    async def read_expedition(self, way: str) -> ExpeditionPage:
+        """Ouvre Opérations, choisit le moyen de lancement (Piliers / Flotte) et la mission « Exploration », puis lit
+        les compteurs et les unités disponibles. Aucun champ n'est rempli, rien n'est lancé."""
+        if not await self.open_section("operations"):
+            raise GameUiError("page « Opérations » inaccessible")
+        for label in ("Piliers" if way == "piliers" else "Flotte", "Exploration"):
+            button = self.page.get_by_role("button", name=re.compile(rf"^\s*{label}\s*$", re.I)).filter(visible=True).first
+            if not await button.count():
+                raise GameUiError(f"bouton « {label} » introuvable sur la page Opérations")
+            await self.guard()
+            await human.click(self.page, button, self.settings)
+            await asyncio.sleep(0.6)
+        raw = {}
+        for _ in range(10):
+            raw = await self.page.evaluate(READ_EXPEDITION_JS)
+            if raw.get("active") and raw.get("units"):
+                break
+            await asyncio.sleep(0.5)
+        return parse_expedition_page(way, raw)

@@ -27,6 +27,7 @@
         <button role="tab" id="tab-constructions" data-tab="constructions" aria-controls="panel-constructions">Constructions</button>
         <button role="tab" id="tab-research" data-tab="research" aria-controls="panel-research">Recherches</button>
         <button role="tab" id="tab-production" data-tab="production" aria-controls="panel-production">Production</button>
+        <button role="tab" id="tab-expeditions" data-tab="expeditions" aria-controls="panel-expeditions">Expéditions</button>
         <button role="tab" id="tab-priority" data-tab="priority" aria-controls="panel-priority">Priorités</button>
         <button role="tab" id="tab-schedule" data-tab="schedule" aria-controls="panel-schedule">Horaires et rythme</button>
         <button role="tab" id="tab-settings" data-tab="settings" aria-controls="panel-settings">Sauvegarde et alertes</button>
@@ -125,6 +126,32 @@
 
       <h2>Revérification</h2>
       <label class="field">Revérifier toutes les <input id="prod-recheck" type="number" min="1" max="1440" step="1" class="inline"> minutes <span data-help-text="Une planète dont la production n'est pas réalisable (ressources insuffisantes) ou qui répète une production est revérifiée toutes les X minutes."></span></label>
+    </section>
+
+    <section class="tabpanel card" id="panel-expeditions" role="tabpanel" aria-labelledby="tab-expeditions" hidden>
+      <p class="mode-banner sim" role="note"><strong>Simulation seulement.</strong> Le bot lit la page Opérations › Exploration et dit ce qu'il lancerait ; le lancement réel n'est pas encore codé (il manque des captures : choix des listes « Durée nominale » et « Copies », bouton de lancement, exploration en cours).</p>
+      <label class="switch"><input type="checkbox" id="exp-enabled"> Préparer des expéditions (exploration)</label>
+
+      <h2>Planète de départ</h2>
+      <div class="scope">
+        <label class="switch"><input type="radio" name="exp-scope" id="escope-all" value="all"> Toutes les planètes</label>
+        <label class="switch"><input type="radio" name="exp-scope" id="escope-one" value="one"> Une seule planète :</label>
+        <select id="exp-planet" aria-label="Planète de départ des expéditions"></select>
+      </div>
+
+      <h2>Combien d'explorations en même temps ? <span data-help-text="Le bot lance des explorations tant qu'il y en a moins que ce nombre, dans la limite des places du jeu (« Explorations actives x/10 ») et du quota du jour (« Explorations quotidiennes x/46 »), lus sur la page à chaque passage."></span></h2>
+      <label class="field">Garder <input id="exp-target" type="number" min="1" max="50" class="inline"> exploration(s) active(s)</label>
+
+      <h2>Expéditions souhaitées, par ordre de priorité <span data-help-text="Pour chaque place libre, le bot prend la première ligne réalisable en entier avec les unités disponibles ; les unités d'une exploration prévue ne sont pas réutilisées par la suivante."></span></h2>
+      <ol id="exp-queue" class="queue"></ol>
+      <div class="row">
+        <select id="exp-add-way" aria-label="Moyen de lancement"></select>
+        <button id="exp-add" type="button" class="small">Ajouter une expédition</button>
+      </div>
+      <p id="exp-hint" class="hint"></p>
+
+      <h2>Revérification</h2>
+      <label class="field">Revérifier toutes les <input id="exp-recheck" type="number" min="1" max="1440" step="1" class="inline"> minutes</label>
     </section>
 
     <section class="tabpanel card" id="panel-priority" role="tabpanel" aria-labelledby="tab-priority" hidden>

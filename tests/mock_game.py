@@ -78,6 +78,9 @@ def initial_state():
         "login_attempts": 0,
         "actions": [],
         "research_busy": False,
+        "exp": {"daily": 3, "daily_max": 46, "active": 2, "active_max": 10, "avail": {
+            "piliers": [["Soldat", 2507458], ["Rempart de Fer", 3182], ["Grand Transporteur", 9000]],
+            "flotte": [["Testo Civil Transpo Destroy Def", 43], ["Sonde Spatiale", 3987]]}},
         "ship_mode": "assemblages",  # mode de production affiché sur les cartes de vaisseaux (« Construction » à choisir)
         "planets": [
             {"name": n, "coords": c, "energy": e, "stocks": copy.deepcopy(s), "busy": False, "buildings": _buildings(), "prod": _prod_items()}
@@ -130,7 +133,7 @@ function card(p, it, kind, busy) {
     + `<div class="body">${costs}${dur}<button class="act" data-name="${it.name}" data-kind="${kind}" ${ok ? '' : 'disabled'}>${label}</button></div></div>`;
 }
 const kfmt = (v) => v >= 1e9 ? (v / 1e9).toFixed(3).replace('.', ',') + ' G' : v >= 1e6 ? (v / 1e6).toFixed(3).replace('.', ',') + ' M' : v >= 1000 ? (v / 1000).toFixed(3).replace('.', ',') + ' K' : String(Math.round(v));
-const ui = {tab: 'Assaut', ship: 'Assemblages'};
+const ui = {tab: 'Assaut', ship: 'Assemblages', way: 'Piliers', mission: 'ATTAQUE'};
 const CK = {Fer: 'F', Cristal: 'C', 'Éther': 'E'};
 const costLeaves = (c) => Object.entries(c).map(([k, v]) => `<span>${CK[k]}: ${kfmt(v)}</span>`).join('');
 function prodCard(it, verb) {
@@ -173,11 +176,23 @@ function prodMain(p, s) {
   const catalogue = '<article data-testid="ship-assembly-card"><button type="button"><span>Intercepteur</span><span>Inactif</span></button><button type="button">Ajouter à mes modèles</button></article>';
   return '<h2>Chantier spatial</h2><div>' + tabs + '</div><div data-testid="ship-assembly-grid">' + ships + '</div><div data-testid="shipyard-catalog-grid">' + catalogue + '</div>';
 }
+function opsMain() {
+  const ex = state.exp;
+  const ways = ['Piliers', 'Flotte'].map((w) => `<button type="button" class="way" data-way="${w}">${w.toUpperCase()}</button>`).join('');
+  const missions = ['ATTAQUE', 'TRANSPORT', 'EXPLORATION', 'FOUILLE'].map((m) => `<button type="button" class="mission" data-m="${m}">${m}</button>`).join('');
+  let body = '';
+  if (ui.mission === 'EXPLORATION') {
+    const units = ex.avail[ui.way.toLowerCase()].map(([n, c]) => `<div><span>${n}</span><span>Disponibles : ${int(c)}</span><input type="number" aria-label="Quantité ${n}"></div>`).join('');
+    body = `<div><span>Explorations quotidiennes</span><span>${ex.daily}/${ex.daily_max}</span></div><div><span>Explorations actives</span><span>${ex.active}/${ex.active_max}</span></div>`
+      + `<div><span>Composition</span>${units}</div><button type="button">AUCUNE UNITÉ SÉLECTIONNÉE.</button>`;
+  }
+  return '<h2>Opérations</h2><div><span>Moyen de lancement</span>' + ways + '</div><div><span>Mission</span>' + missions + '</div>' + body;
+}
 function render() {
   if (!state) return;
   const p = state.planets[state.active], s = sec();
   const title = {buildings: 'Industrie', facilities: 'Installations', tech: 'Laboratoire'}[s] || 'Vue';
-  const isProd = ['staff', 'shipyard', 'specialized', 'defense'].includes(s);
+  const isProd = ['staff', 'shipyard', 'specialized', 'defense', 'operations'].includes(s);
   let cards = '';
   if (isProd) cards = '';
   else if (s === 'tech') cards = state.tech.map((t) => card(p, t, 'tech', state.research_busy)).join('');
@@ -191,10 +206,10 @@ function render() {
     + `<div class="res"><div><span>${big(p.stocks.Fer)}</span><span>FER</span></div><div><span>${big(p.stocks.Cristal)}</span><span>CRISTAL</span></div>`
     + `<div><span>${big(p.stocks['Éther'])}</span><span>ÉTHER</span></div><div><span>${int(p.energy)}</span><span>ÉNERGIE</span></div>`
     + '<div><span>4 808</span><span>ASTRIUM</span></div><div><span>492</span><span>ÉCHOS</span></div></div>'
-    + (isProd ? `<main>${prodMain(p, s)}</main>` : `<main><h2>${title}</h2><div class="grid">${cards}</div></main>`)
+    + (isProd ? `<main>${s === 'operations' ? opsMain() : prodMain(p, s)}</main>` : `<main><h2>${title}</h2><div class="grid">${cards}</div></main>`)
     + '<nav><button class="nav" data-s="facilities"><span class="sr-only">Installations</span></button><button class="nav" data-s="tech"><span class="sr-only">Laboratoire</span></button>'
     + '<button class="nav" data-s="staff"><span class="sr-only">Population</span></button><button class="nav" data-s="shipyard"><span class="sr-only">Chantier spatial</span></button>'
-    + '<button class="nav" data-s="specialized"><span class="sr-only">Appareils spécialisés</span></button><button class="nav" data-s="defense"><span class="sr-only">Défenses</span></button>'
+    + '<button class="nav" data-s="specialized"><span class="sr-only">Appareils spécialisés</span></button><button class="nav" data-s="defense"><span class="sr-only">Défenses</span></button><button class="nav" data-s="operations"><span class="sr-only">Opérations</span></button>'
     + '<button><span class="sr-only">Vue d’ensemble</span></button></nav>'
     + `<div id="overlay" ${overlayOpen ? '' : 'hidden'}><button id="close-ov">Fermer</button><button>Arrêter la rotation</button>${planets}</div>`
     + (state.popup ? '<div role="dialog"><button>Confirmer</button></div>' : '');
@@ -206,6 +221,8 @@ function render() {
     if (state.close_on_select) overlayOpen = false;
     await load();
   });
+  document.querySelectorAll('.way').forEach((b) => b.onclick = () => { ui.way = b.dataset.way; render(); });
+  document.querySelectorAll('.mission').forEach((b) => b.onclick = () => { ui.mission = b.dataset.m; render(); });
   document.querySelectorAll('.tab').forEach((b) => b.onclick = () => { ui.tab = b.dataset.tab; render(); });
   document.querySelectorAll('.stab').forEach((b) => b.onclick = () => { ui.ship = b.dataset.stab; render(); });
   document.querySelectorAll('.mode').forEach((b) => b.onclick = async () => {
@@ -343,6 +360,17 @@ def create_mock_game() -> FastAPI:
                              "qty": qty, "mode": g["ship_mode"] if body["section"] == "ship" else None})
         if g["popup_after_click"]:
             g["popup"] = True
+        return {"ok": True}
+
+    @app.post("/api/_exp")
+    async def set_exp(request: Request):
+        body = await request.json()
+        exp = app.state.game["exp"]
+        for key in ("daily", "daily_max", "active", "active_max"):
+            if key in body:
+                exp[key] = body[key]
+        for way, rows in (body.get("avail") or {}).items():
+            exp["avail"][way] = rows
         return {"ok": True}
 
     @app.post("/api/_prod")
