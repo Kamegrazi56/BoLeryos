@@ -19,6 +19,7 @@ from .decide import Outcome, decide, decide_ordered
 from .driver import GameDriver, GameUiError
 from .numbers import norm
 from . import attacks as attacks_module
+from . import espionage as espionage_module
 from . import expedition as expedition_module
 from . import production as production_module
 from .schedule import is_active, local_now, next_change, windows_from_settings
@@ -74,6 +75,7 @@ class AutomationRunner:
         self.attacks: list[dict] = []
         self._attack_seen: dict[str, float] = {}
         self._attack_last_check: float | None = None
+        self._spied: dict[str, float] = {}  # coordonnées → dernier espionnage (simulé ou réel)
         self._known_planets: list[PlanetInfo] = []
         self.last_cycle = ""
         self._state_path = Path(data_dir) / "automation-state.json" if data_dir and os.path.isdir(data_dir) else None
@@ -90,6 +92,7 @@ class AutomationRunner:
             self._busy_until = {k: float(v) for k, v in saved.get("busy", {}).items() if float(v) > now}
             self._baseline = {str(k): int(v) for k, v in saved.get("baseline", {}).items()}
             self._prod_done = {str(k): str(v) for k, v in saved.get("prod_done", {}).items()}
+            self._spied = {str(k): float(v) for k, v in saved.get("spied", {}).items()}
         except (OSError, ValueError, KeyError, TypeError):
             pass
 
@@ -98,7 +101,7 @@ class AutomationRunner:
             return
         try:
             tmp = self._state_path.with_suffix(".tmp")
-            tmp.write_text(json.dumps({"counter": self._counter, "busy": self._busy_until, "baseline": self._baseline, "prod_done": self._prod_done}), encoding="utf8")
+            tmp.write_text(json.dumps({"counter": self._counter, "busy": self._busy_until, "baseline": self._baseline, "prod_done": self._prod_done, "spied": self._spied}), encoding="utf8")
             os.replace(tmp, self._state_path)
         except OSError:
             pass
@@ -192,7 +195,7 @@ class AutomationRunner:
         if self.cycle_running:
             return "Le bot est en train de vérifier vos planètes."
         cons, research, prod = cfg["constructions"], cfg["research"], cfg["production"]
-        production_on = bool(self._production_blocks(cfg))
+        production_on = bool(self._production_blocks(cfg)) or cfg["espionage"]["enabled"]
         if not ((cons["enabled"] and cons["queue"]) or (research["enabled"] and research["targets"]) or production_on):
             return "Le bot est prêt mais n'a rien à faire : activez les constructions, les recherches ou la production dans Réglages."
         rows = self.planets_state()
@@ -229,6 +232,8 @@ class AutomationRunner:
             work.append(f"{len(prod['queue'])} ligne(s) de production")
         if cfg["expeditions"]["enabled"] and cfg["expeditions"]["queue"]:
             work.append(f"{len(cfg['expeditions']['queue'])} ligne(s) d'expédition")
+        if cfg["espionage"]["enabled"]:
+            work.append("espionnage")
         steps = [
             {"id": "account", "label": "Identifiants mémorisés", "required": True, "link": "/reglages#account",
              "ok": b.has_credentials() or connected,
@@ -521,7 +526,8 @@ class AutomationRunner:
                 self._prod_signature = prod_sig
                 self._prodstate.clear()
             research_on = cfg["research"]["enabled"]
-            if not research_on and not self._constructions_due(cfg) and not self._production_due(cfg):
+            spying = cfg["espionage"]["enabled"]
+            if not research_on and not spying and not self._constructions_due(cfg) and not self._production_due(cfg):
                 due_in = self.next_due_in(cfg)
                 when = f" (prochain contrôle dans {due_in / 60:.0f} min)" if due_in is not None else ""
                 self._note("idle-cycle", f"Cycle : rien à vérifier pour l'instant{when}.")
@@ -540,6 +546,8 @@ class AutomationRunner:
                         await self._constructions_step(cfg, planets, live)
                 elif block == "expeditions":
                     await self._expeditions_step(cfg, planets, live)
+                elif block == "espionage":
+                    await self._espionage_step(cfg, planets, live)
                 else:
                     await self._production_step(cfg, planets, live, block)
             self.last_cycle = f"{datetime.now():%H:%M:%S} ({time.monotonic() - started:.0f} s)"
@@ -635,6 +643,7 @@ class AutomationRunner:
         view["production_sections"] = catalog_module.PRODUCTION_SECTIONS
         view["expedition_ways"] = [{"id": k, "label": v} for k, v in catalog_module.EXPEDITION_WAYS.items()]
         view["expedition_units"] = catalog_module.expedition_units(cfg["catalog"]["ships"])
+        view["espionage_ways"] = [{"id": k, "label": v} for k, v in catalog_module.ESPIONAGE_WAYS.items()]
         view["blocks"] = [{"id": b, "label": catalog_module.BLOCK_LABELS[b]} for b in catalog_module.PRIORITY_BLOCKS]
         return view
 
@@ -1106,6 +1115,70 @@ class AutomationRunner:
             self._settle_production("expeditions", planet, statuses, recheck)
             await human.think(self.bot._settings)
 
+    async def _espionage_step(self, cfg: dict, planets: list[PlanetInfo], live: bool) -> None:
+        """Une cible par passage dans l'intervalle de coordonnées (SIMULATION seulement : aucun envoi n'est codé)."""
+        spy = cfg["espionage"]
+        if not spy["enabled"]:
+            return
+        if live:
+            self._note("spy:live", "Espionnage : l'envoi réel n'est pas encore disponible (captures manquantes) : "
+                       "le bot lit la Galaxie et simule seulement.", "warn", event=True)
+        origin = None
+        if spy["planet"]:
+            origin = next((p for p in planets if norm(p.name) == norm(spy["planet"])), None)
+            if origin is None:
+                self._note("spy:planet", f"Espionnage : planète « {spy['planet']} » introuvable dans la liste des planètes.", "warn")
+                return
+        self._last_notes.pop("spy:planet", None)
+        try:
+            await self.guard()
+            if origin is not None and not await self.driver.switch_planet(origin):
+                self.bot.log(f"Espionnage : changement de planète non confirmé ({origin.name}).", "warn")
+                return
+            rows = await self.driver.read_galaxy()
+        except GameUiError as exc:
+            self.bot.log(f"Espionnage : {exc}.", "error")
+            await self.stop("écran du jeu inattendu", automatic=True)
+            raise Interrupted(str(exc)) from exc
+        my_planets = cfg["catalog"]["planets"] or [p.name for p in planets]
+        targets = espionage_module.parse_galaxy(rows)
+        alliance = espionage_module.my_tag(rows, my_planets)
+        candidates = espionage_module.eligible(targets, spy, my_planets, alliance)
+        label = f"Planète {origin.name}" if origin else "Planète active"
+        if not candidates:
+            self._note("spy:none", f"Espionnage : aucune cible entre {spy['coord_min']} et {spy['coord_max']} dans la liste de la "
+                       f"Galaxie ({len(targets)} planète(s) lue(s)).", event=True)
+            return
+        self._last_notes.pop("spy:none", None)
+        target = espionage_module.choose(candidates, self._spied)
+        buttons = [b for b in espionage_module.buttons_for(spy["way"]) if b in target.actions]
+        if not buttons:
+            self._note("spy:buttons", f"Espionnage : pas de bouton {' / '.join(espionage_module.buttons_for(spy['way']))} pour {target.label()}.", "warn")
+            return
+        what = " et ".join("une sonde" if b == "Sonde" else "un drone" for b in buttons)
+        text = f"{what} sur {target.label()}"
+        self._spied[target.coords] = time.time()
+        self._save_state()
+        self._record_simulated_text(label, text, "Espionnage")
+        self.bot.log(f"[Simulation] Espionnage : j'enverrais {text} ({len(candidates)} cible(s) dans l'intervalle).", event=True)
+
+    async def _read_galaxy_state(self) -> dict:
+        """Lecture seule de la liste de la Galaxie : ce que le bot comprend des cibles (joueur, tag, coordonnées)."""
+        cfg = self._cfg()
+        try:
+            rows = await self.driver.read_galaxy()
+        except GameUiError as exc:
+            return {"error": str(exc), "targets": []}
+        my_planets = cfg["catalog"]["planets"]
+        targets = espionage_module.parse_galaxy(rows)
+        spy = cfg["espionage"]
+        in_range = set()
+        if spy["coord_min"] and spy["coord_max"]:
+            in_range = {t.coords for t in espionage_module.eligible(targets, {**spy, "players": True, "errants": True}, my_planets, "")}
+        return {"alliance": espionage_module.my_tag(rows, my_planets), "rows": len(rows),
+                "targets": [{"player": t.player, "tag": t.tag, "planet": t.planet, "coords": t.coords, "errant": t.errant,
+                             "in_range": t.coords in in_range, "actions": list(t.actions)} for t in targets]}
+
     async def _read_expedition_state(self) -> dict[str, dict]:
         """Lecture seule de Opérations › Exploration (compteurs et unités disponibles), pour chaque voie."""
         out: dict[str, dict] = {}
@@ -1169,7 +1242,8 @@ class AutomationRunner:
                     self._catalog(kind, state.cards, state.planet)
                     sections[section] = {"title": state.section, "planet": state.planet, "resources": asdict(state.resources), "cards": [asdict(c) for c in state.cards]}
             return {"planets": [asdict(p) for p in planets], "sections": sections, "production": await self._read_production_state(),
-                    "expeditions": await self._read_expedition_state()}
+                    "expeditions": await self._read_expedition_state(),
+                    "galaxy": await self._read_galaxy_state()}
         finally:
             self.driver.guard = previous
             self.cycle_running = False

@@ -2,10 +2,10 @@
 const { el, fmt, table, help } = window.ui;
 const $ = (id) => document.getElementById(id);
 const DAYS = ["L", "M", "M", "J", "V", "S", "D"];
-const TABS = ["account", "constructions", "research", "production", "expeditions", "priority", "schedule", "settings"];
+const TABS = ["account", "constructions", "research", "production", "expeditions", "espionage", "priority", "schedule", "settings"];
 
 let model = null; // réglages en cours d'édition (source de vérité de l'interface)
-let catalog = { buildings: [], research: [], planets: [], universes: [], presets: [], production: {}, production_sections: [], blocks: [], expedition_ways: [], expedition_units: {} };
+let catalog = { buildings: [], research: [], planets: [], universes: [], presets: [], production: {}, production_sections: [], blocks: [], expedition_ways: [], expedition_units: {}, espionage_ways: [] };
 let prodDone = {};
 let saveTimer = null;
 let saving = Promise.resolve();
@@ -498,6 +498,30 @@ function renderExpeditions() {
   renderExpQueue();
 }
 
+// -------------------------------------------------------------------------------------- espionnage
+function renderEspionage() {
+  const c = model.espionage;
+  $("spy-enabled").checked = c.enabled;
+  $("spy-players").checked = c.players;
+  $("spy-errants").checked = c.errants;
+  $("spy-exclude").checked = c.exclude_alliance;
+  $("spy-min").value = c.coord_min;
+  $("spy-max").value = c.coord_max;
+  $("spy-way").replaceChildren(...catalog.espionage_ways.map((w) => el("option", { value: w.id, textContent: w.label })));
+  $("spy-way").value = c.way;
+  const names = [...new Set([...catalog.planets, c.planet].filter(Boolean))];
+  $("spy-planet").replaceChildren(el("option", { value: "", textContent: "La planète active" }), ...names.map((n) => el("option", { value: n, textContent: n })));
+  $("spy-planet").value = c.planet;
+}
+[["spy-enabled", "enabled"], ["spy-players", "players"], ["spy-errants", "errants"], ["spy-exclude", "exclude_alliance"]].forEach(([id, key]) => {
+  $(id).addEventListener("change", () => { model.espionage[key] = $(id).checked; scheduleSave(); });
+});
+[["spy-min", "coord_min"], ["spy-max", "coord_max"]].forEach(([id, key]) => {
+  $(id).addEventListener("change", () => { $(id).value = $(id).value.trim().toUpperCase(); model.espionage[key] = $(id).value; scheduleSave(); });
+});
+$("spy-way").addEventListener("change", () => { model.espionage.way = $("spy-way").value; scheduleSave(); });
+$("spy-planet").addEventListener("change", () => { model.espionage.planet = $("spy-planet").value; scheduleSave(); });
+
 // ------------------------------------------------------------------------ plages horaires
 function renderTimezones() {
   let zones = [];
@@ -556,6 +580,7 @@ function renderAll() {
   renderUniverse();
   renderProduction();
   renderExpeditions();
+  renderEspionage();
   catalogKey = catalogSignature();
 }
 function renderUniverse() {

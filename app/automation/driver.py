@@ -13,6 +13,7 @@ from typing import Awaitable, Callable
 
 from .. import human
 from .numbers import norm
+from .espionage import READ_GALAXY_JS
 from .expedition import READ_EXPEDITION_JS, ExpeditionPage, parse_expedition_page
 from .production import READ_PRODUCTION_JS, ProdCard, parse_prod_card
 from .state import READ_PAGE_JS, READ_PLANETS_JS, Card, PageState, PlanetInfo, parse_page, parse_planets
@@ -20,7 +21,7 @@ from .state import READ_PAGE_JS, READ_PLANETS_JS, Card, PageState, PlanetInfo, p
 # Boutons de la navigation du jeu qui mènent à une page (libellés lus dans la barre du bas).
 NAV_LABEL = {
     "facilities": "Installations", "tech": "Laboratoire", "staff": "Population", "shipyard": "Chantier spatial",
-    "specialized": "Appareils spécialisés", "defense": "Défenses", "operations": "Opérations",
+    "specialized": "Appareils spécialisés", "defense": "Défenses", "operations": "Opérations", "galaxy": "Galaxie",
 }
 # Pages de production : élément qui prouve que la page est affichée (pas de carte « Améliorer » sur ces pages).
 READY_SELECTOR = {
@@ -28,6 +29,7 @@ READY_SELECTOR = {
     "shipyard": '[data-testid="ship-assembly-grid"], [data-testid="component-stock-summary"]',
     "specialized": '[data-testid="special-unit-grid"]',
     "defense": '[data-testid="defense-grid"]',
+    "galaxy": 'input[aria-label="Recherche de destination"]',
 }
 # Section de production → (page du jeu, nature des cartes lues, libellé de l'onglet interne à ouvrir si besoin).
 PRODUCTION_PAGE = {
@@ -370,3 +372,16 @@ class GameDriver:
                 break
             await asyncio.sleep(0.5)
         return parse_expedition_page(way, raw)
+
+    # ------------------------------------------------------------ galaxie (lecture seule)
+    async def read_galaxy(self) -> list[dict]:
+        """Ouvre la Galaxie (centrée sur la planète active) et lit la liste des planètes affichées. Aucun clic d'envoi."""
+        if not await self.open_section("galaxy"):
+            raise GameUiError("page « Galaxie » inaccessible")
+        rows: list[dict] = []
+        for _ in range(20):  # la liste se charge par portions (« Chargement de la portion… »)
+            rows = await self.page.evaluate(READ_GALAXY_JS)
+            if rows:
+                break
+            await asyncio.sleep(0.5)
+        return rows

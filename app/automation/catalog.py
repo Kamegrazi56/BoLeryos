@@ -79,11 +79,11 @@ PRODUCTION_SECTIONS = [
 PRODUCTION_SECTION_IDS = [s["id"] for s in PRODUCTION_SECTIONS]
 
 # Ordre d'exécution par défaut des « blocs » (les ressources vont d'abord au premier) : réglable par le joueur.
-PRIORITY_BLOCKS = ["constructions", "research", "population", "shipyard", "specialized", "defense", "expeditions"]
+PRIORITY_BLOCKS = ["constructions", "research", "population", "shipyard", "specialized", "defense", "expeditions", "espionage"]
 BLOCK_LABELS = {
     "constructions": "Constructions (bâtiments)", "research": "Recherches", "population": "Population",
     "shipyard": "Chantier spatial (vaisseaux et composants)", "specialized": "Appareils spécialisés", "defense": "Défenses",
-    "expeditions": "Expéditions (exploration)",
+    "expeditions": "Expéditions (exploration)", "espionage": "Espionnage",
 }
 
 # Population : onglet du jeu → unités (le « Soldat » de base n'a pas de bouton de recrutement).
@@ -142,3 +142,8 @@ def expedition_units(discovered_ships: list[str]) -> dict[str, list[dict]]:
     devices = [{"name": n, "group": "Appareils spécialisés"} for n in SPECIALIZED]
     ships = [{"name": n, "group": "Mes modèles (lus dans le jeu)"} for n in sorted(discovered_ships)]
     return {"piliers": ground + devices, "flotte": ships + devices}
+
+
+# -------------------------------------------------------------------------------------- espionnage
+# Boutons rapides de la Galaxie : « Sonde » (espionnage spatial), « Drone » (espionnage terrestre).
+ESPIONAGE_WAYS = {"sonde": "Sonde (spatial)", "drone": "Drone (terrestre)", "both": "Sonde et drone"}

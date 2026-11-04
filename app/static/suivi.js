@@ -92,6 +92,15 @@ $("read-state").addEventListener("click", async () => {
     el("h2", { textContent: `Planètes (${data.planets.length})` }),
     table(["Nom", "Coordonnées", "Fer", "Cristal", "Éther"], data.planets.map((p) => [p.name, p.coords, ...p.stocks.map(fmt)])),
   );
+  if (data.galaxy) {
+    out.append(el("h2", { textContent: "Galaxie (cibles d'espionnage lues)" }));
+    if (data.galaxy.error) out.append(el("p", { className: "hint", textContent: `Non lue : ${data.galaxy.error}` }));
+    else {
+      out.append(el("p", { className: "hint", textContent: `${data.galaxy.targets.length} planète(s) de joueurs ou d'errants · votre alliance : ${data.galaxy.alliance || "inconnue"}` }));
+      out.append(table(["Joueur", "Tag", "Planète", "Coordonnées", "Errant", "Dans l'intervalle"], data.galaxy.targets.map((t) => [
+        t.player, t.tag, t.planet, t.coords, t.errant ? "oui" : "non", t.in_range ? "oui" : "non"])));
+    }
+  }
   for (const x of Object.values(data.expeditions || {})) {
     out.append(el("h2", { textContent: `Expéditions : ${x.label}` }));
     if (x.error) { out.append(el("p", { className: "hint", textContent: `Non lue : ${x.error}` })); continue; }

@@ -28,6 +28,7 @@
         <button role="tab" id="tab-research" data-tab="research" aria-controls="panel-research">Recherches</button>
         <button role="tab" id="tab-production" data-tab="production" aria-controls="panel-production">Production</button>
         <button role="tab" id="tab-expeditions" data-tab="expeditions" aria-controls="panel-expeditions">Expéditions</button>
+        <button role="tab" id="tab-espionage" data-tab="espionage" aria-controls="panel-espionage">Espionnage</button>
         <button role="tab" id="tab-priority" data-tab="priority" aria-controls="panel-priority">Priorités</button>
         <button role="tab" id="tab-schedule" data-tab="schedule" aria-controls="panel-schedule">Horaires et rythme</button>
         <button role="tab" id="tab-settings" data-tab="settings" aria-controls="panel-settings">Sauvegarde et alertes</button>
@@ -152,6 +153,30 @@
 
       <h2>Revérification</h2>
       <label class="field">Revérifier toutes les <input id="exp-recheck" type="number" min="1" max="1440" step="1" class="inline"> minutes</label>
+    </section>
+
+    <section class="tabpanel card" id="panel-espionage" role="tabpanel" aria-labelledby="tab-espionage" hidden>
+      <p class="mode-banner sim" role="note"><strong>Simulation seulement.</strong> Le bot lit la Galaxie et dit qui il espionnerait ; l'envoi réel (boutons « Sonde » / « Drone ») n'est pas encore codé (il manque une capture d'un envoi fait à la main).</p>
+      <label class="switch"><input type="checkbox" id="spy-enabled"> Espionner automatiquement (une cible par passage)</label>
+
+      <h2>Cibles</h2>
+      <div class="row">
+        <label class="switch"><input type="checkbox" id="spy-players"> Joueurs</label>
+        <label class="switch"><input type="checkbox" id="spy-errants"> Errants (tag [AI])</label>
+        <label class="switch"><input type="checkbox" id="spy-exclude"> Exclure mon alliance</label>
+      </div>
+      <div class="fields">
+        <label>Coordonnée minimum <input id="spy-min" type="text" placeholder="I27 00 00" autocomplete="off" spellcheck="false" maxlength="9"></label>
+        <label>Coordonnée maximum <input id="spy-max" type="text" placeholder="I29 99 99" autocomplete="off" spellcheck="false" maxlength="9"></label>
+      </div>
+      <p class="hint">Le bot espionne les planètes dont les coordonnées sont entre ces deux bornes (comprises), en comparant la lettre puis les trois nombres. Il tourne sur les cibles : d'abord celles jamais espionnées, puis la plus ancienne. Vos planètes ne sont jamais visées.</p>
+
+      <h2>Moyen et départ</h2>
+      <div class="fields">
+        <label>Envoyer <select id="spy-way"></select></label>
+        <label>Depuis la planète <select id="spy-planet"></select></label>
+      </div>
+      <p class="hint">Le bot lit la liste affichée par la Galaxie autour de la planète de départ : une cible hors de cette liste n'est pas vue pour l'instant (la recherche d'une autre zone de la carte demande une capture).</p>
     </section>
 
     <section class="tabpanel card" id="panel-priority" role="tabpanel" aria-labelledby="tab-priority" hidden>

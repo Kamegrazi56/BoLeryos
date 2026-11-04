@@ -116,7 +116,7 @@ def test_ids_are_kept_and_the_catalog_offers_units_per_way(game_client):
     assert [w["id"] for w in catalog["expedition_ways"]] == ["piliers", "flotte"]
     ground = [u["name"] for u in catalog["expedition_units"]["piliers"]]
     assert ground[0] == "Soldat" and "Rempart de Fer" in ground and "Grand Transporteur" in ground
-    assert [b["id"] for b in catalog["blocks"]][-1] == "expeditions"
+    assert [b["id"] for b in catalog["blocks"]][-2:] == ["expeditions", "espionage"]
 
 
 # ------------------------------------------------------------------- avec le navigateur (faux jeu)
@@ -171,7 +171,7 @@ def test_real_mode_never_launches_an_expedition_for_now(game_client, game):
 
 
 def test_priority_includes_expeditions_last_and_disabled_expeditions_do_nothing(game_client, game):
-    assert game_client.get("/api/automation").json()["settings"]["priority"][-1] == "expeditions"
+    assert game_client.get("/api/automation").json()["settings"]["priority"][-2] == "expeditions"
     _expeditions(game_client, [exp_line()], enabled=False)
     _cycle(game_client)
     assert not _has(game_client, "exploration")

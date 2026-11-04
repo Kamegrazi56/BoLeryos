@@ -5,13 +5,14 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .catalog import EXPEDITION_UNIT_MODES, EXPEDITION_WAYS, PRIORITY_BLOCKS, PRODUCTION_SECTION_IDS
+from .catalog import ESPIONAGE_WAYS, EXPEDITION_UNIT_MODES, EXPEDITION_WAYS, PRIORITY_BLOCKS, PRODUCTION_SECTION_IDS
 from .numbers import norm
 from .schedule import parse_hhmm
 
@@ -38,6 +39,9 @@ DEFAULTS: dict[str, Any] = {
     "production": {"enabled": False, "scope": "all", "planet": "", "recheck_minutes": 15.0, "queue": []},
     # Expéditions (Opérations › Exploration) : combien en garder d'actives, et leur composition.
     "expeditions": {"enabled": False, "scope": "all", "planet": "", "recheck_minutes": 15.0, "active_target": 1, "queue": []},
+    # Espionnage automatique : une cible par passage, dans un intervalle de coordonnées, joueurs et/ou errants [AI].
+    "espionage": {"enabled": False, "way": "sonde", "players": False, "errants": True, "exclude_alliance": True,
+                  "coord_min": "", "coord_max": "", "planet": ""},
     # Alerte d'attaque : lecture des capteurs toutes les N secondes, seulement quand le bot est sur ON.
     "attack_alert": {"enabled": False, "interval_seconds": 60},
     # Ordre dans lequel le bot sert ses « blocs » : le premier prend les ressources avant les suivants.
@@ -156,6 +160,13 @@ def _production_queue(raw: Any, errors: list[str]) -> list[dict]:
 
 
 MAX_HOURS = 24
+_COORD_RE = re.compile(r"^([A-Z])(\d{2}) (\d{2}) (\d{2})$")
+
+
+def coord_key(text: str) -> tuple[str, int, int, int] | None:
+    """« I27 95 00 » → ("I", 27, 95, 0) : ordre lettre, puis les trois nombres (bornes comprises)."""
+    match = _COORD_RE.match(str(text).strip().upper())
+    return (match.group(1), int(match.group(2)), int(match.group(3)), int(match.group(4))) if match else None
 
 
 def _expedition_units(raw: Any, name_for_error: str, errors: list[str]) -> list[dict]:
@@ -375,6 +386,30 @@ def validate(data: dict, *, allow_live: bool, min_cycle_minutes: float = 1.0) ->
         }
     else:
         errors.append("expeditions : un objet est attendu")
+    spy = data.get("espionage", merged["espionage"])
+    if isinstance(spy, dict):
+        way = spy.get("way", "sonde")
+        lo, hi = str(spy.get("coord_min", "")).strip().upper(), str(spy.get("coord_max", "")).strip().upper()
+        lo_key, hi_key = coord_key(lo), coord_key(hi)
+        if way not in ESPIONAGE_WAYS:
+            errors.append("espionage.way : « sonde », « drone » ou « both »")
+            way = "sonde"
+        if (lo and lo_key is None) or (hi and hi_key is None):
+            errors.append("espionnage : coordonnées au format « I27 95 00 » (lettre, puis 3 nombres de 2 chiffres)")
+        elif lo_key and hi_key and lo_key > hi_key:
+            errors.append("espionnage : la coordonnée minimum doit être avant la coordonnée maximum")
+        enabled = bool(spy.get("enabled", False))
+        players, errants = bool(spy.get("players", False)), bool(spy.get("errants", True))
+        if enabled and not (lo and hi):
+            errors.append("espionnage : indiquez la coordonnée minimum et la coordonnée maximum")
+        if enabled and not (players or errants):
+            errors.append("espionnage : choisissez joueurs et/ou errants")
+        merged["espionage"] = {"enabled": enabled, "way": way, "players": players, "errants": errants,
+                               "exclude_alliance": bool(spy.get("exclude_alliance", True)), "coord_min": lo, "coord_max": hi,
+                               "planet": str(spy.get("planet", "")).strip()[:80]}
+    else:
+        errors.append("espionage : un objet est attendu")
+
     alert = data.get("attack_alert", merged["attack_alert"])
     if isinstance(alert, dict):
         low = max(1.0, min(10.0, min_cycle_minutes * 60))
@@ -443,7 +478,7 @@ class SettingsStore:
         for key, value in (data if isinstance(data, dict) else {}).items():
             if key == "catalog":
                 continue  # entretenu par le bot
-            if key in ("cycle", "schedule", "constructions", "research", "production", "expeditions", "attack_alert") and isinstance(value, dict) and isinstance(merged.get(key), dict):
+            if key in ("cycle", "schedule", "constructions", "research", "production", "expeditions", "attack_alert", "espionage") and isinstance(value, dict) and isinstance(merged.get(key), dict):
                 merged[key] = {**merged[key], **value}
             else:
                 merged[key] = value

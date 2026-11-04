@@ -88,6 +88,16 @@ def initial_state():
             "flotte": [["Testo Civil Transpo Destroy Def", 43], ["Sonde Spatiale", 3987]]}},
         # Capteurs interstellaires : un déploiement du joueur, comme dans l'export (aucune attaque au départ)
         "movements": [_movement("Déploiement", ("6-79-Egide", "M69 38 06", "KameGrazi"), ("8-50-Concorde", "Z25 95 16", "KameGrazi"))],
+        # Liste de la Galaxie autour de la planète active (structure de l'export du 2026-11-03)
+        "galaxy": [
+            {"player": "KameGrazi", "tag": "REPCO", "planet": "6-79-Egide", "coords": "M69 38 06", "actions": []},
+            {"player": "Kairo-Vigie-378", "tag": "AI", "planet": "Kairo-Vigie-378 7", "coords": "M69 34 68", "actions": ["Flotte", "Piliers", "Sonde", "Drone"]},
+            {"player": "Bryn-Socle-176", "tag": "AI", "planet": "Bryn-Socle-176 3", "coords": "M69 37 24", "actions": ["Flotte", "Piliers", "Sonde", "Drone"]},
+            {"player": "Splif", "tag": "REPCO", "planet": "F5", "coords": "M69 06 25", "actions": ["Flotte", "Piliers", "Sonde", "Drone"]},
+            {"player": "Hades33", "tag": "", "planet": "Gaia - M", "coords": "M69 99 83", "actions": ["Flotte", "Piliers", "Sonde", "Drone"]},
+            {"player": "Torek-Veine-165", "tag": "AI", "planet": "Torek-Veine-165 2", "coords": "M97 50 19", "actions": ["Flotte", "Piliers", "Sonde", "Drone"]},
+            {"mining": True, "planet": "Planete miniere", "coords": "M69 40 68", "actions": ["Miner", "Sonde"]},
+        ],
         "ship_mode": "assemblages",  # mode de production affiché sur les cartes de vaisseaux (« Construction » à choisir)
         "planets": [
             {"name": n, "coords": c, "energy": e, "stocks": copy.deepcopy(s), "busy": False, "buildings": _buildings(), "prod": _prod_items()}
@@ -183,6 +193,15 @@ function prodMain(p, s) {
   const catalogue = '<article data-testid="ship-assembly-card"><button type="button"><span>Intercepteur</span><span>Inactif</span></button><button type="button">Ajouter à mes modèles</button></article>';
   return '<h2>Chantier spatial</h2><div>' + tabs + '</div><div data-testid="ship-assembly-grid">' + ships + '</div><div data-testid="shipyard-catalog-grid">' + catalogue + '</div>';
 }
+function galaxyMain() {
+  const rows = state.galaxy.map((r) => {
+    const actions = r.actions.map((a) => `<button type="button" aria-label="${a}"></button>`).join('');
+    if (r.mining) return `<div class="continuous-inspector__list-row"><button type="button">${r.planet} ${r.coords}</button>${actions}</div>`;
+    const who = r.tag ? `${r.player} [${r.tag}]` : r.player;
+    return `<div class="continuous-inspector__list-row"><button type="button"></button><button type="button">${who}</button><button type="button">${r.planet} · ${r.coords}</button>${actions}</div>`;
+  }).join('');
+  return '<h2>Galaxie</h2><input aria-label="Recherche de destination"><section class="continuous-inspector__list">' + rows + '</section>';
+}
 function opsMain() {
   const ex = state.exp;
   const ways = ['Piliers', 'Flotte'].map((w) => `<button type="button" class="way" data-way="${w}">${w.toUpperCase()}</button>`).join('');
@@ -205,7 +224,7 @@ function render() {
   if (!state) return;
   const p = state.planets[state.active], s = sec();
   const title = {buildings: 'Industrie', facilities: 'Installations', tech: 'Laboratoire'}[s] || 'Vue';
-  const isProd = ['staff', 'shipyard', 'specialized', 'defense', 'operations'].includes(s);
+  const isProd = ['staff', 'shipyard', 'specialized', 'defense', 'operations', 'galaxy'].includes(s);
   let cards = '';
   if (isProd) cards = '';
   else if (s === 'tech') cards = state.tech.map((t) => card(p, t, 'tech', state.research_busy)).join('');
@@ -219,10 +238,10 @@ function render() {
     + `<div class="res"><div><span>${big(p.stocks.Fer)}</span><span>FER</span></div><div><span>${big(p.stocks.Cristal)}</span><span>CRISTAL</span></div>`
     + `<div><span>${big(p.stocks['Éther'])}</span><span>ÉTHER</span></div><div><span>${int(p.energy)}</span><span>ÉNERGIE</span></div>`
     + '<div><span>4 808</span><span>ASTRIUM</span></div><div><span>492</span><span>ÉCHOS</span></div></div>'
-    + (isProd ? `<main>${s === 'operations' ? opsMain() : prodMain(p, s)}</main>` : `<main><h2>${title}</h2><div class="grid">${cards}</div></main>`)
+    + (isProd ? `<main>${s === 'operations' ? opsMain() : s === 'galaxy' ? galaxyMain() : prodMain(p, s)}</main>` : `<main><h2>${title}</h2><div class="grid">${cards}</div></main>`)
     + '<nav><button class="nav" data-s="facilities"><span class="sr-only">Installations</span></button><button class="nav" data-s="tech"><span class="sr-only">Laboratoire</span></button>'
     + '<button class="nav" data-s="staff"><span class="sr-only">Population</span></button><button class="nav" data-s="shipyard"><span class="sr-only">Chantier spatial</span></button>'
-    + '<button class="nav" data-s="specialized"><span class="sr-only">Appareils spécialisés</span></button><button class="nav" data-s="defense"><span class="sr-only">Défenses</span></button><button class="nav" data-s="operations"><span class="sr-only">Opérations</span></button>'
+    + '<button class="nav" data-s="specialized"><span class="sr-only">Appareils spécialisés</span></button><button class="nav" data-s="defense"><span class="sr-only">Défenses</span></button><button class="nav" data-s="operations"><span class="sr-only">Opérations</span></button><button class="nav" data-s="galaxy"><span class="sr-only">Galaxie</span></button>'
     + '<button><span class="sr-only">Vue d’ensemble</span></button></nav>'
     + `<div id="overlay" ${overlayOpen ? '' : 'hidden'}><button id="close-ov">Fermer</button><button>Arrêter la rotation</button>${planets}</div>`
     + sensors()
@@ -374,6 +393,11 @@ def create_mock_game() -> FastAPI:
                              "qty": qty, "mode": g["ship_mode"] if body["section"] == "ship" else None})
         if g["popup_after_click"]:
             g["popup"] = True
+        return {"ok": True}
+
+    @app.post("/api/_galaxy")
+    async def set_galaxy(request: Request):
+        app.state.game["galaxy"] = (await request.json())["rows"]
         return {"ok": True}
 
     @app.post("/api/_movements")

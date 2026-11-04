@@ -170,7 +170,9 @@ dialog.modal ul.missing { padding-left: 18px; }
 dialog.modal ul.missing li { margin: 8px 0; }
 
 /* ------------------------------------------------------------------------ réglages */
-.save-state { margin-left: auto; align-self: center; font-size: 13px; color: var(--muted); min-height: 1.4em; }
+.save-state { margin-left: auto; align-self: center; font-size: 13px; color: var(--muted); min-height: 1.4em;
+  /* largeur fixe : un message plus long ne doit pas replier les onglets ni décaler la page pendant un clic */
+  flex: 0 0 240px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .save-state.ok { color: var(--ok); }
 .save-state.error { color: var(--err); }
 .settings-page { display: flex; flex-direction: column; gap: 10px; padding: 12px; max-width: 1280px; margin: 0 auto; min-height: calc(100vh - 100px); }

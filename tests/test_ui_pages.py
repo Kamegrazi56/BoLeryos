@@ -10,7 +10,7 @@ from playwright.sync_api import sync_playwright
 from app.main import create_app
 from tests.conftest import _free_port
 
-TABS = ["account", "constructions", "research", "production", "expeditions", "priority", "schedule", "settings"]
+TABS = ["account", "constructions", "research", "production", "expeditions", "espionage", "priority", "schedule", "settings"]
 PAGES = ["/", "/ecran", "/reglages", "/suivi"]
 
 
@@ -99,11 +99,11 @@ def test_old_addresses_still_work(ui):
 
 
 # ------------------------------------------------------------------------------- réglages
-def test_settings_are_in_eight_tabs_and_only_one_panel_shows_at_a_time(ui):
+def test_settings_are_in_nine_tabs_and_only_one_panel_shows_at_a_time(ui):
     page, errors, _ = ui
     assert [t.get_attribute("data-tab") for t in page.locator("[role=tab]").all()] == TABS
     assert page.locator("[role=tab]").all_inner_texts() == [
-        "Compte et univers", "Constructions", "Recherches", "Production", "Expéditions", "Priorités", "Horaires et rythme", "Sauvegarde et alertes"]
+        "Compte et univers", "Constructions", "Recherches", "Production", "Expéditions", "Espionnage", "Priorités", "Horaires et rythme", "Sauvegarde et alertes"]
     for tab in TABS:
         page.click(f"#tab-{tab}")
         visible = [t for t in TABS if page.locator(f"#panel-{t}").is_visible()]
@@ -564,10 +564,10 @@ def test_priority_tab_orders_the_blocks(ui):
     page, _, app = ui
     page.click("#tab-priority")
     rows = page.locator("#priority-list .queue-row")
-    assert rows.nth(0).get_attribute("data-block") == "constructions" and rows.count() == 7
+    assert rows.nth(0).get_attribute("data-block") == "constructions" and rows.count() == 8
     _edit(page, lambda: rows.nth(4).locator("button[title^='Plus']").click())
     _edit(page, lambda: page.locator("#priority-list .queue-row").nth(3).locator("button[title^='Plus']").click())
-    assert _saved(app)["priority"] == ["constructions", "research", "specialized", "population", "shipyard", "defense", "expeditions"]
+    assert _saved(app)["priority"] == ["constructions", "research", "specialized", "population", "shipyard", "defense", "expeditions", "espionage"]
 
 
 # ---------------------------------------------------------------------------------- expéditions
@@ -630,3 +630,32 @@ def test_home_shows_a_red_card_only_when_an_attack_is_coming(ui):
     finally:
         runner._running = False
         runner.attacks = []
+
+
+# ----------------------------------------------------------------------------------- espionnage
+def test_espionage_tab_saves_targets_interval_and_way(ui):
+    page, _, app = ui
+    page.click("#tab-espionage")
+    assert "Simulation seulement" in page.inner_text("#panel-espionage")
+    assert page.locator("#spy-way option").all_inner_texts() == ["Sonde (spatial)", "Drone (terrestre)", "Sonde et drone"]
+    page.check("#spy-players")
+    page.fill("#spy-min", "i27 00 00")
+    page.press("#spy-min", "Tab")
+    page.fill("#spy-max", "I29 99 99")
+    page.press("#spy-max", "Tab")
+    page.select_option("#spy-way", "drone")
+    _edit(page, lambda: page.check("#spy-enabled"))
+    saved = _saved(app)["espionage"]
+    assert (saved["enabled"], saved["players"], saved["errants"], saved["coord_min"], saved["coord_max"], saved["way"]) == (
+        True, True, True, "I27 00 00", "I29 99 99", "drone")
+    assert page.input_value("#spy-min") == "I27 00 00"  # mis en majuscules
+
+
+def test_the_save_message_never_moves_the_page_layout(ui):
+    """Régression : un message d'enregistrement plus long repliait la rangée d'onglets et décalait la page au milieu
+    d'un clic (le clic était perdu)."""
+    page, _, _ = ui
+    page.click("#tab-account")
+    before = page.locator("#acct-save").bounding_box()
+    page.evaluate("document.querySelector('#save-msg').textContent = 'Modifications en cours… un message bien plus long que prévu'")
+    assert page.locator("#acct-save").bounding_box() == before
