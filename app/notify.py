@@ -24,7 +24,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-KINDS = ("launch", "attention")  # « launch » : amélioration lancée ; « attention » : intervention ou arrêt automatique
+KINDS = ("launch", "attention", "attack")  # amélioration lancée ; intervention ou arrêt automatique ; attaque en approche
 FORMATS = ("json", "text")  # json : Discord / Slack / Mattermost ; text : ntfy (texte brut)
 
 

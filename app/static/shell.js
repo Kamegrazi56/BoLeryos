@@ -143,7 +143,8 @@
       const events = await (await fetch(`/api/events?after=${lastEvent}`)).json();
       events.forEach((e) => {
         lastEvent = Math.max(lastEvent, e.t);
-        if (e.kind !== "info") new Notification(e.kind === "launch" ? "BoLeryos : amélioration lancée" : "BoLeryos : attention", { body: e.msg });
+        const title = { launch: "BoLeryos : amélioration lancée", attention: "BoLeryos : attention", attack: "BoLeryos : ATTAQUE EN APPROCHE" }[e.kind];
+        if (title) new Notification(title, { body: e.msg, requireInteraction: e.kind === "attack" });
       });
     } catch { /* idem */ }
   }

@@ -545,6 +545,8 @@ function renderAll() {
   renderWindows();
   $("cons-enabled").checked = model.constructions.enabled;
   $("res-enabled").checked = model.research.enabled;
+  $("attack-enabled").checked = model.attack_alert.enabled;
+  $("attack-interval").value = model.attack_alert.interval_seconds;
   $("cons-recheck").value = model.constructions.recheck_minutes;
   renderScope();
   renderPresets();
@@ -576,6 +578,8 @@ bind("tz", (n) => { model.schedule.timezone = n.value; });
 bind("cons-enabled", (n) => { model.constructions.enabled = n.checked; });
 bind("cons-recheck", (n) => { if (n.value !== "") model.constructions.recheck_minutes = Number(n.value); });
 bind("res-enabled", (n) => { model.research.enabled = n.checked; });
+bind("attack-enabled", (n) => { model.attack_alert.enabled = n.checked; });
+bind("attack-interval", (n) => { if (n.value !== "") model.attack_alert.interval_seconds = Number(n.value); });
 
 // ------------------------------------------------------------------------------------ compte
 async function refreshAccount() {
@@ -650,6 +654,7 @@ async function refreshNotifications(fill = true) {
     $("notif-format").value = n.format;
     $("notif-launch").checked = !!n.events.launch;
     $("notif-attention").checked = !!n.events.attention;
+    $("notif-attack").checked = !!n.events.attack;
   }
   $("notif-url").placeholder = n.configured ? "Adresse enregistrée (saisissez-en une autre pour la remplacer)" : "https://…";
   $("notif-test").disabled = $("notif-clear").disabled = !n.configured;
@@ -664,7 +669,7 @@ $("notif-save").addEventListener("click", async () => {
     method: "PUT", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       url: typed || null, format: $("notif-format").value,
-      events: { launch: $("notif-launch").checked, attention: $("notif-attention").checked },
+      events: { launch: $("notif-launch").checked, attention: $("notif-attention").checked, attack: $("notif-attack").checked },
     }),
   });
   const data = await res.json();
@@ -714,6 +719,7 @@ async function refreshCatalog(force = false) {
     const doneNow = JSON.stringify(data.status.production_done || {});
     const doneChanged = doneNow !== JSON.stringify(prodDone);
     prodDone = data.status.production_done || {};
+    $("attack-status").textContent = `État : ${data.status.attack_watch}.`;
     if (doneChanged && model && !(document.activeElement && document.activeElement.matches("input, select"))) renderProdQueue();
     $("persist").textContent = data.status.persistent
       ? "Réglages enregistrés sur le serveur (volume /data) : ils survivent à un redémarrage."

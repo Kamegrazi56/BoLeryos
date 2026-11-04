@@ -59,6 +59,11 @@ def _prod_items():
     return items
 
 
+def _movement(kind, origin, destination, arrival="06:56:16", countdown="01:20:00"):
+    return {"type": kind, "arrival": arrival, "countdown": countdown,
+            "origin": dict(zip(("planet", "coords", "player"), origin)), "destination": dict(zip(("planet", "coords", "player"), destination))}
+
+
 def initial_state():
     stocks = [
         {"Fer": 58.0e6, "Cristal": 22.36e6, "Éther": 19.8e6},
@@ -81,6 +86,8 @@ def initial_state():
         "exp": {"daily": 3, "daily_max": 46, "active": 2, "active_max": 10, "avail": {
             "piliers": [["Soldat", 2507458], ["Rempart de Fer", 3182], ["Grand Transporteur", 9000]],
             "flotte": [["Testo Civil Transpo Destroy Def", 43], ["Sonde Spatiale", 3987]]}},
+        # Capteurs interstellaires : un déploiement du joueur, comme dans l'export (aucune attaque au départ)
+        "movements": [_movement("Déploiement", ("6-79-Egide", "M69 38 06", "KameGrazi"), ("8-50-Concorde", "Z25 95 16", "KameGrazi"))],
         "ship_mode": "assemblages",  # mode de production affiché sur les cartes de vaisseaux (« Construction » à choisir)
         "planets": [
             {"name": n, "coords": c, "energy": e, "stocks": copy.deepcopy(s), "busy": False, "buildings": _buildings(), "prod": _prod_items()}
@@ -188,6 +195,12 @@ function opsMain() {
   }
   return '<h2>Opérations</h2><div><span>Moyen de lancement</span>' + ways + '</div><div><span>Mission</span>' + missions + '</div>' + body;
 }
+function sensors() {
+  const side = (s) => `<div><span>${s.planet}</span><button type="button">${s.coords}</button><span>${s.player}</span></div>`;
+  const rows = state.movements.map((m) => `<div class="mv"><div>${m.type}</div><div>476051 U</div><div>Arrivée: ${m.arrival}</div><div>${m.countdown}</div>`
+    + `<div><span>Origine</span>${side(m.origin)}</div><div><span>Destination</span>${side(m.destination)}</div></div>`).join('');
+  return `<div class="sensors" hidden><span>CAPTEURS INTERSTELLAIRES</span><span>Missions actives : ${state.movements.length} / 29</span>${rows}</div>`;
+}
 function render() {
   if (!state) return;
   const p = state.planets[state.active], s = sec();
@@ -200,7 +213,7 @@ function render() {
   const planets = state.planets.map((pl, i) => `<button class="pl" data-i="${i}"><span>${pl.name}</span><span>${pl.coords}</span>`
     + `<span>${md(pl.stocks.Fer)}</span><span>${md(pl.stocks.Cristal)}</span><span>${md(pl.stocks['Éther'])}</span></button>`).join('');
   document.getElementById('root').innerHTML =
-    '<div class="launcher"><button id="open-planets"><span class="sr-only">Planètes</span></button><button><span class="sr-only">Capteurs</span></button>'
+    '<div class="launcher"><button id="open-planets"><span class="sr-only">Planètes</span></button><button><span class="sr-only">Capteurs</span><span class="game-utility-badge game-utility-badge--fleet">' + state.movements.length + '</span></button>'
     + '<button><span class="sr-only">Chat</span></button><button><span class="sr-only">Favoris</span></button></div>'
     + `<div class="planet"><span>${p.name}</span><span>${p.coords}</span></div>`
     + `<div class="res"><div><span>${big(p.stocks.Fer)}</span><span>FER</span></div><div><span>${big(p.stocks.Cristal)}</span><span>CRISTAL</span></div>`
@@ -212,6 +225,7 @@ function render() {
     + '<button class="nav" data-s="specialized"><span class="sr-only">Appareils spécialisés</span></button><button class="nav" data-s="defense"><span class="sr-only">Défenses</span></button><button class="nav" data-s="operations"><span class="sr-only">Opérations</span></button>'
     + '<button><span class="sr-only">Vue d’ensemble</span></button></nav>'
     + `<div id="overlay" ${overlayOpen ? '' : 'hidden'}><button id="close-ov">Fermer</button><button>Arrêter la rotation</button>${planets}</div>`
+    + sensors()
     + (state.popup ? '<div role="dialog"><button>Confirmer</button></div>' : '');
   document.getElementById('open-planets').onclick = () => { overlayOpen = true; render(); };
   document.getElementById('close-ov').onclick = () => { overlayOpen = false; render(); };
@@ -360,6 +374,11 @@ def create_mock_game() -> FastAPI:
                              "qty": qty, "mode": g["ship_mode"] if body["section"] == "ship" else None})
         if g["popup_after_click"]:
             g["popup"] = True
+        return {"ok": True}
+
+    @app.post("/api/_movements")
+    async def set_movements(request: Request):
+        app.state.game["movements"] = (await request.json())["movements"]
         return {"ok": True}
 
     @app.post("/api/_exp")

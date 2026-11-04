@@ -18,6 +18,7 @@ from . import catalog as catalog_module
 from .decide import Outcome, decide, decide_ordered
 from .driver import GameDriver, GameUiError
 from .numbers import norm
+from . import attacks as attacks_module
 from . import expedition as expedition_module
 from . import production as production_module
 from .schedule import is_active, local_now, next_change, windows_from_settings
@@ -68,6 +69,11 @@ class AutomationRunner:
         self._prodstate: dict[str, dict] = {}
         self._prod_signature = ""
         self._prod_done: dict[str, str] = {}
+        # Alerte d'attaque (seulement sur ON) : attaques vues à la dernière lecture des capteurs, déjà signalées
+        self._attack_task: asyncio.Task | None = None
+        self.attacks: list[dict] = []
+        self._attack_seen: dict[str, float] = {}
+        self._attack_last_check: float | None = None
         self._known_planets: list[PlanetInfo] = []
         self.last_cycle = ""
         self._state_path = Path(data_dir) / "automation-state.json" if data_dir and os.path.isdir(data_dir) else None
@@ -148,6 +154,8 @@ class AutomationRunner:
             "universe": cfg["universe"],
             "planets_state": self.planets_state(),
             "production_state": self.production_state(),
+            "attacks": list(self.attacks) if self._running else [],
+            "attack_watch": self._attack_status(cfg),
             "production_done": self.production_done(),
         }
 
@@ -263,11 +271,17 @@ class AutomationRunner:
         self.bot.log(f"Bot activé (ON) — mode {'RÉEL' if self._cfg()['mode'] == 'live' else 'simulation'}.", event=True)
         await self.bot.ensure_started()  # le navigateur tourne même si aucun écran de l'interface n'est ouvert
         self._task = asyncio.create_task(self._loop())
+        self._attack_task = asyncio.create_task(self._watch_attacks())
 
     async def stop(self, reason: str = "demande de l'utilisateur", *, automatic: bool = False) -> None:
         if not self._running and self._task is None:
             return
         self._running = False
+        watch, self._attack_task = self._attack_task, None
+        if watch is not None and watch is not asyncio.current_task():
+            watch.cancel()
+            await asyncio.gather(watch, return_exceptions=True)
+        self.attacks = []
         task, self._task = self._task, None
         if task is not None and task is not asyncio.current_task():
             task.cancel()
@@ -796,6 +810,58 @@ class AutomationRunner:
             self.bot.log(f"{label} : {exc}.", "error")
             await self.stop("écran du jeu inattendu", automatic=True)
             raise Interrupted(str(exc)) from exc
+
+    # ------------------------------------------------------------------ alerte d'attaque
+    def _attack_status(self, cfg: dict) -> str:
+        alert = cfg["attack_alert"]
+        if not alert["enabled"]:
+            return "désactivée"
+        if not self._running:
+            return "en pause (le bot est sur OFF)"
+        if self._attack_last_check is None:
+            return "en attente de la première lecture des capteurs"
+        ago = time.time() - self._attack_last_check
+        return f"active : capteurs lus il y a {ago:.0f} s (toutes les {alert['interval_seconds']:g} s)"
+
+    async def _watch_attacks(self) -> None:
+        """Lit les capteurs toutes les N secondes tant que le bot est sur ON (lecture de la page, aucun clic)."""
+        while self._running:
+            cfg = self._cfg()
+            alert = cfg["attack_alert"]
+            if alert["enabled"]:
+                try:
+                    await self.check_attacks(cfg)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - une lecture ratée ne doit pas arrêter la surveillance
+                    self._note("attack:error", f"Alerte d'attaque : lecture des capteurs impossible ({type(exc).__name__}).", "warn")
+            await asyncio.sleep(alert["interval_seconds"] if alert["enabled"] else 5.0)
+
+    async def check_attacks(self, cfg: dict | None = None) -> list[dict]:
+        cfg = cfg or self._cfg()
+        b = self.bot
+        page = b._page
+        if b._state.value != "logged_in" or page is None or page.is_closed() or "/game/" not in page.url:
+            return self.attacks
+        raw = await page.evaluate(attacks_module.READ_SENSORS_JS)
+        self._attack_last_check = time.time()
+        movements = attacks_module.parse_movements(raw)
+        if attacks_module.badge_count(raw) and not movements:
+            self._note("attack:unreadable", "Alerte d'attaque : les capteurs signalent des mouvements que le bot ne sait pas lire "
+                       "(capture de la page utile).", "warn", event=True)
+        else:
+            self._last_notes.pop("attack:unreadable", None)
+        found = attacks_module.incoming_attacks(movements, cfg["catalog"]["planets"])
+        now = time.time()
+        for attack in found:
+            if attack.key not in self._attack_seen:  # une seule alerte par attaque
+                self._attack_seen[attack.key] = now
+                self.bot.log(f"ATTAQUE en approche : {attack.describe()}.", "error", event=True, kind="attack")
+        current = {a.key for a in found}
+        self._attack_seen = {k: t for k, t in self._attack_seen.items() if k in current or now - t < 86400}
+        self.attacks = [{"key": a.key, "text": a.describe(), "planet": a.dest_planet, "attacker": a.origin_player,
+                         "arrival": a.arrival, "countdown": a.countdown} for a in found]
+        return self.attacks
 
     # ------------------------------------------------------------------ production
     def _production_blocks(self, cfg: dict) -> list[tuple[str, dict]]:

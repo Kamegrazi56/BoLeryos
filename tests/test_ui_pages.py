@@ -597,3 +597,36 @@ def test_expeditions_tab_builds_lines_with_a_composition_and_says_it_is_simulati
     page.locator("#exp-queue .queue-row").first.locator("button[title='Retirer de la liste']").click()
     _wait_saved(page)
     assert _saved(app)["expeditions"]["queue"] == []
+
+
+# ------------------------------------------------------------------------------- alerte d'attaque
+def test_attack_alert_is_set_in_the_alerts_tab(ui):
+    page, _, app = ui
+    page.click("#tab-settings")
+    assert not page.locator("#attack-enabled").is_checked() and page.input_value("#attack-interval") == "60"
+    _edit(page, lambda: page.check("#attack-enabled"))
+    _edit(page, lambda: page.fill("#attack-interval", "45"))
+    assert _saved(app)["attack_alert"] == {"enabled": True, "interval_seconds": 45.0}
+    page.wait_for_function("document.querySelector('#attack-status').textContent.includes('en pause')")
+    page.fill("#notif-url", "http://127.0.0.1:9/hook")
+    page.uncheck("#notif-attack")
+    page.click("#notif-save")
+    page.wait_for_function("document.querySelector('#notif-status').textContent.includes('127.0.0.1')")
+    assert app.state.bot.notifier.wants("attack") is False
+
+
+def test_home_shows_a_red_card_only_when_an_attack_is_coming(ui):
+    page, _, app = ui
+    page.goto(page.base + "/")
+    page.wait_for_selector("#checklist li")
+    assert page.locator("#attacks").is_hidden()
+    runner = app.state.bot.automation
+    runner._running = True  # affiché seulement quand le bot est sur ON
+    runner.attacks = [{"key": "k", "text": "Attaque de Hades33 (Gaia I17 99 83) vers 5-32-Sceau (I27 95 00), arrivée 07:10:00",
+                       "planet": "5-32-Sceau", "attacker": "Hades33", "arrival": "07:10:00", "countdown": ""}]
+    try:
+        page.wait_for_selector("#attacks:not([hidden])", timeout=10000)
+        assert "Hades33" in page.inner_text("#attacks")
+    finally:
+        runner._running = False
+        runner.attacks = []

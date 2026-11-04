@@ -187,6 +187,12 @@
       <p class="hint">Les réglages ne contiennent ni identifiant ni adresse d'alerte. Un fichier importé ne peut jamais activer le mode réel.</p>
       <p id="persist" class="hint"></p>
 
+      <h2>Alerte d'attaque</h2>
+      <p class="hint">Quand le bot est sur <strong>ON</strong>, il lit les « Capteurs interstellaires » du jeu (sans cliquer) et vous prévient si une <strong>attaque</strong> arrive sur une de vos planètes : bandeau rouge sur l'Accueil, journal, et les alertes ci-dessous (adresse d'envoi, navigateur). Il n'agit pas dans le jeu.</p>
+      <label class="switch"><input type="checkbox" id="attack-enabled"> Surveiller les attaques</label>
+      <label class="field">Lire les capteurs toutes les <input id="attack-interval" type="number" min="10" max="3600" step="1" class="inline"> secondes <span data-help-text="Lecture de la page déjà affichée, sans clic. Une alerte est envoyée une seule fois par attaque."></span></label>
+      <p id="attack-status" class="hint"></p>
+
       <h2>Alertes</h2>
       <p class="hint">Recevez un message quand le bot lance une amélioration ou quand il a besoin de vous (connexion à refaire, contrôle anti-bot, arrêt automatique).</p>
       <p id="notif-status" class="status-line">Chargement…</p>
@@ -200,6 +206,7 @@
           </select></label>
         <label class="switch"><input type="checkbox" id="notif-launch"> Prévenir quand une amélioration est lancée</label>
         <label class="switch"><input type="checkbox" id="notif-attention"> Prévenir quand le bot a besoin de moi</label>
+        <label class="switch"><input type="checkbox" id="notif-attack"> Prévenir en cas d'attaque en approche</label>
         <div class="row">
           <button id="notif-save" type="button">Enregistrer les alertes</button>
           <button id="notif-test" type="button" class="secondary">Envoyer un message de test</button>

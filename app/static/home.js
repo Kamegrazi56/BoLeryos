@@ -59,9 +59,15 @@ function renderPlanets(rows) {
   box.replaceChildren(table(["Planète", "État", "Prochaine vérification"], rows.map((r) => [r.planet, PLANET_STATUS[r.status] || r.status, `dans ${waitText(r.next_in_s)}`])));
 }
 
+function renderAttacks(list) {
+  $("attacks").hidden = !list || !list.length;
+  $("attack-list").replaceChildren(...(list || []).map((x) => el("li", { textContent: x.text })));
+}
+
 function render(d) {
   last = d;
   const a = d.automation;
+  renderAttacks(a.attacks);
   $("sentence").textContent = d.sentence;
   $("counters").replaceChildren(
     el("span", {}, "Lancements aujourd'hui : ", el("strong", { textContent: `${a.launched_today} / ${a.cap}` })),

@@ -187,3 +187,6 @@ details.advanced summary { cursor: pointer; color: var(--muted); user-select: no
 .unit-list li { display: flex; align-items: center; gap: 8px; }
 .unit-list input[type=number], .unit-list select { width: auto; }
 .exp-row { align-items: flex-start; flex-wrap: wrap; }
+
+.attack-card { border-color: var(--err); background: rgba(248, 113, 113, .12); }
+.attack-card h2 { color: var(--err); }

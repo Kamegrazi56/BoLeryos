@@ -38,6 +38,8 @@ DEFAULTS: dict[str, Any] = {
     "production": {"enabled": False, "scope": "all", "planet": "", "recheck_minutes": 15.0, "queue": []},
     # Expéditions (Opérations › Exploration) : combien en garder d'actives, et leur composition.
     "expeditions": {"enabled": False, "scope": "all", "planet": "", "recheck_minutes": 15.0, "active_target": 1, "queue": []},
+    # Alerte d'attaque : lecture des capteurs toutes les N secondes, seulement quand le bot est sur ON.
+    "attack_alert": {"enabled": False, "interval_seconds": 60},
     # Ordre dans lequel le bot sert ses « blocs » : le premier prend les ressources avant les suivants.
     "priority": list(PRIORITY_BLOCKS),
     "catalog": {"buildings": [], "research": [], "planets": [], "universes": [], "ships": []},
@@ -373,6 +375,16 @@ def validate(data: dict, *, allow_live: bool, min_cycle_minutes: float = 1.0) ->
         }
     else:
         errors.append("expeditions : un objet est attendu")
+    alert = data.get("attack_alert", merged["attack_alert"])
+    if isinstance(alert, dict):
+        low = max(1.0, min(10.0, min_cycle_minutes * 60))
+        interval = alert.get("interval_seconds", 60)
+        if isinstance(interval, bool) or not isinstance(interval, (int, float)) or not low <= interval <= 3600:
+            errors.append(f"alerte d'attaque : vérification toutes les {low:g} à 3600 secondes")
+            interval = 60
+        merged["attack_alert"] = {"enabled": bool(alert.get("enabled", False)), "interval_seconds": float(interval)}
+    else:
+        errors.append("attack_alert : un objet est attendu")
     merged["priority"] = _priority(data.get("priority", merged["priority"]), errors)
 
     res = data.get("research", merged["research"])
@@ -431,7 +443,7 @@ class SettingsStore:
         for key, value in (data if isinstance(data, dict) else {}).items():
             if key == "catalog":
                 continue  # entretenu par le bot
-            if key in ("cycle", "schedule", "constructions", "research", "production", "expeditions") and isinstance(value, dict) and isinstance(merged.get(key), dict):
+            if key in ("cycle", "schedule", "constructions", "research", "production", "expeditions", "attack_alert") and isinstance(value, dict) and isinstance(merged.get(key), dict):
                 merged[key] = {**merged[key], **value}
             else:
                 merged[key] = value
