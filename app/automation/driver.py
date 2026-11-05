@@ -354,11 +354,15 @@ class GameDriver:
 
     # ------------------------------------------------------------ expéditions (lecture seule)
     async def read_expedition(self, way: str) -> ExpeditionPage:
-        """Ouvre Opérations, choisit le moyen de lancement (Piliers / Flotte) et la mission « Exploration », puis lit
-        les compteurs et les unités disponibles. Aucun champ n'est rempli, rien n'est lancé."""
+        return await self.read_operation(way, "Exploration")
+
+    async def read_operation(self, way: str, mission: str) -> ExpeditionPage:
+        """Ouvre Opérations, choisit le moyen de lancement (Piliers / Flotte) et la mission (« Exploration »,
+        « Attaque »…), puis lit les compteurs et les unités disponibles (« Disponibles : N » ou « Stock : N »).
+        Aucun champ n'est rempli, rien n'est lancé."""
         if not await self.open_section("operations"):
             raise GameUiError("page « Opérations » inaccessible")
-        for label in ("Piliers" if way == "piliers" else "Flotte", "Exploration"):
+        for label in ("Piliers" if way == "piliers" else "Flotte", mission):
             button = self.page.get_by_role("button", name=re.compile(rf"^\s*{label}\s*$", re.I)).filter(visible=True).first
             if not await button.count():
                 raise GameUiError(f"bouton « {label} » introuvable sur la page Opérations")
@@ -368,7 +372,7 @@ class GameDriver:
         raw = {}
         for _ in range(10):
             raw = await self.page.evaluate(READ_EXPEDITION_JS)
-            if raw.get("active") and raw.get("units"):
+            if raw.get("units") and (raw.get("active") or mission != "Exploration"):
                 break
             await asyncio.sleep(0.5)
         return parse_expedition_page(way, raw)

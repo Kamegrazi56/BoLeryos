@@ -42,6 +42,10 @@ DEFAULTS: dict[str, Any] = {
     # Espionnage automatique : une cible par passage, dans un intervalle de coordonnées, joueurs et/ou errants [AI].
     "espionage": {"enabled": False, "way": "sonde", "players": False, "errants": True, "exclude_alliance": True,
                   "coord_min": "", "coord_max": "", "planet": ""},
+    # Attaque automatique des errants [AI] : intervalle de coordonnées, minimums de ressources lus dans le rapport
+    # d'espionnage (Fer, Cristal, Éther ; on attaque si 1, 2 ou les 3 sont dépassés), voie et composition, nombre total.
+    "raids": {"enabled": False, "way": "piliers", "coord_min": "", "coord_max": "", "planet": "",
+              "min_fer": 0, "min_cristal": 0, "min_ether": 0, "required": 1, "total": 1, "units": []},
     # Alerte d'attaque : lecture des capteurs toutes les N secondes, seulement quand le bot est sur ON.
     "attack_alert": {"enabled": False, "interval_seconds": 60},
     # Ordre dans lequel le bot sert ses « blocs » : le premier prend les ressources avant les suivants.
@@ -410,6 +414,42 @@ def validate(data: dict, *, allow_live: bool, min_cycle_minutes: float = 1.0) ->
     else:
         errors.append("espionage : un objet est attendu")
 
+    raid = data.get("raids", merged["raids"])
+    if isinstance(raid, dict):
+        way = raid.get("way", "piliers")
+        if way not in EXPEDITION_WAYS:
+            errors.append("attaque des errants : voie « piliers » ou « flotte »")
+            way = "piliers"
+        lo, hi = str(raid.get("coord_min", "")).strip().upper(), str(raid.get("coord_max", "")).strip().upper()
+        lo_key, hi_key = coord_key(lo), coord_key(hi)
+        if (lo and lo_key is None) or (hi and hi_key is None):
+            errors.append("attaque des errants : coordonnées au format « I27 95 00 »")
+        elif lo_key and hi_key and lo_key > hi_key:
+            errors.append("attaque des errants : la coordonnée minimum doit être avant la coordonnée maximum")
+        mins = {}
+        for key in ("min_fer", "min_cristal", "min_ether"):
+            value = raid.get(key, 0)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 10**15:
+                errors.append("attaque des errants : minimums de ressources de 0 à 10^15")
+                value = 0
+            mins[key] = int(value)
+        required, total = raid.get("required", 1), raid.get("total", 1)
+        if required not in (1, 2, 3) or isinstance(required, bool):
+            errors.append("attaque des errants : attaquer si 1, 2 ou 3 ressources dépassent leur minimum")
+            required = 1
+        if isinstance(total, bool) or not isinstance(total, (int, float)) or not 1 <= total <= 10000:
+            errors.append("attaque des errants : nombre d'attaques de 1 à 10 000")
+            total = 1
+        enabled = bool(raid.get("enabled", False))
+        units = _expedition_units(raid.get("units"), "attaque des errants", errors) if (enabled or raid.get("units")) else []
+        if enabled and not (lo and hi):
+            errors.append("attaque des errants : indiquez la coordonnée minimum et la coordonnée maximum")
+        merged["raids"] = {"enabled": enabled, "way": way, "coord_min": lo, "coord_max": hi,
+                           "planet": str(raid.get("planet", "")).strip()[:80], **mins, "required": int(required),
+                           "total": int(total), "units": units}
+    else:
+        errors.append("raids : un objet est attendu")
+
     alert = data.get("attack_alert", merged["attack_alert"])
     if isinstance(alert, dict):
         low = max(1.0, min(10.0, min_cycle_minutes * 60))
@@ -478,7 +518,7 @@ class SettingsStore:
         for key, value in (data if isinstance(data, dict) else {}).items():
             if key == "catalog":
                 continue  # entretenu par le bot
-            if key in ("cycle", "schedule", "constructions", "research", "production", "expeditions", "attack_alert", "espionage") and isinstance(value, dict) and isinstance(merged.get(key), dict):
+            if key in ("cycle", "schedule", "constructions", "research", "production", "expeditions", "attack_alert", "espionage", "raids") and isinstance(value, dict) and isinstance(merged.get(key), dict):
                 merged[key] = {**merged[key], **value}
             else:
                 merged[key] = value

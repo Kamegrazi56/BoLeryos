@@ -275,7 +275,7 @@ def test_priority_is_a_complete_ordering_of_the_known_blocks(game_client):
         return game_client.put("/api/automation/settings", json={"settings": {"priority": order}})
 
     ok = put(["defense", "population"])  # les blocs oubliés sont ajoutés à la fin
-    assert ok.status_code == 200 and ok.json()["settings"]["priority"] == ["defense", "population", "constructions", "research", "shipyard", "specialized", "expeditions", "espionage"]
+    assert ok.status_code == 200 and ok.json()["settings"]["priority"] == ["defense", "population", "constructions", "research", "shipyard", "specialized", "expeditions", "espionage", "raids"]
     assert put(["defense", "magie"]).status_code == 422
     assert put("population").status_code == 422
 
@@ -290,7 +290,7 @@ def test_ids_are_kept_and_the_catalog_lists_the_built_in_production_elements(gam
     pop = [e["name"] for e in catalog["production"]["population"]]
     assert "Soldat" not in pop and pop[:2] == ["Rempart de Fer", "Spectre du Rift"] and len(pop) == 10
     assert len(catalog["production"]["components"]) == 37 and len(catalog["production"]["specialized"]) == 7 and len(catalog["production"]["defense"]) == 8
-    assert [b["id"] for b in catalog["blocks"]] == ["constructions", "research", "population", "shipyard", "specialized", "defense", "expeditions", "espionage"]
+    assert [b["id"] for b in catalog["blocks"]] == ["constructions", "research", "population", "shipyard", "specialized", "defense", "expeditions", "espionage", "raids"]
 
 
 def test_read_state_shows_what_the_bot_understands_of_the_production_pages(game_client, game):

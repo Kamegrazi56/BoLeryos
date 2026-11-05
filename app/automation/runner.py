@@ -21,6 +21,7 @@ from .numbers import norm
 from . import attacks as attacks_module
 from . import espionage as espionage_module
 from . import expedition as expedition_module
+from . import raids as raids_module
 from . import production as production_module
 from .schedule import is_active, local_now, next_change, windows_from_settings
 from .settings import SettingsStore, normalized_targets
@@ -76,6 +77,10 @@ class AutomationRunner:
         self._attack_seen: dict[str, float] = {}
         self._attack_last_check: float | None = None
         self._spied: dict[str, float] = {}  # coordonnées → dernier espionnage (simulé ou réel)
+        # Attaque des errants : nombre d'attaques réelles faites (remis à zéro à la main), dernières cibles, rapports lus
+        self._raids_done = 0
+        self._raided: dict[str, float] = {}
+        self._reports: dict[str, dict] = {}  # coordonnées → {"fer", "cristal", "ether", "t"} (rapport d'espionnage)
         self._known_planets: list[PlanetInfo] = []
         self.last_cycle = ""
         self._state_path = Path(data_dir) / "automation-state.json" if data_dir and os.path.isdir(data_dir) else None
@@ -93,6 +98,8 @@ class AutomationRunner:
             self._baseline = {str(k): int(v) for k, v in saved.get("baseline", {}).items()}
             self._prod_done = {str(k): str(v) for k, v in saved.get("prod_done", {}).items()}
             self._spied = {str(k): float(v) for k, v in saved.get("spied", {}).items()}
+            self._raids_done = int(saved.get("raids_done", 0))
+            self._raided = {str(k): float(v) for k, v in saved.get("raided", {}).items()}
         except (OSError, ValueError, KeyError, TypeError):
             pass
 
@@ -101,7 +108,7 @@ class AutomationRunner:
             return
         try:
             tmp = self._state_path.with_suffix(".tmp")
-            tmp.write_text(json.dumps({"counter": self._counter, "busy": self._busy_until, "baseline": self._baseline, "prod_done": self._prod_done, "spied": self._spied}), encoding="utf8")
+            tmp.write_text(json.dumps({"counter": self._counter, "busy": self._busy_until, "baseline": self._baseline, "prod_done": self._prod_done, "spied": self._spied, "raids_done": self._raids_done, "raided": self._raided}), encoding="utf8")
             os.replace(tmp, self._state_path)
         except OSError:
             pass
@@ -159,6 +166,7 @@ class AutomationRunner:
             "production_state": self.production_state(),
             "attacks": list(self.attacks) if self._running else [],
             "attack_watch": self._attack_status(cfg),
+            "raids_done": self._raids_done,
             "production_done": self.production_done(),
         }
 
@@ -195,7 +203,7 @@ class AutomationRunner:
         if self.cycle_running:
             return "Le bot est en train de vérifier vos planètes."
         cons, research, prod = cfg["constructions"], cfg["research"], cfg["production"]
-        production_on = bool(self._production_blocks(cfg)) or cfg["espionage"]["enabled"]
+        production_on = bool(self._production_blocks(cfg)) or cfg["espionage"]["enabled"] or cfg["raids"]["enabled"]
         if not ((cons["enabled"] and cons["queue"]) or (research["enabled"] and research["targets"]) or production_on):
             return "Le bot est prêt mais n'a rien à faire : activez les constructions, les recherches ou la production dans Réglages."
         rows = self.planets_state()
@@ -234,6 +242,8 @@ class AutomationRunner:
             work.append(f"{len(cfg['expeditions']['queue'])} ligne(s) d'expédition")
         if cfg["espionage"]["enabled"]:
             work.append("espionnage")
+        if cfg["raids"]["enabled"]:
+            work.append("attaque des errants")
         steps = [
             {"id": "account", "label": "Identifiants mémorisés", "required": True, "link": "/reglages#account",
              "ok": b.has_credentials() or connected,
@@ -526,7 +536,7 @@ class AutomationRunner:
                 self._prod_signature = prod_sig
                 self._prodstate.clear()
             research_on = cfg["research"]["enabled"]
-            spying = cfg["espionage"]["enabled"]
+            spying = cfg["espionage"]["enabled"] or cfg["raids"]["enabled"]
             if not research_on and not spying and not self._constructions_due(cfg) and not self._production_due(cfg):
                 due_in = self.next_due_in(cfg)
                 when = f" (prochain contrôle dans {due_in / 60:.0f} min)" if due_in is not None else ""
@@ -548,6 +558,8 @@ class AutomationRunner:
                     await self._expeditions_step(cfg, planets, live)
                 elif block == "espionage":
                     await self._espionage_step(cfg, planets, live)
+                elif block == "raids":
+                    await self._raids_step(cfg, planets, live)
                 else:
                     await self._production_step(cfg, planets, live, block)
             self.last_cycle = f"{datetime.now():%H:%M:%S} ({time.monotonic() - started:.0f} s)"
@@ -1161,6 +1173,85 @@ class AutomationRunner:
         self._save_state()
         self._record_simulated_text(label, text, "Espionnage")
         self.bot.log(f"[Simulation] Espionnage : j'enverrais {text} ({len(candidates)} cible(s) dans l'intervalle).", event=True)
+
+    def reset_raids(self) -> None:
+        self._raids_done = 0
+        self._raided.clear()
+        self._save_state()
+
+    async def _raids_step(self, cfg: dict, planets: list[PlanetInfo], live: bool) -> None:
+        """Une attaque d'errant par passage, jusqu'au nombre total voulu (SIMULATION ; rapports pas encore lus)."""
+        raid = cfg["raids"]
+        if not raid["enabled"]:
+            return
+        if self._raids_done >= raid["total"]:
+            self._note("raid:total", f"Attaque des errants : les {raid['total']} attaque(s) demandée(s) sont faites "
+                       "(remettez le compteur à zéro dans Réglages pour continuer).", event=True)
+            return
+        self._last_notes.pop("raid:total", None)
+        if live:
+            self._note("raid:live", "Attaque des errants : l'attaque réelle n'est pas encore disponible (captures manquantes) : "
+                       "le bot simule seulement.", "warn", event=True)
+        origin = None
+        if raid["planet"]:
+            origin = next((p for p in planets if norm(p.name) == norm(raid["planet"])), None)
+            if origin is None:
+                self._note("raid:planet", f"Attaque des errants : planète « {raid['planet']} » introuvable.", "warn")
+                return
+        try:
+            await self.guard()
+            if origin is not None and not await self.driver.switch_planet(origin):
+                self.bot.log(f"Attaque des errants : changement de planète non confirmé ({origin.name}).", "warn")
+                return
+            rows = await self.driver.read_galaxy()
+        except GameUiError as exc:
+            self.bot.log(f"Attaque des errants : {exc}.", "error")
+            await self.stop("écran du jeu inattendu", automatic=True)
+            raise Interrupted(str(exc)) from exc
+        my_planets = cfg["catalog"]["planets"] or [p.name for p in planets]
+        targets = espionage_module.parse_galaxy(rows)
+        spec = {"coord_min": raid["coord_min"], "coord_max": raid["coord_max"], "players": False, "errants": True, "exclude_alliance": True}
+        errants = espionage_module.eligible(targets, spec, my_planets, "")
+        if not errants:
+            self._note("raid:none", f"Attaque des errants : aucun errant entre {raid['coord_min']} et {raid['coord_max']} dans la liste "
+                       f"de la Galaxie.", event=True)
+            return
+        self._last_notes.pop("raid:none", None)
+        known = [t for t in errants if t.coords in self._reports]
+        if not known:
+            self._note("raid:reports", f"Attaque des errants : {len(errants)} errant(s) dans l'intervalle, mais aucune ressource connue : "
+                       "la lecture des rapports d'espionnage n'est pas encore codée.", "warn", event=True)
+            return
+        self._last_notes.pop("raid:reports", None)
+        valid = []
+        for target in known:
+            verdict = raids_module.judge(self._reports[target.coords], raid)
+            if verdict.attack:
+                valid.append(target)
+            else:
+                self._note(f"raid:{target.coords}", f"Attaque des errants : {target.label()} ignoré ({verdict.reason}).")
+        if not valid:
+            return
+        target = min(valid, key=lambda t: (self._raided.get(t.coords, 0.0), espionage_module.coord_key(t.coords)))
+        try:
+            await self.guard()
+            page = await self.driver.read_operation(raid["way"], "Attaque")
+        except GameUiError as exc:
+            self.bot.log(f"Attaque des errants : {exc}.", "error")
+            await self.stop("écran du jeu inattendu", automatic=True)
+            raise Interrupted(str(exc)) from exc
+        units, reason = expedition_module.resolve_line({"units": raid["units"]}, page.available, page.names)
+        if units is None:
+            self._note("raid:units", f"Attaque des errants : composition impossible ({reason}).", event=True)
+            return
+        self._last_notes.pop("raid:units", None)
+        way = "les Piliers" if raid["way"] == "piliers" else "la Flotte"
+        text = (f"une attaque par {way} sur {target.label()} avec " + ", ".join(f"{q} × {n}" for n, q in units)
+                + f" (ressources : {raids_module.describe_resources(self._reports[target.coords])})")
+        self._raided[target.coords] = time.time()
+        self._save_state()
+        self._record_simulated_text("Planète " + (origin.name if origin else "active"), text, "Attaque")
+        self.bot.log(f"[Simulation] Attaque des errants : je lancerais {text}.", event=True)
 
     async def _read_galaxy_state(self) -> dict:
         """Lecture seule de la liste de la Galaxie : ce que le bot comprend des cibles (joueur, tag, coordonnées)."""

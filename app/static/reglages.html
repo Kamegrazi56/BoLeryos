@@ -29,6 +29,7 @@
         <button role="tab" id="tab-production" data-tab="production" aria-controls="panel-production">Production</button>
         <button role="tab" id="tab-expeditions" data-tab="expeditions" aria-controls="panel-expeditions">Expéditions</button>
         <button role="tab" id="tab-espionage" data-tab="espionage" aria-controls="panel-espionage">Espionnage</button>
+        <button role="tab" id="tab-raids" data-tab="raids" aria-controls="panel-raids">Attaques</button>
         <button role="tab" id="tab-priority" data-tab="priority" aria-controls="panel-priority">Priorités</button>
         <button role="tab" id="tab-schedule" data-tab="schedule" aria-controls="panel-schedule">Horaires et rythme</button>
         <button role="tab" id="tab-settings" data-tab="settings" aria-controls="panel-settings">Sauvegarde et alertes</button>
@@ -177,6 +178,39 @@
         <label>Depuis la planète <select id="spy-planet"></select></label>
       </div>
       <p class="hint">Le bot lit la liste affichée par la Galaxie autour de la planète de départ : une cible hors de cette liste n'est pas vue pour l'instant (la recherche d'une autre zone de la carte demande une capture).</p>
+    </section>
+
+    <section class="tabpanel card" id="panel-raids" role="tabpanel" aria-labelledby="tab-raids" hidden>
+      <p class="mode-banner sim" role="note"><strong>Simulation seulement.</strong> Le bot repère les errants de l'intervalle, compare leurs ressources à vos minimums et dit ce qu'il attaquerait. Il ne lance aucune attaque, et la <strong>lecture des rapports d'espionnage n'est pas encore codée</strong> : il faut une capture d'un rapport ouvert et d'une attaque lancée à la main.</p>
+      <label class="switch"><input type="checkbox" id="raid-enabled"> Attaquer automatiquement les errants [AI]</label>
+
+      <h2>Cibles</h2>
+      <div class="fields">
+        <label>Coordonnée minimum <input id="raid-min" type="text" placeholder="I27 00 00" autocomplete="off" spellcheck="false" maxlength="9"></label>
+        <label>Coordonnée maximum <input id="raid-max" type="text" placeholder="I29 99 99" autocomplete="off" spellcheck="false" maxlength="9"></label>
+        <label>Depuis la planète <select id="raid-planet"></select></label>
+      </div>
+
+      <h2>Ressources minimum de la cible <span data-help-text="Lues dans le rapport d'espionnage de la cible. Une ressource « dépasse » quand elle est strictement au-dessus de son minimum."></span></h2>
+      <div class="fields">
+        <label>Fer <input id="raid-fer" type="number" min="0" step="1"></label>
+        <label>Cristal <input id="raid-cristal" type="number" min="0" step="1"></label>
+        <label>Éther <input id="raid-ether" type="number" min="0" step="1"></label>
+        <label>Attaquer si <select id="raid-required">
+          <option value="1">au moins 1 ressource dépasse</option>
+          <option value="2">au moins 2 ressources dépassent</option>
+          <option value="3">les 3 ressources dépassent</option>
+        </select></label>
+      </div>
+
+      <h2>Voie et composition</h2>
+      <label class="field">Envoyer par <select id="raid-way"></select></label>
+      <ul id="raid-units" class="unit-list"></ul>
+      <div class="row"><select id="raid-add-unit" aria-label="Unité à ajouter"></select></div>
+
+      <h2>Nombre d'attaques</h2>
+      <label class="field">Faire <input id="raid-total" type="number" min="1" max="10000" class="inline"> attaque(s) au total <span data-help-text="Une attaque par passage du bot. Une fois ce nombre atteint, le bot s'arrête d'attaquer jusqu'à la remise à zéro du compteur."></span></label>
+      <div class="row"><span id="raid-done" class="hint"></span><button id="raid-reset" type="button" class="secondary small">Remettre le compteur à zéro</button></div>
     </section>
 
     <section class="tabpanel card" id="panel-priority" role="tabpanel" aria-labelledby="tab-priority" hidden>

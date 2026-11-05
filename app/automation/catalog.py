@@ -79,11 +79,12 @@ PRODUCTION_SECTIONS = [
 PRODUCTION_SECTION_IDS = [s["id"] for s in PRODUCTION_SECTIONS]
 
 # Ordre d'exécution par défaut des « blocs » (les ressources vont d'abord au premier) : réglable par le joueur.
-PRIORITY_BLOCKS = ["constructions", "research", "population", "shipyard", "specialized", "defense", "expeditions", "espionage"]
+PRIORITY_BLOCKS = ["constructions", "research", "population", "shipyard", "specialized", "defense", "expeditions", "espionage", "raids"]
 BLOCK_LABELS = {
     "constructions": "Constructions (bâtiments)", "research": "Recherches", "population": "Population",
     "shipyard": "Chantier spatial (vaisseaux et composants)", "specialized": "Appareils spécialisés", "defense": "Défenses",
     "expeditions": "Expéditions (exploration)", "espionage": "Espionnage",
+    "raids": "Attaque des errants",
 }
 
 # Population : onglet du jeu → unités (le « Soldat » de base n'a pas de bouton de recrutement).

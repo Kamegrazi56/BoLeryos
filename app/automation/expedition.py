@@ -163,7 +163,7 @@ READ_EXPEDITION_JS = """
   const after = (label) => { const i = leaves.indexOf(label); return i >= 0 && leaves[i + 1] ? leaves[i + 1] : null; };
   const units = [];
   leaves.forEach((t, i) => {
-    const m = t.match(/^Disponibles\\s*:\\s*(.+)$/);
+    const m = t.match(/^(?:Disponibles|Stock)\\s*:\\s*(.+)$/);
     if (m && i > 0) units.push({ name: leaves[i - 1], available: m[1] });
   });
   return { daily: after('Explorations quotidiennes'), active: after('Explorations actives'), units };

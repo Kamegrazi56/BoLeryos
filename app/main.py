@@ -313,6 +313,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         count = bot.automation.reset_production_done(body.id)
         return JSONResponse({"reset": count, "status": bot.automation.summary()}, headers=NO_STORE)
 
+    @app.post("/api/automation/raids/reset")
+    async def api_raids_reset(request: Request):
+        """Remet à zéro le compteur d'attaques des errants (le bot peut de nouveau en lancer)."""
+        _check_origin(request)
+        bot.automation.reset_raids()
+        return JSONResponse(bot.automation.summary(), headers=NO_STORE)
+
     @app.post("/api/automation/read-state")
     async def api_automation_read_state(request: Request):
         _check_origin(request)

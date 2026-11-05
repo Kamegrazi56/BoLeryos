@@ -2,7 +2,7 @@
 const { el, fmt, table, help } = window.ui;
 const $ = (id) => document.getElementById(id);
 const DAYS = ["L", "M", "M", "J", "V", "S", "D"];
-const TABS = ["account", "constructions", "research", "production", "expeditions", "espionage", "priority", "schedule", "settings"];
+const TABS = ["account", "constructions", "research", "production", "expeditions", "espionage", "raids", "priority", "schedule", "settings"];
 
 let model = null; // réglages en cours d'édition (source de vérité de l'interface)
 let catalog = { buildings: [], research: [], planets: [], universes: [], presets: [], production: {}, production_sections: [], blocks: [], expedition_ways: [], expedition_units: {}, espionage_ways: [] };
@@ -522,6 +522,64 @@ function renderEspionage() {
 $("spy-way").addEventListener("change", () => { model.espionage.way = $("spy-way").value; scheduleSave(); });
 $("spy-planet").addEventListener("change", () => { model.espionage.planet = $("spy-planet").value; scheduleSave(); });
 
+// -------------------------------------------------------------------------------- attaque des errants
+function renderRaidUnits() {
+  const r = model.raids;
+  const list = $("raid-units");
+  list.replaceChildren(...r.units.map((u, k) => {
+    const value = el("input", { type: "number", min: 1, max: u.mode === "percent" ? 100 : 1e12, disabled: u.mode === "max", ariaLabel: `Quantité de ${u.name}` });
+    value.value = u.mode === "max" ? "" : u.value;
+    value.addEventListener("input", () => { if (value.value !== "") { u.value = Math.max(1, Math.floor(Number(value.value))); scheduleSave(); } });
+    const mode = el("select", { ariaLabel: `Mode pour ${u.name}` }, ...Object.entries(UNIT_MODE).map(([v, t]) => el("option", { value: v, textContent: t })));
+    mode.value = u.mode;
+    mode.addEventListener("change", () => { u.mode = mode.value; if (u.mode === "percent") u.value = Math.min(u.value, 100); renderRaidUnits(); scheduleSave(); });
+    const remove = el("button", { type: "button", className: "secondary small", textContent: "×", title: "Retirer cette unité" });
+    remove.addEventListener("click", () => { r.units.splice(k, 1); renderRaidUnits(); scheduleSave(); });
+    return el("li", {}, el("span", { className: "goal-name", textContent: u.name }), mode, value, remove);
+  }));
+  if (!r.units.length) list.append(el("li", { className: "empty-state", textContent: "Aucune unité : ajoutez-en une ci-dessous." }));
+  const choices = (catalog.expedition_units[r.way] || []).filter((e) => !r.units.some((u) => u.name === e.name));
+  $("raid-add-unit").replaceChildren(el("option", { value: "", textContent: "Ajouter une unité…" }), ...choices.map((e) => el("option", { value: e.name, textContent: e.name })));
+}
+function renderRaids() {
+  const r = model.raids;
+  $("raid-enabled").checked = r.enabled;
+  $("raid-min").value = r.coord_min;
+  $("raid-max").value = r.coord_max;
+  $("raid-fer").value = r.min_fer;
+  $("raid-cristal").value = r.min_cristal;
+  $("raid-ether").value = r.min_ether;
+  $("raid-required").value = String(r.required);
+  $("raid-total").value = r.total;
+  $("raid-way").replaceChildren(...catalog.expedition_ways.map((w) => el("option", { value: w.id, textContent: w.label })));
+  $("raid-way").value = r.way;
+  const names = [...new Set([...catalog.planets, r.planet].filter(Boolean))];
+  $("raid-planet").replaceChildren(el("option", { value: "", textContent: "La planète active" }), ...names.map((n) => el("option", { value: n, textContent: n })));
+  $("raid-planet").value = r.planet;
+  renderRaidUnits();
+}
+$("raid-enabled").addEventListener("change", () => { model.raids.enabled = $("raid-enabled").checked; scheduleSave(); });
+[["raid-min", "coord_min"], ["raid-max", "coord_max"]].forEach(([id, key]) => {
+  $(id).addEventListener("change", () => { $(id).value = $(id).value.trim().toUpperCase(); model.raids[key] = $(id).value; scheduleSave(); });
+});
+[["raid-fer", "min_fer"], ["raid-cristal", "min_cristal"], ["raid-ether", "min_ether"], ["raid-total", "total"]].forEach(([id, key]) => {
+  $(id).addEventListener("input", () => { if ($(id).value !== "") { model.raids[key] = Math.max(0, Math.floor(Number($(id).value))); scheduleSave(); } });
+});
+$("raid-required").addEventListener("change", () => { model.raids.required = Number($("raid-required").value); scheduleSave(); });
+$("raid-planet").addEventListener("change", () => { model.raids.planet = $("raid-planet").value; scheduleSave(); });
+$("raid-way").addEventListener("change", () => { model.raids.way = $("raid-way").value; model.raids.units = []; renderRaidUnits(); scheduleSave(); });
+$("raid-add-unit").addEventListener("change", () => {
+  const name = $("raid-add-unit").value;
+  if (!name) return;
+  model.raids.units.push({ name, mode: "number", value: 1 });
+  renderRaidUnits();
+  scheduleSave();
+});
+$("raid-reset").addEventListener("click", async () => {
+  await fetch("/api/automation/raids/reset", { method: "POST" });
+  refreshCatalog(false);
+});
+
 // ------------------------------------------------------------------------ plages horaires
 function renderTimezones() {
   let zones = [];
@@ -581,6 +639,7 @@ function renderAll() {
   renderProduction();
   renderExpeditions();
   renderEspionage();
+  renderRaids();
   catalogKey = catalogSignature();
 }
 function renderUniverse() {
@@ -744,6 +803,7 @@ async function refreshCatalog(force = false) {
     const doneNow = JSON.stringify(data.status.production_done || {});
     const doneChanged = doneNow !== JSON.stringify(prodDone);
     prodDone = data.status.production_done || {};
+    $("raid-done").textContent = `Attaques faites : ${data.status.raids_done} sur ${model ? model.raids.total : "?"}.`;
     $("attack-status").textContent = `État : ${data.status.attack_watch}.`;
     if (doneChanged && model && !(document.activeElement && document.activeElement.matches("input, select"))) renderProdQueue();
     $("persist").textContent = data.status.persistent

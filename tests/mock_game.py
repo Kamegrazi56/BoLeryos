@@ -207,6 +207,10 @@ function opsMain() {
   const ways = ['Piliers', 'Flotte'].map((w) => `<button type="button" class="way" data-way="${w}">${w.toUpperCase()}</button>`).join('');
   const missions = ['ATTAQUE', 'TRANSPORT', 'EXPLORATION', 'FOUILLE'].map((m) => `<button type="button" class="mission" data-m="${m}">${m}</button>`).join('');
   let body = '';
+  if (ui.mission === 'ATTAQUE') {
+    const label = ui.way === 'Piliers' ? 'Stock' : 'Disponibles';
+    body = '<div><span>2. Composition de mission</span>' + ex.avail[ui.way.toLowerCase()].map(([n, c]) => `<div><span>${n}</span><span>${label} : ${int(c)}</span><input type="number" aria-label="Quantité ${n}"></div>`).join('') + '</div><button type="button">LANCEMENT BLOQUÉ</button>';
+  }
   if (ui.mission === 'EXPLORATION') {
     const units = ex.avail[ui.way.toLowerCase()].map(([n, c]) => `<div><span>${n}</span><span>Disponibles : ${int(c)}</span><input type="number" aria-label="Quantité ${n}"></div>`).join('');
     body = `<div><span>Explorations quotidiennes</span><span>${ex.daily}/${ex.daily_max}</span></div><div><span>Explorations actives</span><span>${ex.active}/${ex.active_max}</span></div>`
