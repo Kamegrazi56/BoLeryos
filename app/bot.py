@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import os
 import re
 import time
 from collections import deque
@@ -27,8 +28,9 @@ from . import human
 from .automation.runner import AutomationRunner
 from .automation.settings import SettingsStore
 from .config import Settings
-from .notify import Notifier
+from .display import VirtualDisplay
 from .explore import MAX_SNAPSHOTS, SNAPSHOT_JS, Recorder, should_skip_host
+from .notify import Notifier
 
 TURNSTILE_SELECTOR = 'iframe[src*="challenges.cloudflare.com"]'
 COOKIE_REFUSE_NAME = "tout refuser"
@@ -104,6 +106,15 @@ class BotSession:
         self.last_login_kind = ""
         self._viewport = {"width": VIEWPORT_WIDTH, "height": 900}
         self._last_typing_log = 0.0
+        # Contrôle manuel : file des entrées (souris, clavier) traitée dans l'ordre par une seule tâche ; les
+        # mouvements de souris en attente sont fusionnés pour qu'un clic ne patiente jamais derrière eux.
+        self._input_queue: deque[tuple[str, dict]] = deque()
+        self._input_wakeup = asyncio.Event()
+        self._input_task: asyncio.Task | None = None
+        self._mouse_at: tuple[float, float] | None = None
+        self._window_size: tuple[int, int] | None = None  # navigateur complet : taille voulue de la fenêtre
+        self._mouse_buttons = 0
+        self.input_stats = {"received": 0, "applied": 0, "merged": 0}
         # Flux d'images
         self._capture_task: asyncio.Task | None = None
         self._start_task: asyncio.Task | None = None
@@ -113,6 +124,9 @@ class BotSession:
         self._last_frame_time = 0.0
         self._frame_event = asyncio.Event()
         self._cdp = None  # session CDP de la page courante (flux d'images poussé par Chrome)
+        # Navigateur complet : vraie fenêtre Chromium sur un écran virtuel affiché par noVNC (image Docker)
+        self.display = (VirtualDisplay(settings.vnc_display, settings.vnc_width, settings.vnc_height, settings.vnc_port)
+                        if settings.vnc and VirtualDisplay.available() else None)
         self._screencasting = False
         self._tasks: set[asyncio.Task] = set()
         # Automatisation (plages horaires, constructions, recherches) : réglages non secrets
@@ -158,6 +172,7 @@ class BotSession:
             "message": self._message,
             "page": self._page_label(),
             "manual": self._manual,
+            "display": "vnc" if self.display is not None else "images",
             "explore": {"recording": self._recorder.enabled, **self._recorder.counts()},
             "automation": self.automation.summary(),
         }
@@ -268,7 +283,7 @@ class BotSession:
             try:
                 page = self._page
                 idle = time.monotonic() - self._last_frame_time
-                if self._viewers > 0 and page is not None and not page.is_closed() and idle > 1.0:
+                if self.display is None and self._viewers > 0 and page is not None and not page.is_closed() and idle > 1.0:
                     data = await page.screenshot(type="jpeg", quality=60, timeout=5_000)
                     if data != self._frame_jpeg:
                         self._publish_frame(data)
@@ -309,11 +324,19 @@ class BotSession:
     async def _start_browser(self) -> None:
         s = self._settings
         self._pw = await async_playwright().start()
-        self._browser = await self._pw.chromium.launch(
-            headless=s.headless,
-            executable_path=s.chromium_path,
-            args=["--no-sandbox"] if s.no_sandbox else [],
-        )
+        args = ["--no-sandbox"] if s.no_sandbox else []
+        if self.display is not None:
+            # Vraie fenêtre (barre d'adresse, onglets) sur l'écran virtuel, à sa taille exacte
+            await self.display.ensure()
+            args += ["--window-position=0,0", f"--window-size={self.display.width},{self.display.height}",
+                     "--no-first-run", "--no-default-browser-check", "--lang=fr-FR"]
+            self._browser = await self._pw.chromium.launch(
+                headless=False, executable_path=s.chromium_path, args=args,
+                # langue de l'interface de Chromium = celle du jeu : pas de proposition de traduction
+                env={**os.environ, "DISPLAY": self.display.name, "LANGUAGE": "fr", "LANG": "fr_FR.UTF-8"},
+            )
+        else:
+            self._browser = await self._pw.chromium.launch(headless=s.headless, executable_path=s.chromium_path, args=args)
         await self._new_page()
 
     async def _new_page(self) -> None:
@@ -324,16 +347,20 @@ class BotSession:
                 await self._context.close()
             except Exception:  # noqa: BLE001
                 pass
-        self._context = await self._browser.new_context(
-            viewport=dict(self._viewport), locale="fr-FR"
-        )
-        if self._settings.show_cursor:
+        if self.display is not None:  # la page suit la taille de la fenêtre, comme dans un navigateur normal
+            self._context = await self._browser.new_context(no_viewport=True, locale="fr-FR")
+        else:
+            self._context = await self._browser.new_context(viewport=dict(self._viewport), locale="fr-FR")
+        if self._settings.show_cursor and self.display is None:
             await self._context.add_init_script(CURSOR_SCRIPT)
         self._page = await self._context.new_page()
         self._context.on("response", self._on_response)
         self._page.on("websocket", self._on_websocket)
         self._page.on("framenavigated", self._on_navigated)
-        await self._attach_screencast()
+        if self.display is None:
+            await self._attach_screencast()
+        elif self._window_size:
+            await self._fit_window(*self._window_size)
 
     async def _open_home(self) -> None:
         page = self._page
@@ -535,7 +562,8 @@ class BotSession:
             elif kind == "viewport":
                 await self._set_viewport(_num(msg["width"], 1, 10_000), _num(msg["height"], 1, 10_000))
             elif kind in {"move", "down", "up", "wheel", "type", "press"}:
-                await self._manual_input(kind, msg)
+                if self._manual:
+                    self._enqueue_input(kind, msg)
         except (KeyError, TypeError, ValueError):
             return  # message mal formé : ignoré
         except Exception:  # noqa: BLE001 - page en cours de navigation, etc.
@@ -560,6 +588,10 @@ class BotSession:
             "width": VIEWPORT_WIDTH,
             "height": int(_num(round(VIEWPORT_WIDTH * height / width), VIEWPORT_MIN_HEIGHT, VIEWPORT_MAX_HEIGHT)),
         }
+        if self.display is not None:
+            await self.display.resize(int(width), int(height))
+            await self._fit_window(self.display.width, self.display.height)
+            return
         if abs(new["height"] - self._viewport["height"]) <= 4:
             return
         self._viewport = new
@@ -567,26 +599,118 @@ class BotSession:
         if page is not None and not page.is_closed() and not self._lock.locked():
             await page.set_viewport_size(dict(new))
 
+    async def _fit_window(self, width: int, height: int) -> None:
+        """Navigateur complet : l'écran virtuel prend la taille de la zone d'affichage (noVNC le demande) ; la fenêtre
+        Chromium la suit pour remplir tout l'écran, sans bandes vides."""
+        self._window_size = (max(640, min(width, 3840)), max(400, min(height, 2160)))
+        page = self._page
+        if page is None or page.is_closed() or self._context is None:
+            return
+        try:
+            cdp = await self._context.new_cdp_session(page)
+            window = await cdp.send("Browser.getWindowForTarget")
+            await cdp.send("Browser.setWindowBounds", {"windowId": window["windowId"], "bounds": {"windowState": "normal"}})
+            await cdp.send("Browser.setWindowBounds", {"windowId": window["windowId"], "bounds": {
+                "left": 0, "top": 0, "width": self._window_size[0], "height": self._window_size[1]}})
+            await cdp.detach()
+        except Exception:  # noqa: BLE001 - fenêtre en cours de fermeture ou de création
+            pass
+
+    def _enqueue_input(self, kind: str, msg: dict) -> None:
+        if len(self._input_queue) > 500:  # garde-fou : un client qui inonde le serveur
+            return
+        self.input_stats["received"] += 1
+        self._input_queue.append((kind, msg))
+        self._input_wakeup.set()
+        if self._input_task is None or self._input_task.done():
+            self._input_task = asyncio.create_task(self._input_worker())
+
+    async def _input_worker(self) -> None:
+        """Applique les entrées dans l'ordre. Un mouvement de souris suivi d'une autre entrée est inutile (chaque
+        clic et chaque molette portent leur position) : il est sauté. Ainsi un clic part tout de suite, même si
+        des dizaines de mouvements sont arrivés juste avant pendant que la page du jeu était occupée."""
+        while True:
+            if not self._input_queue:
+                self._input_wakeup.clear()
+                try:
+                    await asyncio.wait_for(self._input_wakeup.wait(), 30)
+                except asyncio.TimeoutError:
+                    return
+                continue
+            kind, msg = self._input_queue.popleft()
+            if kind == "move" and self._input_queue:
+                self.input_stats["merged"] += 1
+                continue
+            if not await self._wait_input_allowed():
+                self._input_queue.clear()
+                continue
+            try:
+                await self._manual_input(kind, msg)
+                self.input_stats["applied"] += 1
+            except (KeyError, TypeError, ValueError):
+                pass
+            except Exception:  # noqa: BLE001 - page en cours de navigation, etc.
+                pass
+
+    async def _wait_input_allowed(self) -> bool:
+        """Le bot finit l'action en cours avant de rendre la main (au plus 10 s) : les clics attendent au lieu d'être perdus."""
+        end = time.monotonic() + 10
+        warned = False
+        while self._manual and (self._lock.locked() or self.automation.cycle_running):
+            if not warned:
+                warned = True
+                self.log("Contrôle manuel : le bot termine son action en cours, vos clics partiront juste après.", "warn")
+            if time.monotonic() > end:
+                self.log("Contrôle manuel : le bot est resté occupé, clics ignorés.", "warn")
+                return False
+            await asyncio.sleep(0.1)
+        return self._manual
+
+    async def _dispatch_mouse(self, page, event_type: str, x: float, y: float, **extra) -> None:
+        """Un seul aller-retour vers Chrome par évènement (CDP Input.dispatchMouseEvent), position comprise."""
+        if self._cdp is not None:
+            await self._cdp.send("Input.dispatchMouseEvent", {"type": event_type, "x": x, "y": y, **extra})
+            return
+        if event_type == "mouseMoved":  # sans session CDP (rare) : Playwright
+            await page.mouse.move(x, y)
+        elif event_type == "mousePressed":
+            await page.mouse.move(x, y)
+            await page.mouse.down(button=extra["button"])
+        elif event_type == "mouseReleased":
+            await page.mouse.move(x, y)
+            await page.mouse.up(button=extra["button"])
+        elif event_type == "mouseWheel":
+            await page.mouse.move(x, y)
+            await page.mouse.wheel(extra["deltaX"], extra["deltaY"])
+
     async def _manual_input(self, kind: str, msg: dict) -> None:
         page = self._page
-        if not self._manual or self._lock.locked() or self.automation.cycle_running or page is None or page.is_closed():
+        if not self._manual or page is None or page.is_closed():
             return
         size = page.viewport_size or self._viewport
         if kind in {"move", "down", "up", "wheel"}:
             x = _num(msg["x"], 0, 1) * size["width"]
             y = _num(msg["y"], 0, 1) * size["height"]
-            await page.mouse.move(x, y)
-            if kind in {"down", "up"}:
+            if kind == "move":
+                await self._dispatch_mouse(page, "mouseMoved", x, y, buttons=self._mouse_buttons)
+            elif kind in {"down", "up"}:
                 button = msg.get("button", "left")
                 if button not in _MOUSE_BUTTONS:
                     return
+                bit = {"left": 1, "right": 2, "middle": 4}[button]
+                if self._mouse_at != (x, y):  # survol d'abord (menus qui s'ouvrent au survol), puis l'appui
+                    await self._dispatch_mouse(page, "mouseMoved", x, y, buttons=self._mouse_buttons)
                 if kind == "down":
                     self.log(f"Clic manuel en ({x:.0f}, {y:.0f}).")
-                    await page.mouse.down(button=button)
+                    self._mouse_buttons |= bit
+                    await self._dispatch_mouse(page, "mousePressed", x, y, button=button, buttons=self._mouse_buttons, clickCount=1)
                 else:
-                    await page.mouse.up(button=button)
-            elif kind == "wheel":
-                await page.mouse.wheel(_num(msg.get("dx", 0), -2000, 2000), _num(msg.get("dy", 0), -2000, 2000))
+                    self._mouse_buttons &= ~bit
+                    await self._dispatch_mouse(page, "mouseReleased", x, y, button=button, buttons=self._mouse_buttons, clickCount=1)
+            else:
+                await self._dispatch_mouse(page, "mouseWheel", x, y, deltaX=_num(msg.get("dx", 0), -2000, 2000),
+                                           deltaY=_num(msg.get("dy", 0), -2000, 2000))
+            self._mouse_at = (x, y)
         elif kind == "type":
             text = str(msg["text"])[:500]
             if not text:
@@ -767,6 +891,13 @@ class BotSession:
         self._page = self._context = self._browser = self._pw = None
 
     async def shutdown(self) -> None:
+        try:
+            await self._shutdown()
+        finally:
+            if self.display is not None:
+                await self.display.stop()
+
+    async def _shutdown(self) -> None:
         await self.automation.stop_keeper()
         await self.automation.stop("arrêt du bot")
         boot = self._boot

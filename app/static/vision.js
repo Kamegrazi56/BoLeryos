@@ -9,6 +9,8 @@ const manual = document.getElementById("manual");
 const LABELS = { idle: "Non connecté", logging_in: "Connexion…", logged_in: "Connecté", error: "Échec" };
 
 let ws = null;
+let vncMode = false; // navigateur complet (noVNC) : la souris et le clavier passent par VNC, pas par les messages ci-dessous
+let rfb = null;
 let manualLockUntil = 0;
 let currentState = "idle";
 function send(obj) {
@@ -24,6 +26,7 @@ function render(data) {
     manual.checked = !!data.manual;
   }
   screen.classList.toggle("manual", manual.checked);
+  if (rfb) rfb.viewOnly = !manual.checked;
   renderExplore(data.explore);
   currentState = data.state;
 
@@ -50,12 +53,13 @@ function reportViewport() {
 }
 new ResizeObserver(() => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(reportViewport, 400);
+  resizeTimer = setTimeout(() => (vncMode ? fitRemote() : reportViewport()), 400);
 }).observe(screen);
 
 // Les images arrivent en binaire (JPEG) : pas de conversion en texte, affichage immédiat.
 let frameUrl = null;
 function showFrame(blob) {
+  if (vncMode) return;
   let img = screen.querySelector("img");
   if (!img) {
     screen.textContent = "";
@@ -83,12 +87,46 @@ function connect() {
 }
 connect();
 
+// ------------------------------------------------- navigateur complet (vraie fenêtre Chromium, noVNC)
+/** L'écran virtuel (côté serveur) prend la taille de la zone d'affichage, puis la fenêtre Chromium la suit. */
+function fitRemote() {
+  reportViewport();
+}
+
+async function setupDisplay() {
+  let info;
+  try { info = await (await fetch("/api/display")).json(); } catch { return; }
+  if (info.mode !== "vnc") return;
+  let RFB;
+  try { ({ default: RFB } = await import("/novnc/core/rfb.js")); } catch { return; } // sans noVNC : vue par images
+  vncMode = true;
+  screen.textContent = "";
+  screen.classList.add("vnc");
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const start = () => {
+    rfb = new RFB(screen, `${proto}://${location.host}/ws/vnc`, { shared: true });
+    rfb.scaleViewport = true; // toute la fenêtre du navigateur tient dans la zone, sans barres de défilement
+    rfb.resizeSession = false; // la taille est réglée par le serveur (fitRemote), même en simple visualisation
+    rfb.focusOnClick = true;
+    rfb.viewOnly = !manual.checked; // regarder seulement, tant que « Contrôle manuel » n'est pas coché
+    rfb.qualityLevel = 7;
+    rfb.compressionLevel = 2;
+    rfb.addEventListener("disconnect", () => { rfb = null; setTimeout(start, 2000); });
+    rfb.addEventListener("connect", () => setTimeout(fitRemote, 200));
+  };
+  start();
+}
+setupDisplay();
+
 // ---------------------------------------------------------------- contrôle manuel
 manual.addEventListener("change", () => {
   manualLockUntil = Date.now() + 800;
   screen.classList.toggle("manual", manual.checked);
   send({ t: "control", enabled: manual.checked });
-  if (manual.checked) screen.focus();
+  if (rfb) {
+    rfb.viewOnly = !manual.checked;
+    if (manual.checked) rfb.focus();
+  } else if (manual.checked) screen.focus();
 });
 
 // Position dans l'image affichée (object-fit: contain), en fraction de 0 à 1.
@@ -107,25 +145,25 @@ const BUTTONS = ["left", "middle", "right"];
 let lastMove = 0;
 
 screen.addEventListener("mousemove", (event) => {
-  if (!manual.checked || Date.now() - lastMove < 40) return;
+  if (vncMode || !manual.checked || Date.now() - lastMove < 40) return;
   const p = pos(event);
   if (p) { lastMove = Date.now(); send({ t: "move", ...p }); }
 });
 screen.addEventListener("mousedown", (event) => {
-  if (!manual.checked) return;
+  if (vncMode || !manual.checked) return;
   event.preventDefault();
   screen.focus();
   const p = pos(event);
   if (p) send({ t: "down", button: BUTTONS[event.button] || "left", ...p });
 });
 screen.addEventListener("mouseup", (event) => {
-  if (!manual.checked) return;
+  if (vncMode || !manual.checked) return;
   const p = pos(event);
   if (p) send({ t: "up", button: BUTTONS[event.button] || "left", ...p });
 });
-screen.addEventListener("contextmenu", (event) => { if (manual.checked) event.preventDefault(); });
+screen.addEventListener("contextmenu", (event) => { if (manual.checked && !vncMode) event.preventDefault(); });
 screen.addEventListener("wheel", (event) => {
-  if (!manual.checked) return;
+  if (vncMode || !manual.checked) return;
   event.preventDefault();
   const p = pos(event);
   if (p) send({ t: "wheel", dx: event.deltaX, dy: event.deltaY, ...p });
@@ -134,7 +172,7 @@ screen.addEventListener("wheel", (event) => {
 const NAMED_KEYS = new Set(["Enter", "Backspace", "Tab", "Escape", "Delete", "Home", "End", "PageUp", "PageDown",
   "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
 screen.addEventListener("keydown", (event) => {
-  if (!manual.checked || ["Control", "Shift", "Alt", "Meta"].includes(event.key)) return;
+  if (vncMode || !manual.checked || ["Control", "Shift", "Alt", "Meta"].includes(event.key)) return;
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") return; // géré par l'évènement « paste »
   event.preventDefault();
   const shortcut = event.ctrlKey || event.metaKey || event.altKey;
@@ -147,10 +185,17 @@ screen.addEventListener("keydown", (event) => {
   }
 });
 document.addEventListener("paste", (event) => {
-  if (!manual.checked || document.activeElement !== screen) return;
+  if (vncMode || !manual.checked || document.activeElement !== screen) return;
   const text = event.clipboardData.getData("text");
   if (text) { event.preventDefault(); send({ t: "type", text: text.slice(0, 500) }); }
 });
+
+const fullscreen = document.getElementById("fullscreen");
+if (fullscreen) {
+  fullscreen.addEventListener("click", () => {
+    if (screen.requestFullscreen) screen.requestFullscreen().then(() => (rfb ? rfb.focus() : screen.focus())).catch(() => {});
+  });
+}
 
 const logout = document.getElementById("logout");
 if (logout) {

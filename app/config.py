@@ -48,6 +48,13 @@ class Settings:
     human_delay_max: float = 1.4
     key_delay_min: float = 0.05    # délai entre deux touches (secondes)
     key_delay_max: float = 0.18
+    # Navigateur complet (vraie fenêtre Chromium sur un écran virtuel, affichée avec noVNC). Activé dans l'image Docker
+    # (variable VNC fixée par le Dockerfile) ; sinon, vue en direct par images (tests, développement).
+    vnc: bool = False
+    vnc_width: int = 1600
+    vnc_height: int = 900
+    vnc_display: int = 99
+    vnc_port: int = 5901
     # Affiche un point rouge à l'endroit de la souris dans la vue en direct.
     show_cursor: bool = True
     # Dossier des réglages d'automatisation (JSON, jamais d'identifiants). Utilisé seulement s'il existe.
@@ -82,6 +89,7 @@ def load_settings() -> Settings:
         key_delay_min=_env_float("KEY_DELAY_MIN", defaults.key_delay_min),
         key_delay_max=_env_float("KEY_DELAY_MAX", defaults.key_delay_max),
         show_cursor=_env_bool("SHOW_CURSOR", defaults.show_cursor),
+        vnc=_env_bool("VNC", defaults.vnc),
         data_dir=os.environ.get("DATA_DIR", defaults.data_dir) or None,
         poll_seconds=_env_float("POLL_SECONDS", defaults.poll_seconds),
         min_cycle_minutes=_env_float("MIN_CYCLE_MINUTES", defaults.min_cycle_minutes),

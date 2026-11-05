@@ -17,19 +17,20 @@ Bot d'automatisation pour Aleryos, destiné aux **tests de protection anti-bot r
 
 Un bandeau permanent indique le mode : **SIMULATION** (vert, le bot ne clique pas) ou **MODE RÉEL** (rouge). Les anciennes adresses `/vision` et `/actions` redirigent vers `/ecran` et `/reglages`. Des pastilles **?** expliquent les réglages moins évidents.
 
-### Contrôle manuel
+### Navigateur complet (page Écran)
 
-Une case « Contrôle manuel » (au-dessus de l'écran) rend la vue cliquable comme une page web : clics, molette, clavier et collage de texte sont rejoués sur le navigateur du bot.
+Dans l'image Docker, le Chromium du bot tourne avec sa **vraie fenêtre** (onglets, barre d'adresse) sur un écran virtuel, affiché dans la page **Écran** par **noVNC** : on navigue et on joue comme dans un vrai navigateur, au clavier et à la souris, comme avec le conteneur « Chromium » de linuxserver. C'est le même navigateur que celui qu'utilise le bot.
 
-- Désactivé par défaut. Tant qu'il est activé, le bot n'agit pas (la connexion automatique est refusée) ; il se désactive tout seul quand le dernier écran est fermé.
-- Les frappes ne sont jamais écrites dans le journal.
-- Non géré : menus déroulants natifs du navigateur, clic droit, fenêtres de fichiers.
-- La zone d'affichage occupe toute la page, et la hauteur du navigateur du bot s'adapte au format de l'écran (largeur fixe de 1440 px).
+- **Regarder** : par défaut, la vue est en lecture seule (le bot peut agir).
+- **Contrôle manuel** : cochez la case pour cliquer, taper, faire défiler, utiliser la barre d'adresse ou les onglets ; le bot se met en pause tant qu'elle est cochée (et la décoche tout seul quand plus aucun écran n'est ouvert).
+- **Plein écran** : bouton au-dessus de la vue (Échap pour sortir). L'écran virtuel prend toujours la taille de la zone d'affichage : image nette, sans bandes vides.
+- Rien de plus à exposer : le serveur VNC n'écoute que dans le conteneur, la page passe par le port du bot (7654) et sa vérification d'origine ; la protection `ui_user` / `ui_password` s'applique aussi.
+- Le bot travaille dans le premier onglet : un onglet ouvert à la main n'est pas vu par le bot.
 - Toute personne qui accède à l'interface peut agir sur le compte du jeu : protégez-la (`ui_user` / `ui_password`).
 
-### Affichage en direct
+### Vue par images (hors Docker)
 
-Chrome pousse lui-même une image à chaque changement de la page (CDP `Page.startScreencast`) ; le serveur ne garde que la dernière et l'envoie en JPEG brut sur le WebSocket. Mesure en local (serveur seul, sans réseau ni affichage du navigateur) : médiane de 5 ms, maximum d'environ 50 ms entre un changement de la page et l'envoi de l'image. Une capture classique sert de filet de sécurité si Chrome n'envoie rien pendant 1 s.
+Sans écran virtuel (tests, développement), la page Écran affiche un flux d'images poussé par Chrome (CDP `Page.startScreencast`) avec un contrôle manuel simplifié ; les mouvements de souris en attente y sont fusionnés pour qu'un clic parte tout de suite.
 
 ### Choix de l'univers
 

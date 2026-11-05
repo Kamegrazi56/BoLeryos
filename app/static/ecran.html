@@ -24,7 +24,10 @@
     <section class="card stage">
       <div class="toolbar">
         <span>Page : <span id="page">-</span> · <span id="message"></span></span>
-        <label class="switch" title="Pour jouer vous-même dans cette vue (le bot se met en pause)"><input type="checkbox" id="manual"> Contrôle manuel</label>
+        <span class="row" style="margin:0">
+          <button type="button" id="fullscreen" class="secondary small" title="Afficher le navigateur du bot sur tout l'écran (Échap pour sortir)">Plein écran</button>
+          <label class="switch" title="Pour jouer vous-même dans cette vue (le bot se met en pause)"><input type="checkbox" id="manual"> Contrôle manuel</label>
+        </span>
       </div>
       <div class="tools">
         <span id="universes" class="universes"></span>

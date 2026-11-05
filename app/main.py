@@ -30,6 +30,9 @@ WS_TICK = 0.25  # délai maximal entre deux envois du statut et du journal (seco
 MIN_FRAME_INTERVAL = 0.04  # écart minimal entre deux images envoyées
 
 
+NOVNC_DIR = Path("/usr/share/novnc")
+
+
 class NoStoreStaticFiles(StaticFiles):
     """Fichiers JS/CSS jamais mis en cache : après une mise à jour du bot, le navigateur recharge les nouveaux."""
 
@@ -339,6 +342,60 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def api_status(limit: int = 50):
         return JSONResponse({**bot.status(), "logs": bot.logs(max(1, min(limit, 1000)))}, headers=NO_STORE)
 
+    @app.get("/api/display")
+    async def api_display():
+        """« vnc » : navigateur complet (vraie fenêtre Chromium affichée par noVNC) ; « images » : vue par images."""
+        d = bot.display
+        return JSONResponse({"mode": "vnc" if d is not None and NOVNC_DIR.is_dir() else "images",
+                             "width": d.width if d else None, "height": d.height if d else None}, headers=NO_STORE)
+
+    @app.websocket("/ws/vnc")
+    async def ws_vnc(ws: WebSocket):
+        """Relais WebSocket ↔ serveur VNC local (127.0.0.1) : aucun port VNC n'est exposé hors du conteneur."""
+        if not _same_origin(ws.headers, ws.headers.get("host")) or bot.display is None:
+            await ws.close(code=1008)
+            return
+        protocols = ws.scope.get("subprotocols") or []
+        await ws.accept(subprotocol="binary" if "binary" in protocols else None)
+        bot.viewer_joined()
+        bot.start_in_background()
+        writer = None
+        try:
+            await bot.display.ensure()
+            reader, writer = await asyncio.open_connection("127.0.0.1", bot.display.port)
+
+            async def upstream() -> None:  # clavier, souris, presse-papiers de l'utilisateur → VNC
+                while True:
+                    msg = await ws.receive()
+                    if msg["type"] == "websocket.disconnect":
+                        return
+                    data = msg.get("bytes") if msg.get("bytes") is not None else (msg.get("text") or "").encode()
+                    writer.write(data)
+                    await writer.drain()
+
+            async def downstream() -> None:  # images de l'écran → navigateur de l'utilisateur
+                while True:
+                    data = await reader.read(65536)
+                    if not data:
+                        return
+                    await ws.send_bytes(data)
+
+            tasks = [asyncio.create_task(upstream()), asyncio.create_task(downstream())]
+            _, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+        except (OSError, RuntimeError, WebSocketDisconnect):
+            pass
+        finally:
+            if writer is not None:
+                writer.close()
+            bot.viewer_left()
+            try:
+                await ws.close()
+            except (RuntimeError, WebSocketDisconnect):
+                pass  # déjà fermé par le navigateur
+
     @app.websocket("/ws/vision")
     async def ws_vision(ws: WebSocket):
         if not _same_origin(ws.headers, ws.headers.get("host")):
@@ -407,6 +464,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_api_route("/vision", redirect("/ecran"), methods=["GET"], include_in_schema=False)
     app.add_api_route("/actions", redirect("/reglages"), methods=["GET"], include_in_schema=False)
     app.mount("/static", NoStoreStaticFiles(directory=STATIC_DIR), name="static")
+    if NOVNC_DIR.is_dir():  # client noVNC (paquet « novnc » de l'image Docker)
+        app.mount("/novnc", NoStoreStaticFiles(directory=NOVNC_DIR), name="novnc")
 
     if settings.ui_user and settings.ui_password:
         app.add_middleware(BasicAuthMiddleware, user=settings.ui_user, password=settings.ui_password)
