@@ -40,6 +40,8 @@ class AutomationRunner:
         self.idle = asyncio.Event()
         self.idle.set()
         self.cycle_running = False
+        # Un seul « travail » à la fois sur la page du jeu : un cycle ou une lecture de l'état (Suivi), jamais les deux.
+        self._work_lock = asyncio.Lock()
         self._task: asyncio.Task | None = None
         self._running = False
         self._busy_until: dict[str, float] = {}
@@ -344,9 +346,14 @@ class AutomationRunner:
             self._last_notes[key] = message
             self.bot.log(message, level, event=event, kind=kind)
 
+    def _is_current_loop(self) -> bool:
+        """Faux pour une ancienne boucle : après un arrêt (automatique ou non) puis un nouveau ON, seule la boucle
+        lancée par le dernier ON continue ; l'ancienne se termine à son réveil au lieu de tourner en double."""
+        return self._running and self._task is not None and self._task is asyncio.current_task()
+
     async def _loop(self) -> None:
         errors = 0
-        while self._running:
+        while self._is_current_loop():
             cfg = self._cfg()
             active, text = self.in_window(cfg)
             if self._window_active != active:
@@ -368,11 +375,15 @@ class AutomationRunner:
                 await self._sleep(poll)
                 continue
             self._last_notes.pop("precondition", None)
+            if not self._is_current_loop():  # arrêtée (ou remplacée) pendant la vérification de l'écran
+                return
             try:
                 await self.run_cycle(cfg)
                 errors = 0
             except Interrupted as exc:
                 self.bot.log(f"Cycle interrompu : {exc}.", "warn", event=True)
+                if not self._is_current_loop():  # arrêt automatique pendant le cycle : cette boucle est finie
+                    return
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
@@ -519,6 +530,10 @@ class AutomationRunner:
 
     # ------------------------------------------------------------------- cycle
     async def run_cycle(self, cfg: dict | None = None) -> None:
+        async with self._work_lock:  # attend la fin d'une lecture de l'état en cours
+            await self._run_cycle(cfg)
+
+    async def _run_cycle(self, cfg: dict | None = None) -> None:
         cfg = cfg or self._cfg()
         live = cfg["mode"] == "live"
         cons = cfg["constructions"]
@@ -680,6 +695,9 @@ class AutomationRunner:
             self.bot.log(
                 f"{planet_label} : {decision.card.name} lancée (niveau {decision.card.level} → {decision.card.level + 1}) — "
                 f"{self.launched_today(cfg)}/{cfg['daily_cap']} aujourd'hui.", event=True, kind="launch")
+            if not result.verified:
+                self.bot.log(f"{planet_label} : {decision.card.name} : le débit est trop petit pour être vu à l'écran "
+                             "(lancement déduit du changement de la carte), contrôlez dans le jeu.", "warn")
             return "launched"
         self._unconfirmed_streak += 1
         self.bot.log(f"{planet_label} : lancement non confirmé ({result.detail}).", "warn", event=True)
@@ -811,6 +829,9 @@ class AutomationRunner:
             if funding is None:
                 self._note("research:planet", f"Recherches : planète « {res['funding_planet']} » introuvable.", "warn")
                 return
+        elif not planets:
+            self._note("research:planet", "Recherches : aucune planète lue, impossible de choisir celle qui paie.", "warn")
+            return
         else:  # automatique : la planète qui a le plus de Fer
             funding = max(planets, key=lambda p: p.stocks[0] or 0)
         label = f"Recherches (planète {funding.name})"
@@ -872,7 +893,7 @@ class AutomationRunner:
                        "(capture de la page utile).", "warn", event=True)
         else:
             self._last_notes.pop("attack:unreadable", None)
-        found = attacks_module.incoming_attacks(movements, cfg["catalog"]["planets"])
+        found = attacks_module.incoming_attacks(movements, cfg["catalog"]["planets"], [p.coords for p in self._known_planets])
         now = time.time()
         for attack in found:
             if attack.key not in self._attack_seen:  # une seule alerte par attaque
@@ -1307,11 +1328,15 @@ class AutomationRunner:
     # ------------------------------------------------------------- diagnostic
     async def read_state(self) -> dict:
         """Lecture seule pour vérifier ce que le bot comprend de l'écran (planètes, ressources, cartes)."""
-        if self.cycle_running:
+        if self.cycle_running or self._work_lock.locked():
             raise GameUiError("un cycle d'automatisation est en cours")
         problem = self._preconditions()
         if problem:
             raise GameUiError(problem)
+        async with self._work_lock:
+            return await self._read_state_locked()
+
+    async def _read_state_locked(self) -> dict:
 
         async def diag_guard() -> None:
             if self.bot._manual or self.bot._state.value != "logged_in":
@@ -1323,6 +1348,7 @@ class AutomationRunner:
         self.idle.clear()
         try:
             planets = await self.driver.list_planets()
+            self._known_planets = planets  # coordonnées utiles aussi à l'alerte d'attaque
             self.store.add_catalog("planets", [p.name for p in planets])
             sections: dict[str, dict] = {}
             for section in ("buildings", "facilities", "tech"):

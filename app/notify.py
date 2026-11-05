@@ -37,8 +37,11 @@ def _addresses(host: str) -> list[ipaddress._BaseAddress]:
     return [ipaddress.ip_address(info[4][0]) for info in infos]
 
 
-def check_url(url: str, *, allow_private: bool = False) -> str:
-    """Retourne l'adresse nettoyée ou lève NotifyError (adresse non sûre)."""
+def check_url(url: str, *, allow_private: bool = False, resolve: bool = True) -> str:
+    """Retourne l'adresse nettoyée ou lève NotifyError (adresse non sûre).
+
+    `resolve` faux : seule la forme est contrôlée (relecture du fichier au démarrage, quand le réseau peut ne pas être
+    prêt) ; l'adresse est de toute façon revérifiée, DNS compris, avant chaque envoi."""
     url = url.strip()
     parts = urlsplit(url)
     if parts.scheme != "https" and not (allow_private and parts.scheme == "http"):
@@ -47,13 +50,14 @@ def check_url(url: str, *, allow_private: bool = False) -> str:
         raise NotifyError("Adresse invalide.")
     if parts.username or parts.password:
         raise NotifyError("L'adresse ne doit pas contenir d'identifiants.")
-    if not allow_private:
+    if not allow_private and resolve:
         try:
             addresses = _addresses(parts.hostname)
         except OSError as exc:
             raise NotifyError("Adresse introuvable (DNS).") from exc
         for ip in addresses:
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+            # `is_global` faux : réseau local, réservé, partagé d'opérateur (100.64.0.0/10, VPN), documentation…
+            if not ip.is_global or ip.is_multicast:
                 raise NotifyError("Les adresses du réseau local ou réservées sont refusées.")
     return url
 
@@ -70,7 +74,8 @@ class Notifier:
         if self._path and self._path.exists():
             try:
                 saved = json.loads(self._path.read_text(encoding="utf8"))
-                self._url = check_url(saved["url"], allow_private=allow_private) if saved.get("url") else ""
+                # Sans DNS : une panne de réseau au démarrage ne doit pas faire oublier (puis effacer) l'adresse.
+                self._url = check_url(saved["url"], allow_private=allow_private, resolve=False) if saved.get("url") else ""
                 self._format = saved.get("format") if saved.get("format") in FORMATS else "json"
                 self._events = {kind: bool(saved.get("events", {}).get(kind, True)) for kind in KINDS}
             except (OSError, ValueError, KeyError, TypeError):

@@ -437,3 +437,97 @@ def test_automation_endpoints_reject_other_sites(game_client):
                         ("post", "/api/automation/stop"), ("post", "/api/automation/read-state")):
         kwargs = {"json": {"settings": {}}} if method == "put" else {}
         assert getattr(game_client, method)(url, headers=evil, **kwargs).status_code == 403
+
+
+def test_switching_on_again_after_an_automatic_stop_never_runs_two_loops(game_client):
+    """Arrêt automatique pendant un cycle, puis ON aussitôt : l'ancienne boucle ne doit pas repartir à son réveil."""
+    import asyncio
+
+    runner = _runner(game_client)
+    _configure(game_client, cycle=(0.05, 0.05))  # 3 s d'attente entre deux cycles
+    callers = []
+
+    async def fake_cycle(cfg=None):
+        callers.append(asyncio.current_task())
+        if len(callers) == 1:  # premier cycle : arrêt automatique (comme deux lancements non confirmés)
+            await runner.stop("test", automatic=True)
+            raise Interrupted("test")
+        await asyncio.sleep(0.2)
+
+    runner.run_cycle = fake_cycle
+
+    async def scenario():
+        await runner.start()
+        for _ in range(50):
+            if not runner._running:
+                break
+            await asyncio.sleep(0.1)
+        assert not runner._running
+        await runner.start()  # l'utilisateur remet ON tout de suite
+        await asyncio.sleep(5)  # l'ancienne boucle aurait fini sa pause
+        await runner.stop("fin du test")
+
+    game_client.portal.call(scenario)
+    assert len(callers) >= 2
+    assert len({id(t) for t in callers[1:]}) == 1  # une seule boucle après le redémarrage
+
+
+def test_a_cheap_upgrade_on_a_rich_planet_is_confirmed_by_the_card_and_counted(game_client, game):
+    """Stocks affichés en milliards (arrondis au million) : un débit de quelques centaines de milliers est invisible.
+    Le lancement est confirmé par la carte (bouton désactivé : construction en cours) et compté dans le maximum."""
+    game.set_stocks(1, **{"Fer": 4.121e9, "Cristal": 3.201e9, "Éther": 1.5e9})
+    game_client.portal.call(_bot(game_client)._page.reload)
+    _configure(game_client, mode="live", constructions=[("Centre de Recherche", 25)], scope="one", planet="6-79-Egide")
+    _cycle(game_client)
+    assert [a["name"] for a in game.actions()] == ["Centre de Recherche"]
+    assert not _has(game_client, "non confirmé")
+    assert _has(game_client, "débit est trop petit pour être vu")
+    assert _runner(game_client).launched_today() == 1
+    assert _planets_state(game_client)["6-79-Egide"]["status"] == "busy"
+
+
+def test_a_cycle_waits_for_a_game_state_reading_instead_of_running_alongside(game_client):
+    import asyncio
+
+    runner = _runner(game_client)
+    _configure(game_client, constructions=[("Mine de Fer", 45)])
+    original = runner.driver.list_planets
+    order = []
+
+    async def slow_list():
+        order.append("début lecture des planètes")
+        await asyncio.sleep(1.0)
+        return await original()
+
+    runner.driver.list_planets = slow_list
+
+    async def scenario():
+        reading = asyncio.create_task(runner.read_state())
+        await asyncio.sleep(0.3)
+        runner._running = True
+        try:
+            await runner.run_cycle()  # attend la fin de la lecture
+            order.append("fin du cycle")
+        finally:
+            runner._running = False
+        return await reading
+
+    state = game_client.portal.call(scenario)
+    assert state["planets"]  # la lecture a abouti sans être dérangée
+    assert order[0] == "début lecture des planètes" and order[-1] == "fin du cycle"
+    with pytest.raises(Exception, match="cycle"):  # et l'inverse reste refusé : pas de lecture pendant un cycle
+        async def read_during_cycle():
+            async with runner._work_lock:
+                await runner.read_state()
+        game_client.portal.call(read_during_cycle)
+
+
+def test_research_without_any_planet_read_says_so_instead_of_crashing(game_client):
+    runner = _runner(game_client)
+    _configure(game_client, research={"Technologie laser": 30})
+    runner._running = True
+    try:
+        game_client.portal.call(runner._research_step, runner.store.get(), [], False)
+    finally:
+        runner._running = False
+    assert _has(game_client, "aucune planète lue")

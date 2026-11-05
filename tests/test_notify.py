@@ -57,6 +57,7 @@ def receiver():
     "http://example.com/hook", "ftp://example.com/x", "https://127.0.0.1/x", "https://localhost/x", "https://10.0.0.5/x",
     "https://192.168.1.10/x", "https://169.254.169.254/latest", "https://[::1]/x", "https://0.0.0.0/x",
     "https://user:pass@93.184.216.34/x", "https:///x", "https://" + "a" * 600 + ".com/x", "",
+    "https://100.64.1.1/x", "https://[::ffff:127.0.0.1]/x",  # réseau partagé d'opérateur / VPN ; IPv4 dans IPv6
 ])
 def test_unsafe_addresses_are_refused(url):
     with pytest.raises(NotifyError):
@@ -66,6 +67,23 @@ def test_unsafe_addresses_are_refused(url):
 def test_a_public_https_address_is_accepted_and_private_ones_only_in_tests():
     assert check_url(" https://93.184.216.34/hook ") == "https://93.184.216.34/hook"
     assert check_url("http://127.0.0.1:8080/x", allow_private=True) == "http://127.0.0.1:8080/x"
+
+
+def test_a_dns_failure_at_startup_does_not_lose_the_saved_address(tmp_path, monkeypatch):
+    """Réseau pas encore prêt au redémarrage : l'adresse enregistrée est gardée, et n'est pas effacée du fichier."""
+    import app.notify as notify_module
+
+    (tmp_path / "notifications.json").write_text(json.dumps({"url": f"https://example.com/{SECRET}", "format": "json",
+                                                             "events": {}}), encoding="utf8")
+
+    def no_dns(host):
+        raise OSError("dns")
+
+    monkeypatch.setattr(notify_module, "_addresses", no_dns)
+    n = Notifier(str(tmp_path))
+    assert n.configured
+    n.configure(url=None, fmt="json", events={"launch": False})  # l'utilisateur change seulement une case
+    assert json.loads((tmp_path / "notifications.json").read_text(encoding="utf8"))["url"].endswith(SECRET)
 
 
 # ------------------------------------------------------------------------- configuration
@@ -81,7 +99,8 @@ def test_address_is_saved_apart_with_restricted_rights_and_survives_a_restart(tm
     n = Notifier(str(tmp_path), allow_private=True)
     n.configure(url=f"http://127.0.0.1:9/hook/{SECRET}", fmt="text", events={"launch": True, "attention": True})
     path = tmp_path / "notifications.json"
-    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    if os.name != "nt":  # Windows ne gère pas les droits Unix ; le bot tourne sous Linux (Docker), où c'est vérifié
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
     again = Notifier(str(tmp_path), allow_private=True)
     assert again.configured and again.public_config()["format"] == "text" and again.wants("attention")
     again.clear()

@@ -38,6 +38,16 @@ def test_only_attacks_coming_from_elsewhere_onto_my_planets_count():
     assert found[0].describe() == "Attaque de Hades33 (Gaia I17 99 83) vers 5-32-Sceau (I27 95 00), arrivée 06:56:16 (dans 01:20:00)"
 
 
+def test_an_enemy_planet_with_the_same_name_as_mine_is_still_an_attack():
+    """Les coordonnées font foi quand elles sont connues : un nom de planète peut être porté par l'ennemi aussi."""
+    twin = ("5-32-Sceau", "I17 99 83", "Hades33")  # planète ennemie au même nom que la mienne
+    movements = parse_movements(_raw(_movement("Attaque", twin, SCEAU), _movement("Attaque", EGIDE, SCEAU)))
+    by_name = incoming_attacks(movements, ["5-32-Sceau", "6-79-Egide"])
+    by_coords = incoming_attacks(movements, ["5-32-Sceau", "6-79-Egide"], ["I27 95 00", "M69 38 06"])
+    assert by_name == []  # ancien comportement (noms seulement) : l'attaque passait inaperçue
+    assert [m.origin_coords for m in by_coords] == ["I17 99 83"]
+
+
 def test_without_my_planet_list_players_are_compared():
     movements = parse_movements(_raw(_movement("Attaque", ENEMY, SCEAU), _movement("Attaque", EGIDE, SCEAU)))
     assert [m.origin_player for m in incoming_attacks(movements, [])] == ["Hades33"]

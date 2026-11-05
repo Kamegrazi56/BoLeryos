@@ -70,7 +70,7 @@ SNAPSHOT_JS = """
   for (const el of document.body.querySelectorAll('*')) {
     if (texts.length >= 800) break;
     if (el.children.length || el.matches('script,style,noscript,input,textarea,select,option')) continue;
-    const t = (el.textContent || '').trim().replace(/\s+/g, ' ');
+    const t = (el.textContent || '').trim().replace(/\\s+/g, ' ');
     if (!t) continue;
     const r = el.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) continue;

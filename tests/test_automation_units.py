@@ -318,3 +318,28 @@ def test_ordered_rule_energy_and_unreadable_values():
     assert decide_ordered(cards[:1], blind, _queue(("Mine de Fer", 45))).decision is None
     bad = Card("Mine de Fer", 40, {}, None, "Améliorer", True, unreadable=["Fer '12 To'"])
     assert decide_ordered([bad], RES, _queue(("Mine de Fer", 45))).decision is None
+
+
+def test_one_refused_saved_value_keeps_every_other_setting_and_the_original_file(tmp_path):
+    """Après une mise à jour qui change une limite, une valeur refusée ne doit pas effacer tous les réglages."""
+    import json
+
+    saved = json.loads(json.dumps(DEFAULTS))
+    saved["universe"] = "Asterion"
+    saved["constructions"]["queue"] = [{"name": "Mine de Fer", "level": 45}]
+    saved["daily_cap"] = 0  # seule valeur refusée
+    (tmp_path / "automation.json").write_text(json.dumps(saved), encoding="utf8")
+    store = SettingsStore(str(tmp_path))
+    data = store.get()
+    assert data["universe"] == "Asterion" and [q["name"] for q in data["constructions"]["queue"]] == ["Mine de Fer"]
+    assert data["daily_cap"] == DEFAULTS["daily_cap"] and data["mode"] == "dry_run"
+    assert store.load_problems and (tmp_path / "automation.json.bak").exists()
+
+
+def test_a_settings_file_that_is_fully_valid_reports_no_problem(tmp_path):
+    import json
+
+    (tmp_path / "automation.json").write_text(json.dumps({**DEFAULTS, "mode": "live"}), encoding="utf8")
+    store = SettingsStore(str(tmp_path))
+    assert store.loaded_from_disk and not store.load_problems and store.get()["mode"] == "dry_run"
+    assert not (tmp_path / "automation.json.bak").exists()

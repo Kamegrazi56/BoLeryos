@@ -85,17 +85,26 @@ def badge_count(raw: dict) -> int:
     return total
 
 
-def incoming_attacks(movements: list[Movement], my_planets: list[str]) -> list[Movement]:
+def _coords(text: str) -> str:
+    return " ".join(str(text).upper().split())
+
+
+def incoming_attacks(movements: list[Movement], my_planets: list[str], my_coords: list[str] | None = None) -> list[Movement]:
     """Attaques qui arrivent sur une de vos planètes et viennent d'ailleurs.
 
-    « Vos planètes » : la liste lue dans le jeu ; si elle est encore inconnue, on compare les joueurs (origine différente
-    de la destination)."""
+    « Vos planètes » : de préférence leurs COORDONNÉES (uniques, alors qu'une planète ennemie peut porter le même nom
+    qu'une des vôtres) ; à défaut, leurs noms lus dans le jeu ; si rien n'est connu, on compare les joueurs (origine
+    différente de la destination)."""
+    coords = {_coords(c) for c in (my_coords or []) if c}
     mine = {norm(p) for p in my_planets}
     out = []
     for mv in movements:
         if "attaq" not in norm(mv.type):
             continue
-        if mine:
+        if coords and mv.dest_coords and mv.origin_coords:
+            if _coords(mv.dest_coords) in coords and _coords(mv.origin_coords) not in coords:
+                out.append(mv)
+        elif mine:
             if norm(mv.dest_planet) in mine and norm(mv.origin_planet) not in mine:
                 out.append(mv)
         elif mv.origin_player and mv.dest_player and norm(mv.origin_player) != norm(mv.dest_player):

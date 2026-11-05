@@ -6,6 +6,7 @@ import copy
 import json
 import os
 import re
+import shutil
 import tempfile
 import uuid
 from pathlib import Path
@@ -496,14 +497,41 @@ class SettingsStore:
         self._min_cycle = min_cycle_minutes
         self._data = copy.deepcopy(DEFAULTS)
         self.loaded_from_disk = False
+        self.load_problems: list[str] = []  # valeurs du fichier refusées au démarrage (affichées dans le journal)
         if self._path and self._path.exists():
             try:
                 saved = json.loads(self._path.read_text(encoding="utf8"))
+                if not isinstance(saved, dict):
+                    raise ValueError("objet JSON attendu")
                 saved["mode"] = "dry_run"  # le mode réel n'est jamais restauré après un redémarrage
-                self._data = validate(saved, allow_live=False, min_cycle_minutes=min_cycle_minutes)
+                try:
+                    self._data = validate(saved, allow_live=False, min_cycle_minutes=min_cycle_minutes)
+                except SettingsError as exc:
+                    # Une seule valeur refusée (ex. limite changée par une mise à jour) ne doit pas tout effacer :
+                    # on garde chaque partie valide, et une copie du fichier d'origine est conservée à côté.
+                    self._data = self._salvage(saved, min_cycle_minutes)
+                    self.load_problems = exc.errors
+                    try:
+                        shutil.copyfile(self._path, self._path.with_name(self._path.name + ".bak"))
+                    except OSError:
+                        pass  # la copie est une précaution : son échec n'empêche pas de démarrer
                 self.loaded_from_disk = True
             except (OSError, ValueError):
                 self._data = copy.deepcopy(DEFAULTS)
+                self.load_problems = ["fichier de réglages illisible : valeurs par défaut"]
+
+    @staticmethod
+    def _salvage(saved: dict, min_cycle_minutes: float) -> dict:
+        """Réglages partiellement valides : chaque partie est validée seule ; une partie refusée garde sa valeur par défaut."""
+        data = copy.deepcopy(DEFAULTS)
+        for key in DEFAULTS:
+            if key == "mode" or key not in saved:
+                continue
+            try:
+                data[key] = validate({key: saved[key]}, allow_live=False, min_cycle_minutes=min_cycle_minutes)[key]
+            except SettingsError:
+                pass
+        return data
 
     @property
     def persistent(self) -> bool:

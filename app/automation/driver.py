@@ -229,11 +229,27 @@ class GameDriver:
         if await dialog.count() and await dialog.is_visible():
             raise GameUiError("une fenêtre inattendue s'est ouverte après le clic (capture de la page nécessaire)")
         after = await self.read_page()
+        # 1) un débit visible. Le jeu arrondit les gros stocks (« 4,121 G » : au million près) : un petit coût peut ne
+        # pas se voir ; seuls les coûts assez grands par rapport à l'arrondi servent de preuve.
+        invisible = True
         for label, cost in fresh.costs.items():
             was, now = before.resources.stock(label), after.resources.stock(label)
-            if was is not None and now is not None and was - now >= 0.5 * cost:
+            step = before.resources.step(label)
+            if cost <= 0 or was is None or now is None or (step is not None and cost < 2 * step):
+                continue
+            invisible = False
+            if was - now >= 0.5 * cost:
                 return LaunchResult(True, f"{label} débité")
-        return LaunchResult(False, "les ressources n'ont pas été débitées")
+        if not invisible:
+            return LaunchResult(False, "les ressources n'ont pas été débitées")
+        # 2) débit trop petit pour se voir : la carte doit avoir changé (niveau monté, ou bouton désactivé / retiré
+        # parce qu'une construction est en cours). Sinon, rien ne prouve que le clic a eu un effet.
+        now_card = next((c for c in after.cards if norm(c.name) == norm(card.name)), None)
+        changed = (now_card is None or not now_card.enabled or now_card.action != fresh.action
+                   or (now_card.level is not None and fresh.level is not None and now_card.level > fresh.level))
+        if changed:
+            return LaunchResult(True, "débit trop petit pour être vu, mais la carte a changé", verified=False)
+        return LaunchResult(False, "débit trop petit pour être vu et carte inchangée")
 
     # ------------------------------------------------------------ production
     async def _read_production_cards(self, kind: str) -> list[ProdCard]:

@@ -134,6 +134,11 @@ class BotSession:
             self, SettingsStore(settings.data_dir, settings.min_cycle_minutes), settings.data_dir
         )
         self.notifier = Notifier(settings.data_dir, settings.allow_private_webhooks)
+        problems = self.automation.store.load_problems
+        if problems:  # réglages enregistrés en partie refusés : le dire au lieu de les remplacer en silence
+            self.log("Réglages enregistrés : certaines valeurs ont été refusées et remises par défaut ("
+                     + " ; ".join(problems[:3]) + "). Le fichier d'origine est conservé (automation.json.bak).",
+                     "warn", event=True)
         # Exploration de la structure du site (désactivée par défaut)
         self._recorder = Recorder()
         self._snapshot_task: asyncio.Task | None = None
