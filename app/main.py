@@ -10,6 +10,7 @@ import secrets
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -56,7 +57,8 @@ class AutomationSettingsRequest(BaseModel):
 
 class CredentialsRequest(BaseModel):
     identifier: str = Field(min_length=1, max_length=254)
-    password: SecretStr = Field(min_length=1, max_length=256)
+    # None : garder le mot de passe déjà enregistré (le champ de la page reste vide, il n'est jamais réaffiché).
+    password: Annotated[SecretStr, Field(min_length=1, max_length=256)] | None = None
 
 
 class NotificationsRequest(BaseModel):
@@ -196,14 +198,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "hint": bot.credentials_hint(),  # jamais l'identifiant complet ni le mot de passe
                 "universe": cfg["universe"],
                 "universes": cfg["catalog"]["universes"],
+                "saved_on_disk": bot.vault.available,  # le mot de passe survit à un redémarrage (chiffré)
+                "ui_protected": settings.ui_user is not None,  # l'interface du bot demande un mot de passe
             },
+            headers=NO_STORE,
+        )
+
+    @app.get("/api/account/form")
+    async def api_account_form():
+        """Pré-remplit les champs de la page : l'identifiant, jamais le mot de passe (seulement « il en existe un »)."""
+        return JSONResponse(
+            {"identifier": bot.credentials_identifier(), "has_password": bot.credentials_password_known()},
             headers=NO_STORE,
         )
 
     @app.post("/api/account/credentials")
     async def api_account_credentials(body: CredentialsRequest, request: Request):
         _check_origin(request)
-        bot.set_credentials(body.identifier.strip(), body.password.get_secret_value())
+        password = body.password.get_secret_value() if body.password else None
+        if not bot.set_credentials(body.identifier.strip(), password):
+            raise HTTPException(422, "Saisissez le mot de passe.")
         # Comme TBot : une fois les identifiants saisis, le bot se connecte et choisit l'univers tout seul.
         bot.automation.reset_connection()
         bot.automation.ensure_keeper()
@@ -220,6 +234,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def api_account_login(request: Request):
         """Relance tout de suite la connexion automatique (après une erreur ou une intervention manuelle)."""
         _check_origin(request)
+        if not bot.has_credentials():
+            bot.restore_credentials()  # identifiants enregistrés (après une déconnexion, par exemple)
         if not bot.has_credentials():
             raise HTTPException(409, "Aucun identifiant en mémoire : saisissez-les d'abord.")
         bot.automation.reset_connection()

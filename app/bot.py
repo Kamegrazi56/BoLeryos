@@ -31,6 +31,7 @@ from .config import Settings
 from .display import VirtualDisplay
 from .explore import MAX_SNAPSHOTS, SNAPSHOT_JS, Recorder, should_skip_host
 from .notify import Notifier
+from .vault import CredentialVault
 
 TURNSTILE_SELECTOR = 'iframe[src*="challenges.cloudflare.com"]'
 COOKIE_REFUSE_NAME = "tout refuser"
@@ -134,6 +135,12 @@ class BotSession:
             self, SettingsStore(settings.data_dir, settings.min_cycle_minutes), settings.data_dir
         )
         self.notifier = Notifier(settings.data_dir, settings.allow_private_webhooks)
+        # Identifiants enregistrés (chiffrés) : relus en mémoire au démarrage, SANS se connecter tant que
+        # l'utilisateur ne le demande pas (« Relancer la connexion »).
+        self.vault = CredentialVault(settings.data_dir)
+        self.restore_credentials()
+        if self.vault.problem:
+            self.log(f"Identifiants : {self.vault.problem}.", "warn", event=True)
         problems = self.automation.store.load_problems
         if problems:  # réglages enregistrés en partie refusés : le dire au lieu de les remplacer en silence
             self.log("Réglages enregistrés : certaines valeurs ont été refusées et remises par défaut ("
@@ -389,14 +396,39 @@ class BotSession:
     def credentials_hint(self) -> str:
         return _mask(self._creds[0]) if self._creds else ""
 
-    def set_credentials(self, identifier: str, password: str) -> None:
+    def credentials_identifier(self) -> str:
+        """Identifiant (adresse e-mail) mémorisé ou enregistré, pour pré-remplir la page. Jamais le mot de passe."""
+        return self._creds[0] if self._creds else self.vault.saved_identifier()
+
+    def credentials_password_known(self) -> bool:
+        """Un mot de passe est disponible (en mémoire ou enregistré) : le champ peut rester vide."""
+        return self._creds is not None
+
+    def set_credentials(self, identifier: str, password: str | None = None) -> bool:
+        """Mémorise l'identifiant. Sans nouveau mot de passe, garde celui déjà connu. Retourne False si aucun n'existe."""
+        if password is None:
+            if self._creds is None:
+                return False
+            password = self._creds[1]
         self._creds = (identifier, password)
-        self.log(f"Identifiants mémorisés pour la reconnexion automatique ({_mask(identifier)}) : en mémoire seulement.", event=True)
+        if self.vault.save(identifier, password):
+            self.log(f"Identifiants enregistrés pour la reconnexion automatique ({_mask(identifier)}) : mot de passe chiffré sur le disque du bot.", event=True)
+        else:
+            self.log(f"Identifiants mémorisés pour la reconnexion automatique ({_mask(identifier)}) : en mémoire seulement (pas de dossier /data).", event=True)
+        return True
+
+    def restore_credentials(self) -> bool:
+        """Recharge en mémoire les identifiants enregistrés (démarrage, ou après une déconnexion)."""
+        saved = self.vault.load()
+        if saved:
+            self._creds = saved
+        return saved is not None
 
     def forget_credentials(self) -> None:
-        if self._creds:
-            self.log("Identifiants oubliés.", event=True)
+        if self._creds or self.vault.saved_identifier():
+            self.log("Identifiants oubliés (y compris ceux enregistrés).", event=True)
         self._creds = None
+        self.vault.clear()
 
     # ----------------------------------------------------- écran courant du site
     async def detect_screen(self) -> str:
@@ -464,7 +496,7 @@ class BotSession:
             return self.status()
 
     async def logout(self) -> dict[str, str]:
-        self._creds = None  # se déconnecter, c'est aussi oublier les identifiants
+        self._creds = None  # se déconnecter : plus de reconnexion automatique (les identifiants enregistrés restent sur disque)
         await self.automation.stop_keeper()
         await self.automation.stop("déconnexion")
         async with self._lock:
@@ -477,6 +509,10 @@ class BotSession:
             self._set(State.IDLE, "Non connecté.")
             self.log("Déconnexion : session du navigateur effacée.", event=True)
             return self.status()
+
+    def _login_delay(self) -> tuple[float, float]:
+        d = self.automation.store.get()["login_delay"]
+        return d["min_seconds"], d["max_seconds"]
 
     async def _do_login(self, identifier: str, password: str) -> _Outcome:
         s = self._settings
@@ -491,19 +527,20 @@ class BotSession:
         except Exception:  # noqa: BLE001
             return _Outcome(False, "Formulaire de connexion introuvable (sélecteurs à vérifier).", "technical")
 
-        await human.think(s)
+        delay = self._login_delay()  # délai min/max entre deux clics, choisi dans Réglages › Compte et univers
+        await human.think(s, delay)
         self.log("Saisie de l'identifiant.")
         await human.click(page, email, s)
         await human.micro(s)
         await human.type_text(page, identifier, s)
 
-        await human.think(s)
+        await human.think(s, delay)
         self.log("Saisie du mot de passe.")
         await human.click(page, pwd, s)
         await human.micro(s)
         await human.type_text(page, password, s)
 
-        await human.think(s)
+        await human.think(s, delay)
         self.log("Clic sur le bouton de connexion.")
         await human.click(page, submit, s)
         self.log("Formulaire envoyé, attente du résultat.")

@@ -48,6 +48,10 @@
         <label>Univers <span data-help-text="Le nom de l'univers tel qu'il est affiché sur la page « Choisissez votre univers ». Une fois connecté, le bot clique dessus. Des suggestions apparaissent dès que le bot a vu cette page."></span>
           <input id="universe" type="text" list="universe-list" autocomplete="off" spellcheck="false" placeholder="ex. Asterion"></label>
         <datalist id="universe-list"></datalist>
+        <label>Connexion : délai minimum entre deux clics (secondes) <span data-help-text="Pendant la connexion, le bot attend une durée au hasard entre le minimum et le maximum avant chaque clic ou saisie. Enregistré tout seul."></span>
+          <input id="login-delay-min" type="number" min="0" max="60" step="0.1"></label>
+        <label>Connexion : délai maximum entre deux clics (secondes)
+          <input id="login-delay-max" type="number" min="0" max="60" step="0.1"></label>
       </div>
       <div class="row">
         <button id="acct-save" type="button">Enregistrer et se connecter</button>
@@ -56,7 +60,8 @@
         <span id="acct-msg" class="hint" role="status"></span>
       </div>
       <p class="hint">Dès que les identifiants sont enregistrés, le bot <strong>se connecte tout seul</strong>, entre dans l'univers indiqué et <strong>reste connecté</strong> (il se reconnecte si la session expire), que l'interrupteur soit sur ON ou sur OFF. ON sert seulement à lui faire <em>travailler</em> (constructions, recherches). Si le site refuse les identifiants, le bot n'insiste pas ; si un contrôle anti-bot l'arrête, il vous demande de vous connecter à la main (page Écran, contrôle manuel) puis reprend seul.</p>
-      <p class="hint">Les identifiants sont gardés <strong>en mémoire du bot seulement</strong> : jamais écrits sur disque, ni dans le journal, ni dans les réglages exportés. Ils sont perdus au redémarrage du conteneur (il faut alors les ressaisir) et oubliés par « Oublier le compte » et par « Se déconnecter » (page Écran). Utilisez de préférence un compte de test.</p>
+      <p class="hint">Les champs sont <strong>enregistrés par le bot</strong> et réaffichés à chaque visite : l'identifiant tel quel, le mot de passe <strong>chiffré</strong> sur le disque du bot (dossier /data). Le mot de passe n'est jamais réaffiché (le champ reste vide et indique qu'il est enregistré : laissez-le vide pour le garder). Rien n'apparaît dans le journal ni dans les réglages exportés. « Oublier le compte » efface tout ; « Se déconnecter » (page Écran) arrête seulement la reconnexion automatique. Après un redémarrage, le bot ne se connecte pas seul : cliquez sur « Relancer la connexion ». Utilisez de préférence un compte de test.</p>
+      <p id="acct-warn" class="hint" role="note" hidden><strong>Attention :</strong> l'interface du bot n'est pas protégée par un mot de passe (UI_USER / UI_PASSWORD). Quiconque peut l'ouvrir voit l'identifiant enregistré et peut utiliser le compte.</p>
     </section>
 
     <section class="tabpanel card" id="panel-constructions" role="tabpanel" aria-labelledby="tab-constructions" hidden>

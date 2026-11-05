@@ -13,10 +13,14 @@ from playwright.async_api import Locator, Page
 from .config import Settings
 
 
-async def think(s: Settings) -> None:
-    """Pause de « réflexion » entre deux actions (durée aléatoire dans [human_delay_min, human_delay_max])."""
+async def think(s: Settings, delay: tuple[float, float] | None = None) -> None:
+    """Pause de « réflexion » entre deux actions.
+
+    Durée aléatoire dans `delay` (minimum, maximum) s'il est donné, sinon dans [human_delay_min, human_delay_max].
+    """
     if s.human_mode:
-        await asyncio.sleep(random.uniform(s.human_delay_min, s.human_delay_max))
+        low, high = delay if delay else (s.human_delay_min, s.human_delay_max)
+        await asyncio.sleep(random.uniform(low, high))
 
 
 async def micro(s: Settings) -> None:

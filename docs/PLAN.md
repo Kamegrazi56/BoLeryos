@@ -16,7 +16,7 @@ Cadre : test de protections anti-bot **avec l'éditeur** (GEEKOS NEXUS), sur un 
 | # | Fonctionnalité | Phase | État des connaissances |
 |---|---|---|---|
 | F1 | **Période horaire d'activité** : le bot n'agit que dans une ou plusieurs plages de la journée. | 2 | Aucune capture nécessaire. |
-| F2 | **Connexion automatique** : identifiant, mot de passe et univers enregistrés dans le bot. | 6 | **Fait en mémoire** : interrupteur ON/OFF, connexion et choix de l'univers automatiques, reconnexion si la session expire. **Reste D1** : conserver les identifiants après un redémarrage du conteneur. L'univers est mémorisé (non secret). |
+| F2 | **Connexion automatique** : identifiant, mot de passe et univers enregistrés dans le bot. | 6 | **Fait en mémoire** : interrupteur ON/OFF, connexion et choix de l'univers automatiques, reconnexion si la session expire. **D1 fait (option B, 05/11/2026)** : identifiants conservés après un redémarrage (mot de passe chiffré dans `/data`, clé à côté). L'univers est mémorisé (non secret). Délai min/max entre deux clics de la connexion réglable (Compte et univers). |
 | F3 | **Constructions** selon un **niveau demandé** par le joueur, sur **toutes les planètes**, si les ressources de la planète suffisent. | 3-4 | Pages Industrie et Installations capturées (cartes avec « Améliorer »). |
 | F4 | **Recherches** lancées si les ressources suffisent. | 5 | Page capturée : boutons « Rechercher » / « Ressources insuffisantes ». |
 | F5 | **Expéditions** en mode spatial ou terrestre, avec des **modèles** et une **durée** choisis par le joueur. | 8 | Page Opérations › Exploration capturée (compteurs, unités disponibles). **Étape 1 codée : simulation.** Étape 2 (lancement réel) : captures d'une exploration lancée à la main. |

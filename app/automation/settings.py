@@ -22,6 +22,8 @@ DEFAULTS: dict[str, Any] = {
     "universe": "",  # univers où entrer automatiquement (nom affiché sur la page de choix) ; vide = demander
     "daily_cap": 20,
     "cycle": {"min_minutes": 3.0, "max_minutes": 8.0},
+    # Pause aléatoire entre deux clics de la connexion (secondes), choisie dans Réglages › Compte et univers.
+    "login_delay": {"min_seconds": 0.4, "max_seconds": 1.4},
     "schedule": {
         "enabled": False,
         "timezone": "Europe/Paris",
@@ -113,6 +115,7 @@ def _queue(raw: Any, errors: list[str]) -> list[dict]:
     return out
 
 
+MAX_LOGIN_DELAY = 60.0  # secondes
 PRODUCTION_MODES = ("once", "stock", "repeat")
 MAX_AMOUNT = 10**12
 
@@ -294,6 +297,17 @@ def validate(data: dict, *, allow_live: bool, min_cycle_minutes: float = 1.0) ->
         merged["cycle"] = {"min_minutes": lo, "max_minutes": hi}
     except (KeyError, TypeError, ValueError):
         errors.append(f"cycle : minutes minimum (≥ {min_cycle_minutes:g}) et maximum (≥ minimum, ≤ 1440)")
+
+    login_delay = data.get("login_delay", merged["login_delay"])
+    try:
+        d_lo, d_hi = login_delay["min_seconds"], login_delay["max_seconds"]
+        if any(isinstance(v, bool) or not isinstance(v, (int, float)) for v in (d_lo, d_hi)):
+            raise ValueError
+        if not 0 <= d_lo <= d_hi <= MAX_LOGIN_DELAY:
+            raise ValueError
+        merged["login_delay"] = {"min_seconds": float(d_lo), "max_seconds": float(d_hi)}
+    except (KeyError, TypeError, ValueError):
+        errors.append(f"délai entre deux clics de la connexion : minimum ≥ 0, maximum ≥ minimum, ≤ {MAX_LOGIN_DELAY:g} secondes")
 
     schedule = data.get("schedule", merged["schedule"])
     try:
@@ -546,7 +560,7 @@ class SettingsStore:
         for key, value in (data if isinstance(data, dict) else {}).items():
             if key == "catalog":
                 continue  # entretenu par le bot
-            if key in ("cycle", "schedule", "constructions", "research", "production", "expeditions", "attack_alert", "espionage", "raids") and isinstance(value, dict) and isinstance(merged.get(key), dict):
+            if key in ("cycle", "login_delay", "schedule", "constructions", "research", "production", "expeditions", "attack_alert", "espionage", "raids") and isinstance(value, dict) and isinstance(merged.get(key), dict):
                 merged[key] = {**merged[key], **value}
             else:
                 merged[key] = value

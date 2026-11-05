@@ -622,6 +622,8 @@ function renderAll() {
   $("cap").value = model.daily_cap;
   $("cycle-min").value = model.cycle.min_minutes;
   $("cycle-max").value = model.cycle.max_minutes;
+  $("login-delay-min").value = model.login_delay.min_seconds;
+  $("login-delay-max").value = model.login_delay.max_seconds;
   $("sched-enabled").checked = model.schedule.enabled;
   renderTimezones();
   renderWindows();
@@ -657,6 +659,8 @@ const bind = (id, apply) => {
 bind("cap", (n) => { if (n.value !== "") model.daily_cap = Number(n.value); });
 bind("cycle-min", (n) => { if (n.value !== "") model.cycle.min_minutes = Number(n.value); });
 bind("cycle-max", (n) => { if (n.value !== "") model.cycle.max_minutes = Number(n.value); });
+bind("login-delay-min", (n) => { if (n.value !== "") model.login_delay.min_seconds = Number(n.value); });
+bind("login-delay-max", (n) => { if (n.value !== "") model.login_delay.max_seconds = Number(n.value); });
 bind("sched-enabled", (n) => { model.schedule.enabled = n.checked; });
 bind("tz", (n) => { model.schedule.timezone = n.value; });
 bind("cons-enabled", (n) => { model.constructions.enabled = n.checked; });
@@ -673,6 +677,7 @@ async function refreshAccount() {
       el("strong", { textContent: a.has_credentials ? `Identifiants en mémoire (${a.hint})` : "Aucun identifiant en mémoire" }),
       a.has_credentials ? " — le bot peut se reconnecter tout seul." : " — le bot ne pourra pas se connecter tout seul.",
     );
+    $("acct-warn").hidden = a.ui_protected || !a.saved_on_disk;
   } catch { /* idem */ }
 }
 /** État de la connexion automatique, mis à jour en direct (événement émis par shell.js). */
@@ -683,14 +688,28 @@ window.addEventListener("boleryos:status", (event) => {
   if (a.connection) parts.push(a.connection);
   $("conn-status").replaceChildren("Connexion : ", el("strong", { textContent: parts.join(" — ") }));
 });
+/** Champs mémorisés : l'identifiant est réaffiché ; le mot de passe jamais (le champ reste vide, avec une indication). */
+let passwordSaved = false;
+function showPasswordSaved(saved) {
+  passwordSaved = saved;
+  $("acct-pw").placeholder = saved ? "•••••••••• (enregistré : laissez vide pour le garder)" : "";
+}
+async function fillAccountForm() {
+  try {
+    const form = await (await fetch("/api/account/form")).json();
+    if (form.identifier && !$("acct-id").value) $("acct-id").value = form.identifier;
+    showPasswordSaved(!!form.has_password);
+  } catch { /* le bot redémarre : les champs resteront vides */ }
+}
 $("acct-save").addEventListener("click", async () => {
   const identifier = $("acct-id").value.trim(), password = $("acct-pw").value;
-  if (!identifier || !password) { $("acct-msg").textContent = "Renseignez l'identifiant et le mot de passe."; return; }
+  if (!identifier || (!password && !passwordSaved)) { $("acct-msg").textContent = "Renseignez l'identifiant et le mot de passe."; return; }
   model.universe = $("universe").value.trim();
   await save(); // l'univers est enregistré avant que le bot ne se connecte
-  const res = await fetch("/api/account/credentials", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ identifier, password }) });
+  const res = await fetch("/api/account/credentials", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ identifier, password: password || undefined }) });
   $("acct-pw").value = ""; // jamais conservé dans la page
-  $("acct-msg").textContent = res.ok ? "Enregistré : le bot se connecte." : "Refusé.";
+  if (res.ok) showPasswordSaved(true);
+  $("acct-msg").textContent = res.ok ? "Enregistré : le bot se connecte." : detailText(await res.json().catch(() => ({})), "Refusé.");
   refreshAccount();
 });
 $("acct-login").addEventListener("click", async () => {
@@ -701,6 +720,7 @@ $("acct-login").addEventListener("click", async () => {
 $("acct-forget").addEventListener("click", async () => {
   await fetch("/api/account/credentials", { method: "DELETE" });
   $("acct-id").value = ""; $("acct-pw").value = "";
+  showPasswordSaved(false);
   $("acct-msg").textContent = "Oubliés.";
   refreshAccount();
 });
@@ -825,6 +845,7 @@ async function refreshCatalog(force = false) {
   setTab(initialTab());
   refreshCatalog(false);
   refreshAccount();
+  fillAccountForm();
   refreshNotifications();
   setInterval(refreshAccount, 8000);
   setInterval(() => refreshCatalog(false), 8000);
