@@ -4,16 +4,17 @@ FROM mcr.microsoft.com/playwright/python:v1.64.1-noble
 
 WORKDIR /srv
 
+COPY requirements.txt .
+# Pas de venv : l'image n'embarque pas python3-venv. Le conteneur ne sert qu'à ce bot.
+RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
+
 # Navigateur complet : écran virtuel VNC (Xvnc), client web noVNC et xrandr (taille de l'écran ajustée à la page).
+# Installé après pip : noVNC tire des paquets Python de la distribution, que pip ne sait pas remplacer.
 # Le serveur VNC n'écoute que dans le conteneur ; l'interface du bot le relaie sur son propre port.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tigervnc-standalone-server novnc x11-xserver-utils \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
-
-COPY requirements.txt .
-# Pas de venv : l'image n'embarque pas python3-venv. Le conteneur ne sert qu'à ce bot.
-RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
 COPY app ./app
 
