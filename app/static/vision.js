@@ -118,6 +118,16 @@ async function setupDisplay() {
 }
 setupDisplay();
 
+// La molette fait toujours défiler la page du jeu, même en simple visualisation : noVNC ignore la molette en
+// lecture seule, on la lui transmet donc nous-mêmes (seulement la molette : clics et clavier restent bloqués).
+screen.addEventListener("wheel", (event) => {
+  if (!rfb || !rfb.viewOnly || typeof rfb._handleWheel !== "function") return;
+  rfb._viewOnly = false;
+  try { rfb._handleWheel(event); } finally { rfb._viewOnly = true; }
+  event.preventDefault();
+  event.stopPropagation();
+}, { capture: true, passive: false });
+
 // ---------------------------------------------------------------- contrôle manuel
 manual.addEventListener("change", () => {
   manualLockUntil = Date.now() + 800;
@@ -189,6 +199,21 @@ document.addEventListener("paste", (event) => {
   const text = event.clipboardData.getData("text");
   if (text) { event.preventDefault(); send({ t: "type", text: text.slice(0, 500) }); }
 });
+
+// Panneau « Outils & journal » escamotable, par-dessus l'écran
+const drawer = document.getElementById("drawer");
+const toolsToggle = document.getElementById("tools-toggle");
+function setDrawer(open) {
+  if (!drawer) return;
+  drawer.classList.toggle("open", open);
+  drawer.setAttribute("aria-hidden", String(!open));
+  if (toolsToggle) toolsToggle.setAttribute("aria-expanded", String(open));
+  if (open) logBox.scrollTop = logBox.scrollHeight;
+}
+if (toolsToggle) toolsToggle.addEventListener("click", () => setDrawer(!drawer.classList.contains("open")));
+const drawerClose = document.getElementById("drawer-close");
+if (drawerClose) drawerClose.addEventListener("click", () => setDrawer(false));
+document.addEventListener("keydown", (event) => { if (event.key === "Escape" && drawer && drawer.classList.contains("open") && !manual.checked) setDrawer(false); });
 
 const fullscreen = document.getElementById("fullscreen");
 if (fullscreen) {

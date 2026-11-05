@@ -82,11 +82,16 @@ def test_every_page_has_the_same_four_entries_the_switch_and_the_mode_banner(ui)
     page, errors, _ = ui
     for path in PAGES:
         page.goto(page.base + path)
-        page.wait_for_selector("#mode-banner:not([hidden])")
-        assert page.locator("header.top nav a").all_inner_texts() == ["Accueil", "Écran", "Réglages", "Suivi"]
+        assert [t.strip().lower() for t in page.locator("header.top nav a").all_inner_texts()] == ["accueil", "écran", "réglages", "suivi"]
         assert page.locator("header.top #power").is_visible()
-        assert "SIMULATION" in page.locator("#mode-banner").inner_text()
         assert page.locator("header.top nav a.active").count() == 1
+        if path == "/ecran":  # le navigateur prend toute la page : le mode tient dans une pastille du bandeau
+            page.wait_for_function("document.querySelector('#mode-chip').textContent === 'Simulation'")
+            assert page.locator("#mode-banner").is_hidden()
+            assert page.evaluate("document.documentElement.scrollHeight <= innerHeight")  # aucune barre de défilement
+        else:
+            page.wait_for_selector("#mode-banner:not([hidden])")
+            assert "SIMULATION" in page.locator("#mode-banner").inner_text()
     assert errors == []
 
 
@@ -102,7 +107,7 @@ def test_old_addresses_still_work(ui):
 def test_settings_are_in_ten_tabs_and_only_one_panel_shows_at_a_time(ui):
     page, errors, _ = ui
     assert [t.get_attribute("data-tab") for t in page.locator("[role=tab]").all()] == TABS
-    assert page.locator("[role=tab]").all_inner_texts() == [
+    assert [t.strip() for t in page.locator("[role=tab]").all_text_contents()] == [
         "Compte et univers", "Constructions", "Recherches", "Production", "Expéditions", "Espionnage", "Attaques", "Priorités", "Horaires et rythme", "Sauvegarde et alertes"]
     for tab in TABS:
         page.click(f"#tab-{tab}")
@@ -385,7 +390,7 @@ def test_home_page_says_what_the_bot_does_and_what_is_missing(ui):
     assert "✗" in work.inner_text() and work.locator("a").get_attribute("href") == "/reglages#constructions"
     assert "✓" in page.locator("#checklist li[data-step=account]").inner_text()  # déjà connecté
     assert page.locator("[data-power]").is_visible()
-    assert "Simulation (ne clique pas)" in page.inner_text("#mode-sim")
+    assert "Simulation (ne clique pas)" in page.text_content("#mode-sim")
     assert "Aucun événement" in page.inner_text("#events") or page.locator("#events li").count() >= 1
     assert "Rien pour l'instant" in page.inner_text("#sim-list")
 
@@ -490,14 +495,25 @@ def test_game_state_is_read_on_the_follow_up_page(ui):
     page.click("#tab-state")
     page.click("#read-state")
     page.wait_for_function("document.querySelector('#read-msg').textContent.includes('terminée')", timeout=60000)
-    assert "Planètes (3)" in page.inner_text("#state-out")
+    assert "Planètes (3)" in page.text_content("#state-out")
 
 
-def test_screen_page_keeps_live_view_and_manual_control(ui):
+def test_screen_page_fills_the_page_and_keeps_tools_in_a_drawer(ui):
     page, errors, _ = ui
     page.goto(page.base + "/ecran")
-    assert page.locator("#screen").is_visible() and page.locator("#manual").is_visible()
-    assert page.locator("#log").count() == 1 and errors == []
+    assert page.locator("#screen").is_visible() and page.locator("header.top #manual").is_visible()
+    header = page.locator("header.top").bounding_box()
+    screen = page.locator("#screen").bounding_box()
+    viewport = page.viewport_size
+    assert abs(screen["y"] - (header["y"] + header["height"])) <= 2  # juste sous le bandeau
+    assert screen["width"] >= viewport["width"] - 2 and abs(screen["y"] + screen["height"] - viewport["height"]) <= 2
+    assert not page.locator("#log").is_visible()  # journal escamoté
+    page.click("#tools-toggle")
+    page.wait_for_selector("#drawer.open")
+    assert page.locator("#log").is_visible() and page.locator("#rec").count() == 1
+    page.click("#drawer-close")
+    page.wait_for_selector("#drawer:not(.open)", state="attached")
+    assert errors == []
 
 
 # ---------------------------------------------------------------------------------- production

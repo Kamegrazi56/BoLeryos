@@ -54,6 +54,12 @@
   const header = document.querySelector("header.top");
   if (header) header.after(banner);
   function paintBanner(mode) {
+    const chip = document.getElementById("mode-chip"); // page Écran : le mode tient dans le bandeau du haut
+    if (chip) {
+      chip.className = "mode-chip " + (mode === "live" ? "live" : "sim");
+      chip.textContent = mode === "live" ? "Mode réel" : "Simulation";
+      chip.title = mode === "live" ? "Le bot clique et dépense vos ressources" : "Le bot ne clique pas";
+    }
     banner.hidden = false;
     banner.className = "mode-banner " + (mode === "live" ? "live" : "sim");
     banner.replaceChildren(

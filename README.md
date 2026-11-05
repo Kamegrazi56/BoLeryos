@@ -8,6 +8,8 @@ Bot d'automatisation pour Aleryos, destiné aux **tests de protection anti-bot r
 
 ## Pages
 
+Interface au style inspiré d'Aleryos (espace profond, panneaux translucides, accents cyan et violet).
+
 | Page | Rôle |
 |---|---|
 | `/` **Accueil** | Un grand interrupteur **ON / OFF**, une phrase qui dit ce que fait le bot, la liste **« Prêt à démarrer ? »** (✓ / ✗ avec un lien « Corriger »), le choix **Simulation / Réel**, un résumé en phrases de ce que le bot aurait fait, les derniers événements et les planètes suivies. |
@@ -21,7 +23,8 @@ Un bandeau permanent indique le mode : **SIMULATION** (vert, le bot ne clique pa
 
 Dans l'image Docker, le Chromium du bot tourne avec sa **vraie fenêtre** (onglets, barre d'adresse) sur un écran virtuel, affiché dans la page **Écran** par **noVNC** : on navigue et on joue comme dans un vrai navigateur, au clavier et à la souris, comme avec le conteneur « Chromium » de linuxserver. C'est le même navigateur que celui qu'utilise le bot.
 
-- **Regarder** : par défaut, la vue est en lecture seule (le bot peut agir).
+- Le navigateur occupe **toute la page sous le bandeau du haut**. Dans ce bandeau : le mode (Simulation / Réel), « Contrôle manuel », « Plein écran », « Outils & journal » (panneau escamotable : page affichée, univers, exploration de la structure, journal, déconnexion), et l'interrupteur ON/OFF.
+- **Regarder** : par défaut, la vue est en lecture seule (le bot peut agir). La **molette fait toujours défiler la page du jeu**, même sans contrôle manuel ; clics et clavier restent bloqués.
 - **Contrôle manuel** : cochez la case pour cliquer, taper, faire défiler, utiliser la barre d'adresse ou les onglets ; le bot se met en pause tant qu'elle est cochée (et la décoche tout seul quand plus aucun écran n'est ouvert).
 - **Plein écran** : bouton au-dessus de la vue (Échap pour sortir). L'écran virtuel prend toujours la taille de la zone d'affichage : image nette, sans bandes vides.
 - Rien de plus à exposer : le serveur VNC n'écoute que dans le conteneur, la page passe par le port du bot (7654) et sa vérification d'origine ; la protection `ui_user` / `ui_password` s'applique aussi.

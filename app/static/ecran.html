@@ -5,51 +5,55 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BoLeryos | Écran</title>
   <link rel="icon" href="data:,">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body class="screen-page">
   <header class="top">
-    <strong>BOLERYOS</strong>
+    <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span><strong>BOLERYOS</strong></a>
     <nav>
       <a href="/">Accueil</a>
       <a href="/ecran">Écran</a>
       <a href="/reglages">Réglages</a>
       <a href="/suivi">Suivi</a>
     </nav>
+    <div class="screen-controls">
+      <span id="mode-chip" class="mode-chip sim" role="status">Simulation</span>
+      <label class="switch manual-switch" title="Pour jouer vous-même dans le navigateur (le bot se met en pause)"><input type="checkbox" id="manual"> <span>Contrôle manuel</span></label>
+      <button type="button" id="fullscreen" class="secondary small" title="Afficher le navigateur du bot sur tout l'écran (Échap pour sortir)">Plein écran</button>
+      <button type="button" id="tools-toggle" class="secondary small" aria-expanded="false" aria-controls="drawer">Outils &amp; journal</button>
+    </div>
     <button id="power" class="power off" type="button" aria-pressed="false">Bot : OFF</button>
     <span id="badge" class="badge idle">Non connecté</span>
-    <button id="logout" class="secondary" type="button" title="Ferme la session du navigateur du bot et oublie les identifiants mémorisés">Se déconnecter</button>
   </header>
-  <div class="app-grid vision">
-    <section class="card stage">
-      <div class="toolbar">
-        <span>Page : <span id="page">-</span> · <span id="message"></span></span>
-        <span class="row" style="margin:0">
-          <button type="button" id="fullscreen" class="secondary small" title="Afficher le navigateur du bot sur tout l'écran (Échap pour sortir)">Plein écran</button>
-          <label class="switch" title="Pour jouer vous-même dans cette vue (le bot se met en pause)"><input type="checkbox" id="manual"> Contrôle manuel</label>
-        </span>
+
+  <main class="screen-main">
+    <div id="screen" class="screen" tabindex="0"><span class="screen-wait">Démarrage du navigateur du bot…</span></div>
+
+    <aside id="drawer" class="drawer" aria-label="Outils et journal" aria-hidden="true">
+      <div class="drawer-head">
+        <h2>Outils &amp; journal</h2>
+        <button type="button" id="drawer-close" class="secondary small" aria-label="Fermer le panneau">×</button>
       </div>
-      <div class="tools">
-        <span id="universes" class="universes"></span>
-        <details class="explore">
-          <summary>Exploration de la structure du site</summary>
-          <div class="explore-body">
-            <label class="switch"><input type="checkbox" id="rec"> Enregistrer la structure</label>
-            <button type="button" class="secondary small" id="snap">Capturer la page</button>
-            <a class="button secondary small" id="export" href="/api/explore/export" download>Exporter</a>
-            <button type="button" class="secondary small" id="clear">Effacer</button>
-            <span id="exp-count" class="hint"></span>
-          </div>
-          <p class="hint">Enregistre les pages, les chemins d'API et la forme des échanges. Les valeurs (mots de passe, jetons, cookies, e-mails, saisies) sont masquées ; vérifiez le fichier avant de l'envoyer.</p>
-        </details>
-      </div>
-      <div id="screen" class="screen" tabindex="0"><span>Démarrage du navigateur du bot…</span></div>
-    </section>
-    <aside class="card side">
-      <h1>Journal du bot</h1>
+      <p class="status-line">Page : <span id="page">-</span><br><span id="message"></span></p>
+      <span id="universes" class="universes"></span>
+      <details class="explore">
+        <summary>Exploration de la structure du site</summary>
+        <div class="explore-body">
+          <label class="switch"><input type="checkbox" id="rec"> Enregistrer la structure</label>
+          <button type="button" class="secondary small" id="snap">Capturer la page</button>
+          <a class="button secondary small" id="export" href="/api/explore/export" download>Exporter</a>
+          <button type="button" class="secondary small" id="clear">Effacer</button>
+          <span id="exp-count" class="hint"></span>
+        </div>
+        <p class="hint">Enregistre les pages, les chemins d'API et la forme des échanges. Les valeurs (mots de passe, jetons, cookies, e-mails, saisies) sont masquées ; vérifiez le fichier avant de l'envoyer.</p>
+      </details>
+      <h3>Journal du bot</h3>
       <div id="log" class="log"></div>
+      <button id="logout" class="secondary small" type="button" title="Ferme la session du navigateur du bot et oublie les identifiants mémorisés">Se déconnecter du jeu</button>
     </aside>
-  </div>
+  </main>
   <script src="/static/shell.js"></script>
   <script src="/static/vision.js"></script>
 </body>

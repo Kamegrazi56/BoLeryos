@@ -63,6 +63,11 @@ def vnc_app(settings):
     thread.join(timeout=10)
 
 
+FIELD_JS = """() => { const r = document.querySelector('input[name=email]').getBoundingClientRect();
+    return [r.x + r.width / 2 + window.screenX + (window.outerWidth - window.innerWidth),
+            r.y + r.height / 2 + window.screenY + (window.outerHeight - window.innerHeight)]; }"""
+
+
 def _loop():
     return next(o for o in gc.get_objects() if isinstance(o, asyncio.AbstractEventLoop) and o.is_running())
 
@@ -93,13 +98,29 @@ def test_the_screen_page_shows_the_real_browser_window_and_manual_control_reache
             time.sleep(0.2)
         assert abs(bot.display.width - area[0]) <= 4 and abs(bot.display.height - area[1]) <= 4
         time.sleep(1.5)
-        field = run(bot._page.evaluate("""() => { const r = document.querySelector('input[name=email]').getBoundingClientRect();
-            return [r.x + r.width / 2 + window.screenX + (window.outerWidth - window.innerWidth),
-                    r.y + r.height / 2 + window.screenY + (window.outerHeight - window.innerHeight)]; }"""))
+        field = run(bot._page.evaluate(FIELD_JS))
         canvas = page.locator("#screen canvas").first
         box = canvas.bounding_box()
         size = page.evaluate("() => { const c = document.querySelector('#screen canvas'); return [c.width, c.height]; }")
         target = (box["x"] + field[0] * box["width"] / size[0], box["y"] + field[1] * box["height"] / size[1])
+
+        # la molette fait défiler la page du jeu même sans contrôle manuel (lecture seule)
+        run(bot._page.evaluate("() => { document.body.style.height = '6000px'; window.scrollTo(0, 0); }"))
+        time.sleep(0.5)
+        center = (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        page.mouse.move(*center)
+        for _ in range(6):
+            page.mouse.wheel(0, 120)
+            time.sleep(0.1)
+        for _ in range(40):
+            if run(bot._page.evaluate("() => window.scrollY")) > 0:
+                break
+            time.sleep(0.1)
+        assert run(bot._page.evaluate("() => window.scrollY")) > 0
+        assert page.evaluate("() => window.scrollY") == 0  # la page de l'interface, elle, ne bouge pas
+        time.sleep(1.0)  # fin du défilement doux déclenché par la molette, puis retour en haut
+        run(bot._page.evaluate("() => { document.documentElement.style.scrollBehavior = 'auto'; window.scrollTo(0, 0); }"))
+        time.sleep(0.5)
 
         # sans contrôle manuel : on regarde seulement, rien n'atteint la page
         page.mouse.click(*target)
@@ -113,14 +134,25 @@ def test_the_screen_page_shows_the_real_browser_window_and_manual_control_reache
                 break
             time.sleep(0.1)
         time.sleep(0.5)
-        box = canvas.bounding_box()  # la page a pu défiler : on recalcule la position
-        page.mouse.click(box["x"] + field[0] * box["width"] / size[0], box["y"] + field[1] * box["height"] / size[1])
+        focused = "() => document.activeElement && document.activeElement.name === 'email'"
+        for _ in range(5):  # machine chargée : on attend que le clic ait bien donné le focus au champ
+            field = run(bot._page.evaluate(FIELD_JS))  # position du champ à l'instant du clic
+            box = canvas.bounding_box()  # la page a pu défiler : on recalcule la position
+            page.mouse.click(box["x"] + field[0] * box["width"] / size[0], box["y"] + field[1] * box["height"] / size[1])
+            for _ in range(20):
+                if run(bot._page.evaluate(focused)):
+                    break
+                time.sleep(0.1)
+            if run(bot._page.evaluate(focused)):
+                break
         page.keyboard.type("joueur@example.com")
-        for _ in range(60):
+        for _ in range(160):
             if run(bot._page.input_value("input[name=email]")) == "joueur@example.com":
                 break
             time.sleep(0.05)
-        assert run(bot._page.input_value("input[name=email]")) == "joueur@example.com"
+        assert run(bot._page.input_value("input[name=email]")) == "joueur@example.com", (
+            run(bot._page.evaluate(focused)), page.evaluate("() => rfb && [rfb.viewOnly, rfb._rfbConnectionState]"), bot._manual,
+            run(bot._page.evaluate("() => [location.href, document.activeElement && document.activeElement.outerHTML.slice(0, 80)]")))
         assert errors == []
         browser.close()
 
