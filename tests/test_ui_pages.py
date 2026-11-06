@@ -10,7 +10,6 @@ from playwright.sync_api import sync_playwright
 from app.main import create_app
 from tests.conftest import _free_port
 
-TABS = ["account", "constructions", "research", "production", "expeditions", "espionage", "raids", "priority", "schedule", "settings"]
 PAGES = ["/", "/ecran", "/reglages", "/suivi"]
 
 
@@ -21,7 +20,7 @@ def ui(settings, game):
 
     from app.bot import State
 
-    app = create_app(replace(settings, login_url=game.url + "/game/asterion/buildings", allow_private_webhooks=True))
+    app = create_app(replace(settings, login_url=game.url + "/game/asterion/buildings"))
     port = _free_port()
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)
@@ -55,7 +54,7 @@ def ui(settings, game):
         bot._set(State.LOGGED_IN, "test")
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(base + "/reglages")
-        page.wait_for_function("document.querySelectorAll('#cons-add-name option').length > 1")
+        page.wait_for_selector("#acct-id")
         yield page, errors, app
         browser.close()
     server.should_exit = True
@@ -63,7 +62,7 @@ def ui(settings, game):
 
 
 def _saved(app):
-    return app.state.bot.automation.store.get()
+    return app.state.bot.supervisor.prefs.get()
 
 
 def _wait_saved(page):
@@ -78,20 +77,16 @@ def _edit(page, action):
 
 
 # ------------------------------------------------------------------------------ navigation
-def test_every_page_has_the_same_four_entries_the_switch_and_the_mode_banner(ui):
+def test_every_page_has_the_same_four_entries_and_the_general_bot_switch(ui):
     page, errors, _ = ui
     for path in PAGES:
         page.goto(page.base + path)
         assert [t.strip().lower() for t in page.locator("header.top nav a").all_inner_texts()] == ["accueil", "écran", "réglages", "suivi"]
-        assert page.locator("header.top #power").is_visible()
         assert page.locator("header.top nav a.active").count() == 1
-        if path == "/ecran":  # le navigateur prend toute la page : le mode tient dans une pastille du bandeau
-            page.wait_for_function("document.querySelector('#mode-chip').textContent === 'Simulation'")
-            assert page.locator("#mode-banner").is_hidden()
+        assert page.locator("header.top #power").text_content() == "Bot : OFF"
+        assert page.locator("[data-power], #mode-chip, #mode-banner").count() == 0
+        if path == "/ecran":
             assert page.evaluate("document.documentElement.scrollHeight <= innerHeight")  # aucune barre de défilement
-        else:
-            page.wait_for_selector("#mode-banner:not([hidden])")
-            assert "SIMULATION" in page.locator("#mode-banner").inner_text()
     assert errors == []
 
 
@@ -100,54 +95,29 @@ def test_old_addresses_still_work(ui):
     page.goto(page.base + "/vision")
     assert page.url.endswith("/ecran")
     page.goto(page.base + "/actions")
-    assert page.url.endswith("/reglages")
+    assert "/reglages" in page.url
+    page.goto(page.base + "/fonctionnalites")
+    assert page.url.endswith("/reglages#features")
+    assert page.locator("#panel-features").is_visible()
+
+
+def test_the_removed_features_have_no_settings_and_no_routes(ui):
+    page, _, _ = ui
+    page.goto(page.base + "/reglages")
+    tabs = [t.strip().lower() for t in page.locator("[role=tab]").all_inner_texts()]
+    assert tabs == ["compte et univers", "fonctionnalités", "constructions", "recherches", "population"]
+    for tab in tabs:  # aucune section supprimée ne réapparaît, quel que soit l'onglet
+        page.click(f"[role=tab]:has-text('{tab}')", strict=False)
+        text = page.inner_text("main").lower()
+        for word in ("expéditions", "attaques", "horaires", "alertes"):
+            assert word not in text
+    for route in ("/api/automation", "/api/dashboard", "/api/notifications"):
+        assert page.request.get(page.base + route).status == 404
 
 
 # ------------------------------------------------------------------------------- réglages
-def test_settings_are_in_ten_tabs_and_only_one_panel_shows_at_a_time(ui):
-    page, errors, _ = ui
-    assert [t.get_attribute("data-tab") for t in page.locator("[role=tab]").all()] == TABS
-    assert [t.strip() for t in page.locator("[role=tab]").all_text_contents()] == [
-        "Compte et univers", "Constructions", "Recherches", "Production", "Expéditions", "Espionnage", "Attaques", "Priorités", "Horaires et rythme", "Sauvegarde et alertes"]
-    for tab in TABS:
-        page.click(f"#tab-{tab}")
-        visible = [t for t in TABS if page.locator(f"#panel-{t}").is_visible()]
-        assert visible == [tab], f"onglet {tab} : panneaux visibles {visible}"
-        assert page.locator(f"#tab-{tab}").get_attribute("aria-selected") == "true"
-    assert errors == []
-
-
-def test_selected_tab_is_remembered_and_can_be_opened_from_a_link(ui):
-    page, _, _ = ui
-    page.click("#tab-research")
-    page.reload()
-    page.wait_for_selector("#res-goals")
-    assert page.locator("#panel-research").is_visible()
-    page.goto(page.base + "/reglages#schedule")
-    page.wait_for_selector("#windows")
-    assert page.locator("#panel-schedule").is_visible()
-
-
-def test_settings_page_has_no_mode_switch_and_never_sends_the_mode(ui):
+def test_account_keeps_credentials_in_memory_and_never_shows_them_again(ui):
     page, _, app = ui
-    assert page.locator("#mode").count() == 0
-    page.click("#tab-constructions")
-    _edit(page, lambda: page.fill("#cons-recheck", "20"))
-    assert _saved(app)["mode"] == "dry_run"
-
-
-def test_the_save_indicator_confirms_each_change(ui):
-    page, _, app = ui
-    page.click("#tab-constructions")
-    page.fill("#cons-recheck", "25")
-    _wait_saved(page)
-    assert "✓" in page.locator("#save-msg").inner_text()
-    assert _saved(app)["constructions"]["recheck_minutes"] == 25.0
-
-
-def test_account_tab_keeps_credentials_in_memory_and_never_shows_them_again(ui):
-    page, _, app = ui
-    page.click("#tab-account")
     page.fill("#acct-id", "titulaire.secret@example.com")
     page.fill("#acct-pw", "mot-de-passe-tres-secret")
     page.click("#acct-save")
@@ -164,17 +134,25 @@ def test_account_tab_keeps_credentials_in_memory_and_never_shows_them_again(ui):
 
 def test_universe_is_typed_with_suggestions_and_saved(ui):
     page, _, app = ui
-    app.state.bot.automation.store.add_catalog("universes", ["Asterion", "Kael"])
+    app.state.bot.supervisor.prefs.add_catalog("universes", ["Asterion", "Kael"])
     page.reload()
     page.wait_for_function("document.querySelectorAll('#universe-list option').length == 2")
-    page.click("#tab-account")
     assert page.locator("#universe-list option").evaluate_all("o => o.map(x => x.value)") == ["Asterion", "Kael"]
     _edit(page, lambda: (page.fill("#universe", "Kael"), page.press("#universe", "Tab")))
     assert _saved(app)["universe"] == "Kael"
 
 
-def test_entering_the_account_makes_the_bot_connect_by_itself_without_the_switch(settings, game):
-    """Comme TBot : identifiants + univers saisis dans Réglages, et le bot se connecte tout seul (interrupteur sur OFF)."""
+def test_login_delay_is_saved_and_a_bad_range_is_refused(ui):
+    page, _, app = ui
+    _edit(page, lambda: (page.fill("#login-delay-min", "2"), page.fill("#login-delay-max", "3")))
+    assert _saved(app)["login_delay"] == {"min_seconds": 2.0, "max_seconds": 3.0}
+    page.fill("#login-delay-min", "9")
+    page.wait_for_function("document.querySelector('#save-msg').className.includes('error')", timeout=5000)
+    assert _saved(app)["login_delay"]["min_seconds"] == 2.0
+
+
+def test_entering_the_account_makes_the_bot_connect_by_itself(settings, game):
+    """Comme TBot : identifiants + univers saisis dans Réglages, et le bot se connecte tout seul."""
     from dataclasses import replace as _replace
 
     game.reset(require_auth=True)
@@ -199,303 +177,11 @@ def test_entering_the_account_makes_the_bot_connect_by_itself_without_the_switch
             page.click("#acct-save")
             page.wait_for_function("document.querySelector('#conn-status').textContent.includes('dans la partie')", timeout=90000)
             assert "Connecté" in page.inner_text("#conn-status")
-            assert app.state.bot.automation.summary()["running"] is False  # l'interrupteur n'a jamais été touché
             assert "/game/" in app.state.bot._page.url and game.info()["logged_in"] is True
             browser.close()
     finally:
         server.should_exit = True
         thread.join(timeout=5)
-
-
-def test_buildings_and_research_come_from_built_in_lists_without_any_name_field(ui):
-    page, _, _ = ui
-    page.click("#tab-constructions")
-    names = page.locator("#cons-add-name option").all_text_contents()[1:]
-    assert len(names) == 16 and names[:2] == ["Mine de Fer", "Extracteur de Cristal"]
-    assert {"Industrie", "Infrastructures"} == {g.get_attribute("label") for g in page.locator("#cons-add-name optgroup").all()}
-    assert page.locator("#panel-constructions input[type=text]").count() == 0  # aucune saisie libre de nom
-    page.click("#tab-research")
-    research = page.locator("#res-goals .goal-name").all_inner_texts()
-    assert len(research) == 23 and "Ingénierie minière" in research
-
-
-def test_the_player_builds_an_ordered_list_of_upgrades(ui):
-    page, _, app = ui
-    page.click("#tab-constructions")
-    assert "Liste vide" in page.locator("#cons-queue").inner_text()  # message de départ
-    for name, level in (("Mine de Fer", "45"), ("Centrale Énergétique", "30"), ("Caserne", "20")):
-        page.select_option("#cons-add-name", name)
-        page.fill("#cons-add-level", level)
-        page.click("#cons-add")
-    assert page.locator("#cons-queue .queue-row .goal-name").all_inner_texts() == ["Mine de Fer", "Centrale Énergétique", "Caserne"]
-    assert "Mine de Fer" not in page.locator("#cons-add-name option").all_text_contents()  # déjà dans la liste
-    page.locator("#cons-queue .queue-row").nth(2).locator("button[title^='Monter']").click()
-    page.locator("#cons-queue .queue-row").nth(1).locator("button[title^='Monter']").click()  # Caserne passe en premier
-    page.locator("#cons-queue .queue-row").nth(2).locator("button[title='Retirer de la liste']").click()  # retire Centrale
-    _edit(page, lambda: page.locator("#cons-queue .queue-row").nth(1).locator("input[type=number]").fill("46"))
-    queue = _saved(app)["constructions"]["queue"]
-    assert [(q["name"], q["level"], q["relative"]) for q in queue] == [("Caserne", 20, False), ("Mine de Fer", 46, False)]
-    assert all(q["id"] for q in queue)
-    assert page.locator("#cons-queue .queue-row .rank").all_inner_texts() == ["1", "2"]
-    assert page.locator("#cons-queue .queue-row").nth(0).locator("button[title^='Monter']").is_disabled()
-
-
-def test_a_level_can_be_relative_to_the_current_one(ui):
-    page, _, app = ui
-    page.click("#tab-constructions")
-    page.select_option("#cons-add-name", "Mine de Fer")
-    page.select_option("#cons-add-mode", "relative")
-    page.fill("#cons-add-level", "3")
-    page.click("#cons-add")
-    page.select_option("#cons-add-name", "Caserne")
-    page.fill("#cons-add-level", "10")
-    _edit(page, lambda: page.click("#cons-add"))
-    page.select_option("#cons-queue .queue-row >> nth=1 >> select", "relative")  # Caserne passe en relatif
-    _wait_saved(page)
-    queue = _saved(app)["constructions"]["queue"]
-    assert [(q["name"], q["level"], q["relative"]) for q in queue] == [("Mine de Fer", 3, True), ("Caserne", 10, True)]
-
-
-def test_ready_made_lists_fill_the_queue_and_stay_editable(ui):
-    page, _, app = ui
-    page.click("#tab-constructions")
-    assert page.locator("#preset option").all_inner_texts() == [
-        "Les 3 mines", "Les 3 mines et l'énergie", "Mines, énergie et stockage"]
-    page.select_option("#preset", "mines_energy")
-    page.fill("#preset-n", "4")
-    _edit(page, lambda: page.click("#preset-apply"))
-    queue = _saved(app)["constructions"]["queue"]
-    assert [(q["name"], q["level"], q["relative"]) for q in queue] == [
-        ("Mine de Fer", 4, True), ("Extracteur de Cristal", 4, True), ("Synthétiseur d'Éther", 4, True), ("Centrale Énergétique", 4, True)]
-    assert page.dialogs == []  # liste vide au départ : aucune confirmation
-    page.locator("#cons-queue .queue-row").nth(3).locator("button[title='Retirer de la liste']").click()
-    _wait_saved(page)
-    assert len(_saved(app)["constructions"]["queue"]) == 3
-    page.select_option("#preset", "mines")
-    page.click("#preset-apply")  # liste non vide : confirmation demandée
-    assert any("Remplacer" in m for m in page.dialogs)
-
-
-def test_research_goals_are_saved_and_empty_means_no_goal(ui):
-    page, _, app = ui
-    page.click("#tab-research")
-    page.fill("#res-goals [data-goal='Technologie laser']", "25")
-    page.fill("#res-goals [data-goal='Technologie ionique']", "20")
-    page.check("#res-enabled")
-    _edit(page, lambda: page.fill("#res-goals [data-goal='Technologie ionique']", ""))
-    assert _saved(app)["research"] == {"enabled": True, "targets": {"Technologie laser": 25}, "funding_planet": ""}
-
-
-def _read_state(page):
-    page.goto(page.base + "/suivi#state")
-    page.click("#read-state")
-    page.wait_for_function("document.querySelector('#read-msg').textContent.includes('terminée')", timeout=60000)
-    page.goto(page.base + "/reglages")
-    page.wait_for_function("document.querySelectorAll('#cons-add-name option').length > 1")
-
-
-def test_all_planets_or_a_single_selected_planet(ui):
-    page, _, app = ui
-    _read_state(page)
-    page.click("#tab-constructions")
-    assert page.locator("#scope-all").is_checked() and page.locator("#cons-planet").is_disabled()
-    assert page.locator("#cons-planet option").all_inner_texts()[1:] == ["6-79-Egide", "8-50-Concorde", "9-169-Strate"]
-    page.check("#scope-one")
-    assert page.locator("#cons-planet").is_enabled() and page.locator("#cons-planet").input_value() == "6-79-Egide"
-    _edit(page, lambda: page.select_option("#cons-planet", "9-169-Strate"))
-    cons = _saved(app)["constructions"]
-    assert (cons["scope"], cons["planet"]) == ("one", "9-169-Strate")
-    _edit(page, lambda: page.check("#scope-all"))
-    cons = _saved(app)["constructions"]
-    assert (cons["scope"], cons["planet"]) == ("all", "") and page.locator("#cons-planet").is_disabled()
-    page.select_option("#cons-add-name", "Mine de Fer")
-    page.fill("#cons-add-level", "45")
-    page.click("#cons-add")
-    assert "actuel : 40" in page.locator("#cons-queue .queue-row").first.inner_text()
-    page.click("#tab-research")
-    assert "8-50-Concorde" in page.locator("#res-planet option").all_inner_texts()
-
-
-def test_the_waiting_timer_is_set_in_minutes_and_saved(ui):
-    page, _, app = ui
-    page.click("#tab-constructions")
-    assert page.input_value("#cons-recheck") == "15"
-    _edit(page, lambda: page.fill("#cons-recheck", "30"))
-    assert _saved(app)["constructions"]["recheck_minutes"] == 30.0
-
-
-def test_time_windows_are_edited_and_advanced_settings_are_folded(ui):
-    page, _, app = ui
-    page.click("#tab-schedule")
-    page.check("#sched-enabled")
-    _edit(page, lambda: page.fill("#windows .window-row:first-child input[type=time] >> nth=0", "09:30"))
-    saved = _saved(app)["schedule"]
-    assert saved["enabled"] is True and saved["windows"][0]["start"] == "09:30"
-    advanced = page.locator("#panel-schedule details.advanced")
-    assert advanced.get_attribute("open") is None
-    for hidden in ("#tz", "#cap", "#cycle-min", "#cycle-max"):
-        assert not page.locator(hidden).is_visible()
-    page.click("#panel-schedule details.advanced summary")
-    assert page.locator("#tz option").count() > 20
-    assert "Maximum de lancements par jour" in advanced.inner_text() and "Fréquence de vérification" in advanced.inner_text()
-    _edit(page, lambda: page.fill("#cap", "7"))
-    assert _saved(app)["daily_cap"] == 7
-
-
-def test_help_bubbles_exist_and_explain(ui):
-    page, _, _ = ui
-    page.click("#tab-constructions")
-    helps = page.locator("#panel-constructions .help")
-    assert helps.count() >= 2 and "première" in (helps.first.get_attribute("data-help") or "")
-
-
-# ------------------------------------------------------------------------------ alertes
-def test_alert_address_is_never_shown_again_and_bad_addresses_are_refused(ui):
-    page, _, app = ui
-    page.click("#tab-settings")
-    page.fill("#notif-url", "ftp://exemple.invalid/hook")
-    page.uncheck("#notif-launch")
-    page.click("#notif-save")
-    page.wait_for_function("document.querySelector('#notif-msg').textContent.includes('https')")  # autre schéma refusé
-    assert not app.state.bot.notifier.configured
-    secret = "http://127.0.0.1:9/webhook/TOKEN-SECRET-123"  # autorisé ici : réglage de test
-    page.fill("#notif-url", secret)
-    page.check("#notif-attention")
-    page.click("#notif-save")
-    page.wait_for_function("document.querySelector('#notif-status').textContent.includes('127.0.0.1')")
-    assert page.input_value("#notif-url") == ""
-    assert "TOKEN-SECRET" not in page.content() and "TOKEN-SECRET" not in page.locator("#notif-status").inner_text()
-    assert app.state.bot.notifier.wants("attention") and not app.state.bot.notifier.wants("launch")
-    page.click("#notif-clear")
-    page.wait_for_function("document.querySelector('#notif-status').textContent.includes('Aucune adresse')")
-
-
-def test_settings_import_cannot_enable_real_mode(ui, tmp_path):
-    page, _, app = ui
-    page.click("#tab-settings")
-    file = tmp_path / "reglages.json"
-    file.write_text('{"mode": "live", "daily_cap": 9}', encoding="utf8")
-    page.set_input_files("#import", str(file))
-    page.wait_for_function("document.querySelector('#save-msg').textContent.includes('importés')")
-    assert _saved(app)["mode"] == "dry_run" and _saved(app)["daily_cap"] == 9
-
-
-# --------------------------------------------------------------------------------- accueil
-def test_home_page_says_what_the_bot_does_and_what_is_missing(ui):
-    page, _, app = ui
-    page.goto(page.base + "/")
-    page.wait_for_function("document.querySelector('#sentence').textContent.includes('arrêté')")
-    assert page.locator("#checklist li").count() == 5
-    work = page.locator("#checklist li[data-step=work]")
-    assert "✗" in work.inner_text() and work.locator("a").get_attribute("href") == "/reglages#constructions"
-    assert "✓" in page.locator("#checklist li[data-step=account]").inner_text()  # déjà connecté
-    assert page.locator("[data-power]").is_visible()
-    assert "Simulation (ne clique pas)" in page.text_content("#mode-sim")
-    assert "Aucun événement" in page.inner_text("#events") or page.locator("#events li").count() >= 1
-    assert "Rien pour l'instant" in page.inner_text("#sim-list")
-
-
-def test_switch_on_with_missing_items_opens_a_dialog_with_fix_links(ui):
-    page, _, app = ui
-    page.goto(page.base + "/")
-    page.wait_for_selector("#checklist li")
-    page.click("[data-power]")
-    dialog = page.locator("dialog.modal")
-    dialog.wait_for(state="visible")
-    assert "Quelque chose à faire" in dialog.inner_text()
-    assert dialog.locator("a", has_text="Corriger").get_attribute("href") == "/reglages#constructions"
-    dialog.get_by_role("button", name="Annuler").click()
-    time.sleep(0.5)
-    assert app.state.bot.automation.summary()["running"] is False
-    page.click("[data-power]")
-    page.get_by_role("button", name="Démarrer quand même").click()
-    page.wait_for_function("document.querySelector('#power').textContent.includes('ON')", timeout=15000)
-    assert app.state.bot.automation.summary()["running"] is True
-    assert "ON" in page.inner_text("[data-power]")
-    page.click("#power")
-    page.wait_for_function("document.querySelector('#power').textContent.includes('OFF')", timeout=15000)
-    assert app.state.bot.automation.summary()["running"] is False
-
-
-def test_real_mode_needs_a_confirmation_and_the_banner_follows(ui):
-    page, _, app = ui
-    page.goto(page.base + "/")
-    page.wait_for_selector("#mode-sim")
-    page.click("#mode-live")
-    page.wait_for_function("document.querySelector('#mode-banner').textContent.includes('MODE RÉEL')")
-    assert any("Mode RÉEL" in m and "aucune simulation" in m for m in page.dialogs)  # prévenu : rien n'a été simulé
-    assert _saved(app)["mode"] == "live"
-    assert "live" in page.get_attribute("#mode-banner", "class")
-    page.click("#mode-sim")
-    page.wait_for_function("document.querySelector('#mode-banner').textContent.includes('SIMULATION')")
-    assert _saved(app)["mode"] == "dry_run"
-
-
-def test_refused_real_mode_leaves_the_simulation(ui):
-    page, _, app = ui
-    page.goto(page.base + "/")
-    page.wait_for_selector("#mode-sim")
-    page.accept_dialogs = False  # l'utilisateur répond « Annuler » à la confirmation
-    page.click("#go-live")
-    time.sleep(0.5)
-    assert _saved(app)["mode"] == "dry_run"
-
-
-def test_simulation_is_summarised_in_sentences_then_real_mode_is_offered(ui):
-    page, _, app = ui
-    page.goto(page.base + "/reglages#constructions")
-    page.wait_for_function("document.querySelectorAll('#cons-add-name option').length > 1")
-    page.select_option("#cons-add-name", "Mine de Fer")
-    page.fill("#cons-add-level", "45")
-    page.click("#cons-add")
-    page.check("#cons-enabled")
-    _wait_saved(page)
-    page.click("#power")  # tout est prêt : aucune boîte de dialogue
-    page.wait_for_function("document.querySelector('#power').textContent.includes('ON')", timeout=15000)
-    page.goto(page.base + "/")
-    page.wait_for_function("document.querySelectorAll('#sim-list li:not(.empty-state)').length >= 1", timeout=60000)
-    line = page.locator("#sim-list li").first.inner_text()
-    assert "sur 6-79-Egide, j'aurais lancé Mine de Fer niveau 41" in line and ("À l'instant" in line or "Il y a" in line)
-    assert page.locator("#go-live").is_visible()
-    page.wait_for_function("document.querySelector('#events').textContent.includes('Simulation')", timeout=30000)
-    page.click("#power")
-
-
-# ----------------------------------------------------------------------------------- suivi
-def test_followed_planets_and_readable_journal(ui):
-    page, _, app = ui
-    page.goto(page.base + "/reglages#constructions")
-    page.wait_for_function("document.querySelectorAll('#cons-add-name option').length > 1")
-    page.select_option("#cons-add-name", "Mine de Fer")
-    page.fill("#cons-add-level", "45")
-    page.click("#cons-add")
-    page.check("#cons-enabled")
-    _wait_saved(page)
-    page.click("#power")
-    page.wait_for_function("document.querySelector('#power').textContent.includes('ON')", timeout=15000)
-    page.goto(page.base + "/suivi")
-    assert page.locator("#panel-log").is_visible() and not page.locator("#panel-planets").is_visible()
-    page.wait_for_function("document.querySelector('#log').textContent.includes('Simulation')", timeout=60000)
-    events = page.locator("#log div").count()
-    page.check("#log-details")
-    assert page.locator("#log div").count() >= events  # les détails techniques s'ajoutent aux événements
-    page.select_option("#log-level", "error")
-    assert "Journal vide" in page.inner_text("#log") or page.locator("#log div.error").count() == page.locator("#log div").count()
-    page.click("#tab-planets")
-    page.wait_for_function("document.querySelectorAll('#cons-pending tr').length >= 4", timeout=60000)
-    text = page.locator("#cons-pending").inner_text()
-    assert "8-50-Concorde" in text and "en attente de ressources" in text and "dans" in text
-    assert "réalisable (simulation)" in text
-    page.click("#power")
-
-
-def test_game_state_is_read_on_the_follow_up_page(ui):
-    page, _, _ = ui
-    page.goto(page.base + "/suivi")
-    page.click("#tab-state")
-    page.click("#read-state")
-    page.wait_for_function("document.querySelector('#read-msg').textContent.includes('terminée')", timeout=60000)
-    assert "Planètes (3)" in page.text_content("#state-out")
 
 
 def test_screen_page_fills_the_page_and_keeps_tools_in_a_drawer(ui):
@@ -516,185 +202,171 @@ def test_screen_page_fills_the_page_and_keeps_tools_in_a_drawer(ui):
     assert errors == []
 
 
-# ---------------------------------------------------------------------------------- production
-def _add_prod(page, section, name, mode="once", amount=None, maxi=False):
-    page.select_option("#prod-add-section", section)
-    page.select_option("#prod-add-name", name)
-    page.select_option("#prod-add-mode", mode)
-    if maxi:
-        page.check("#prod-add-max")
-    else:
-        page.fill("#prod-add-amount", str(amount))
-    page.click("#prod-add")
-
-
-def test_production_tab_builds_lines_from_built_in_lists_with_three_behaviours(ui):
-    page, _, app = ui
-    page.click("#tab-production")
-    assert page.locator("#prod-add-section option").all_inner_texts() == [
-        "Population", "Chantier spatial : vaisseaux", "Chantier spatial : composants", "Appareils spécialisés", "Défenses"]
-    names = page.locator("#prod-add-name option").all_text_contents()[1:]
-    assert names[:3] == ["Rempart de Fer", "Spectre du Rift", "Surchargeur Plasmique"] and "Mineur" in names
-    assert "Liste vide" in page.inner_text("#prod-queue")
-    _add_prod(page, "population", "Rempart de Fer", "once", 50)
-    _add_prod(page, "defense", "Éclateur Ionique", "stock", 200)
-    _add_prod(page, "specialized", "Drone Terrestre", "repeat", maxi=True)
-    _wait_saved(page)
-    queue = _saved(app)["production"]["queue"]
-    assert [(q["section"], q["name"], q["mode"], q["amount"], q["max"]) for q in queue] == [
-        ("population", "Rempart de Fer", "once", 50, False), ("defense", "Éclateur Ionique", "stock", 200, False),
-        ("specialized", "Drone Terrestre", "repeat", 1, True)]
-    assert all(q["id"] for q in queue)
-    assert "Rempart de Fer" not in page.locator("#prod-add-name option").all_text_contents()  # déjà dans la liste
-    # « maximum » n'existe pas pour un objectif de stock
-    page.select_option("#prod-add-mode", "stock")
-    assert page.locator("#prod-add-max").is_disabled()
-    page.locator("#prod-queue .queue-row").nth(2).locator("select").select_option("stock")
-    _wait_saved(page)
-    third = _saved(app)["production"]["queue"][2]
-    assert third["mode"] == "stock" and third["max"] is False
-
-
-def test_production_lines_can_be_reordered_edited_and_removed_and_scope_chosen(ui):
-    page, _, app = ui
-    page.click("#tab-production")
-    _add_prod(page, "population", "Pilote", "once", 5)
-    _add_prod(page, "population", "Mineur", "once", 7)
-    page.locator("#prod-queue .queue-row").nth(1).locator("button[title^='Monter']").click()
-    _edit(page, lambda: page.locator("#prod-queue .queue-row").nth(0).locator("input[type=number]").fill("9"))
-    queue = _saved(app)["production"]["queue"]
-    assert [(q["name"], q["amount"]) for q in queue] == [("Mineur", 9), ("Pilote", 5)]
-    _edit(page, lambda: page.locator("#prod-queue .queue-row").nth(1).locator("button[title='Retirer de la liste']").click())
-    assert [q["name"] for q in _saved(app)["production"]["queue"]] == ["Mineur"]
-    app.state.bot.automation.store.add_catalog("planets", ["6-79-Egide"])
-    page.reload()
-    page.wait_for_function("document.querySelectorAll('#prod-planet option').length > 1")
-    page.click("#tab-production")
-    _edit(page, lambda: page.check("#pscope-one"))
-    assert _saved(app)["production"]["scope"] == "one" and _saved(app)["production"]["planet"] == "6-79-Egide"
-    _edit(page, lambda: page.check("#prod-enabled"))
-    assert _saved(app)["production"]["enabled"] is True
-
-
-def test_priority_tab_orders_the_blocks(ui):
-    page, _, app = ui
-    page.click("#tab-priority")
-    rows = page.locator("#priority-list .queue-row")
-    assert rows.nth(0).get_attribute("data-block") == "constructions" and rows.count() == 9
-    _edit(page, lambda: rows.nth(4).locator("button[title^='Plus']").click())
-    _edit(page, lambda: page.locator("#priority-list .queue-row").nth(3).locator("button[title^='Plus']").click())
-    assert _saved(app)["priority"] == ["constructions", "research", "specialized", "population", "shipyard", "defense", "expeditions", "espionage", "raids"]
-
-
-# ---------------------------------------------------------------------------------- expéditions
-def test_expeditions_tab_builds_lines_with_a_composition_and_says_it_is_simulation_only(ui):
-    page, _, app = ui
-    page.click("#tab-expeditions")
-    assert "Simulation seulement" in page.inner_text("#panel-expeditions")
-    assert page.locator("#exp-add-way option").all_inner_texts() == ["Piliers (terrestre)", "Flotte (spatial)"]
-    assert "Liste vide" in page.inner_text("#exp-queue")
-    page.click("#exp-add")  # voie Piliers : première unité proposée = Soldat
-    row = page.locator("#exp-queue .queue-row").first
-    row.locator("select[aria-label='Unité à ajouter']").select_option("Grand Transporteur")
-    _wait_saved(page)
-    row.locator("input[aria-label='Durée en heures']").fill("3")
-    row = page.locator("#exp-queue .queue-row").first
-    row.locator("input[aria-label='Quantité de Soldat']").fill("40")
-    row.locator("select[aria-label='Mode pour Soldat']").select_option("percent")
-    row.locator("select[aria-label='Mode pour Grand Transporteur']").select_option("max")
-    _edit(page, lambda: page.fill("#exp-target", "3"))
-    saved = _saved(app)["expeditions"]
-    assert saved["active_target"] == 3 and saved["queue"][0]["way"] == "piliers" and saved["queue"][0]["hours"] == 3
-    assert saved["queue"][0]["units"] == [{"name": "Soldat", "mode": "percent", "value": 40}, {"name": "Grand Transporteur", "mode": "max", "value": 1}]
-    assert page.locator("#exp-queue input[aria-label='Quantité de Grand Transporteur']").is_disabled()  # « maximum » : pas de quantité
-    page.check("#exp-enabled")
-    _wait_saved(page)
-    assert _saved(app)["expeditions"]["enabled"] is True
-    page.locator("#exp-queue .queue-row").first.locator("button[title='Retirer de la liste']").click()
-    _wait_saved(page)
-    assert _saved(app)["expeditions"]["queue"] == []
-
-
-# ------------------------------------------------------------------------------- alerte d'attaque
-def test_attack_alert_is_set_in_the_alerts_tab(ui):
-    page, _, app = ui
-    page.click("#tab-settings")
-    assert not page.locator("#attack-enabled").is_checked() and page.input_value("#attack-interval") == "60"
-    _edit(page, lambda: page.check("#attack-enabled"))
-    _edit(page, lambda: page.fill("#attack-interval", "45"))
-    assert _saved(app)["attack_alert"] == {"enabled": True, "interval_seconds": 45.0}
-    page.wait_for_function("document.querySelector('#attack-status').textContent.includes('en pause')")
-    page.fill("#notif-url", "http://127.0.0.1:9/hook")
-    page.uncheck("#notif-attack")
-    page.click("#notif-save")
-    page.wait_for_function("document.querySelector('#notif-status').textContent.includes('127.0.0.1')")
-    assert app.state.bot.notifier.wants("attack") is False
-
-
-def test_home_shows_a_red_card_only_when_an_attack_is_coming(ui):
-    page, _, app = ui
+# ---------------------------------------------------------------------------------- accueil, suivi
+def test_home_shows_connection_scanned_planets_and_events(ui):
+    page, errors, _ = ui
+    page.click("#scan-run")
+    page.wait_for_function("document.querySelectorAll('#scan-list tr').length === 4", timeout=10000)
     page.goto(page.base + "/")
-    page.wait_for_selector("#checklist li")
-    assert page.locator("#attacks").is_hidden()
-    runner = app.state.bot.automation
-    runner._running = True  # affiché seulement quand le bot est sur ON
-    runner.attacks = [{"key": "k", "text": "Attaque de Hades33 (Gaia I17 99 83) vers 5-32-Sceau (I27 95 00), arrivée 07:10:00",
-                       "planet": "5-32-Sceau", "attacker": "Hades33", "arrival": "07:10:00", "countdown": ""}]
-    try:
-        page.wait_for_selector("#attacks:not([hidden])", timeout=10000)
-        assert "Hades33" in page.inner_text("#attacks")
-    finally:
-        runner._running = False
-        runner.attacks = []
+    page.wait_for_function("document.querySelectorAll('#planets tr').length === 4", timeout=10000)
+    assert "8-50-Concorde" in page.text_content("#planets")
+    assert "Scan des planètes" in page.text_content("#events")
+    assert "Aucun identifiant" in page.text_content("#sentence")
+    assert errors == []
 
 
-# ----------------------------------------------------------------------------------- espionnage
-def test_espionage_tab_saves_targets_interval_and_way(ui):
-    page, _, app = ui
-    page.click("#tab-espionage")
-    assert "Simulation seulement" in page.inner_text("#panel-espionage")
-    assert page.locator("#spy-way option").all_inner_texts() == ["Sonde (spatial)", "Drone (terrestre)", "Sonde et drone"]
-    page.check("#spy-players")
-    page.fill("#spy-min", "i27 00 00")
-    page.press("#spy-min", "Tab")
-    page.fill("#spy-max", "I29 99 99")
-    page.press("#spy-max", "Tab")
-    page.select_option("#spy-way", "drone")
-    _edit(page, lambda: page.check("#spy-enabled"))
-    saved = _saved(app)["espionage"]
-    assert (saved["enabled"], saved["players"], saved["errants"], saved["coord_min"], saved["coord_max"], saved["way"]) == (
-        True, True, True, "I27 00 00", "I29 99 99", "drone")
-    assert page.input_value("#spy-min") == "I27 00 00"  # mis en majuscules
-
-
-def test_the_save_message_never_moves_the_page_layout(ui):
-    """Régression : un message d'enregistrement plus long repliait la rangée d'onglets et décalait la page au milieu
-    d'un clic (le clic était perdu)."""
+def test_follow_up_page_is_only_the_journal(ui):
     page, _, _ = ui
-    page.click("#tab-account")
-    before = page.locator("#acct-save").bounding_box()
-    page.evaluate("document.querySelector('#save-msg').textContent = 'Modifications en cours… un message bien plus long que prévu'")
-    assert page.locator("#acct-save").bounding_box() == before
+    page.click("#scan-run")
+    page.wait_for_function("document.querySelectorAll('#scan-list tr').length === 4", timeout=10000)
+    page.goto(page.base + "/suivi")
+    assert page.locator("[role=tab]").count() == 0 and page.locator("#read-state").count() == 0
+    page.wait_for_function("document.querySelector('#log').textContent.includes('Scan des planètes')", timeout=10000)
+    page.check("#log-details")
+    page.select_option("#log-level", "error")
+    assert "Journal vide" in page.inner_text("#log") or page.locator("#log div.error").count() == page.locator("#log div").count()
 
 
-# ------------------------------------------------------------------------------ attaque des errants
-def test_raids_tab_saves_interval_minimums_rule_way_composition_and_total(ui):
-    page, _, app = ui
-    page.click("#tab-raids")
-    assert "lecture des rapports d'espionnage n'est pas encore codée" in page.inner_text("#panel-raids")
-    for sel, value in (("#raid-min", "m69 00 00"), ("#raid-max", "M69 99 99")):
-        page.fill(sel, value)
-        page.press(sel, "Tab")
-    page.fill("#raid-fer", "1000000")
-    page.fill("#raid-cristal", "500000")
-    page.select_option("#raid-required", "2")
-    page.select_option("#raid-way", "piliers")
-    page.select_option("#raid-add-unit", "Rempart de Fer")
-    page.locator("#raid-units select[aria-label='Mode pour Rempart de Fer']").select_option("max")
-    page.fill("#raid-total", "5")
-    _edit(page, lambda: page.check("#raid-enabled"))
-    r = _saved(app)["raids"]
-    assert (r["enabled"], r["coord_min"], r["coord_max"], r["min_fer"], r["min_cristal"], r["min_ether"], r["required"], r["way"], r["total"]) == (
-        True, "M69 00 00", "M69 99 99", 1000000, 500000, 0, 2, "piliers", 5)
-    assert r["units"] == [{"name": "Rempart de Fer", "mode": "max", "value": 1}]
-    page.wait_for_function("document.querySelector('#raid-done').textContent.includes('0 sur 5')")
+def test_account_has_a_planet_scan_section_with_a_button_and_the_scanned_list(ui):
+    page, _, _app = ui
+    assert "Scan des planètes" in page.text_content("#scan-title")
+    assert "Aucun scan" in page.text_content("#scan-status")
+    page.click("#scan-run")
+    page.wait_for_function("document.querySelectorAll('#scan-list tr').length === 4", timeout=10000)  # en-tête + 3 planètes
+    listed = page.text_content("#scan-list")
+    assert "8-50-Concorde" in listed and "Z25 95 16" in listed
+    assert "3 planète(s)" in page.text_content("#scan-status") and "à la demande" in page.text_content("#scan-status")
+
+
+def test_features_page_sets_the_timer_enables_reorders_and_the_switch_starts_the_bot(ui):
+    page, errors, app = ui
+    page.goto(page.base + "/reglages#features")
+    page.wait_for_selector("[data-feature=test]")
+    card = page.locator("[data-feature=test]")
+    assert "Désactivée" in card.inner_text()
+    card.get_by_label("Activer Test (ne fait rien)").check()  # sans minuteur : refusé, la case revient
+    page.wait_for_function("document.querySelector('#feat-msg').className.includes('error')", timeout=5000)
+    assert "minuteur" in page.inner_text("#feat-msg").lower()
+    page.wait_for_function("!document.querySelector('[data-feature=test] input[type=checkbox]').checked", timeout=5000)
+    page.fill("[data-feature=test] input[aria-label^='Minuteur minimum']", "0.5")
+    page.fill("[data-feature=test] input[aria-label^='Minuteur maximum']", "1")
+    page.wait_for_function("document.querySelector('#feat-msg').textContent.includes('Enregistré')", timeout=5000)
+    page.locator("[data-feature=test]").get_by_label("Activer Test (ne fait rien)").check()
+    page.wait_for_function("document.querySelector('[data-feature=test]').classList.contains('enabled')", timeout=5000)
+    saved = app.state.bot.scheduler.store.get("test")
+    assert (saved["enabled"], saved["min_minutes"], saved["max_minutes"]) == (True, 0.5, 1.0)
+    assert page.locator("[data-feature=test] button[aria-label^='Descendre']").is_disabled()  # dernière de la liste
+    page.click("#power")
+    page.wait_for_function("document.querySelector('#power').textContent === 'Bot : ON'", timeout=5000)
+    assert app.state.bot.scheduler.on is True
+    page.click("#power")
+    page.wait_for_function("document.querySelector('#power').textContent === 'Bot : OFF'", timeout=5000)
+    assert errors == []
+
+
+def test_constructions_panel_builds_an_ordered_list_of_targets_for_all_or_one_planet(ui):
+    page, errors, app = ui
+    page.click("#scan-run")
+    page.wait_for_function("document.querySelectorAll('#scan-list tr').length === 4", timeout=10000)
+    page.goto(page.base + "/reglages#constructions")
+    page.wait_for_function("document.querySelectorAll('#cons-add-building option').length === 16", timeout=5000)
+    assert page.locator("#cons-add-building optgroup").evaluate_all("g => g.map(x => x.label)") == ["Industrie", "Infrastructures"]
+    page.select_option("#cons-add-building", "mine-de-fer")
+    page.fill("#cons-add-level", "45")
+    page.click("#cons-add")
+    page.select_option("#cons-add-building", "caserne")
+    page.fill("#cons-add-level", "25")
+    page.click("#cons-add")
+    page.wait_for_function("document.querySelector('#cons-msg').textContent.includes('Enregistré')", timeout=5000)
+    assert page.locator("#cons-queue li[data-building]").evaluate_all("l => l.map(x => x.dataset.building)") == ["mine-de-fer", "caserne"]
+    assert page.locator("#cons-add-building option").count() == 14  # déjà dans la liste : plus proposés
+    page.click("button[aria-label='Monter : Caserne']")
+    page.wait_for_function("document.querySelector('#cons-msg').textContent.includes('Enregistré')", timeout=5000)
+    assert [line["building"] for line in app.state.bot.constructions.get()["queue"]] == ["caserne", "mine-de-fer"]
+    page.check("input[name=cons-scope][value=one]")
+    page.wait_for_function("document.querySelector('#cons-msg').className.includes('error')", timeout=5000)  # pas de planète choisie
+    page.wait_for_function("document.querySelectorAll('#cons-planet option').length > 1", timeout=10000)
+    page.select_option("#cons-planet", "8-50-Concorde")
+    page.wait_for_function("document.querySelector('#cons-msg').textContent.includes('Enregistré')", timeout=5000)
+    assert app.state.bot.constructions.get()["planet"] == "8-50-Concorde"
+    page.click("button[aria-label='Supprimer : Caserne']")
+    page.wait_for_function("document.querySelectorAll('#cons-queue li[data-building]').length === 1", timeout=5000)
+    assert errors == []
+
+
+def test_researches_panel_builds_an_ordered_list_with_one_research_planet(ui):
+    page, errors, app = ui
+    page.click("#scan-run")
+    page.wait_for_function("document.querySelectorAll('#scan-list tr').length === 4", timeout=10000)
+    page.goto(page.base + "/reglages#researches")
+    page.wait_for_function("document.querySelectorAll('#res-add-research option').length === 23", timeout=5000)
+    assert page.locator("#res-add-research optgroup").evaluate_all("g => g.map(x => x.label)") == ["Civil", "Militaire"]
+    page.wait_for_function("document.querySelectorAll('#res-planet option').length > 1", timeout=10000)
+    page.select_option("#res-add-research", "technologie-laser")
+    page.fill("#res-add-level", "30")
+    page.click("#res-add")
+    page.wait_for_function("document.querySelector('#res-msg').className.includes('error')", timeout=5000)  # pas de planète choisie
+    page.select_option("#res-planet", "6-79-Egide")
+    page.select_option("#res-add-research", "technologie-energie")
+    page.fill("#res-add-level", "25")
+    page.click("#res-add")
+    page.wait_for_function("document.querySelector('#res-msg').textContent.includes('Enregistré')", timeout=5000)
+    assert page.locator("#res-queue li[data-research]").evaluate_all("l => l.map(x => x.dataset.research)") == ["technologie-laser", "technologie-energie"]
+    assert page.locator("#res-add-research option").count() == 21
+    page.click("button[aria-label='Monter : Technologie Énergie']")
+    page.wait_for_function("document.querySelector('#res-msg').textContent.includes('Enregistré')", timeout=5000)
+    saved = app.state.bot.researches.get()
+    assert saved["planet"] == "6-79-Egide" and [line["research"] for line in saved["queue"]] == ["technologie-energie", "technologie-laser"]
+    assert errors == []
+
+
+def test_population_panel_sets_mode_quantity_and_planet_for_each_population(ui):
+    page, errors, app = ui
+    page.click("#scan-run")
+    page.wait_for_function("document.querySelectorAll('#scan-list tr').length === 4", timeout=10000)
+    page.goto(page.base + "/reglages#populations")
+    page.wait_for_function("document.querySelectorAll('#pop-add-population option').length === 10", timeout=5000)
+    page.wait_for_function("document.querySelectorAll('#pop-add-planet option').length > 1", timeout=10000)
+    assert page.locator("#pop-add-population optgroup").evaluate_all("g => g.map(x => x.label)") == ["Assaut", "Logistique", "Administration"]
+    page.select_option("#pop-add-population", "pilote")
+    page.select_option("#pop-add-mode", "target")
+    page.fill("#pop-add-amount", "100")
+    page.select_option("#pop-add-planet", "6-79-Egide")
+    page.click("#pop-add")
+    page.select_option("#pop-add-population", "mineur")
+    page.select_option("#pop-add-mode", "max")
+    page.select_option("#pop-add-planet", "")  # toutes les planètes
+    assert page.locator("#pop-add-amount-label").is_hidden()  # MAX : pas de quantité
+    page.click("#pop-add")
+    page.wait_for_function("document.querySelector('#pop-msg').textContent.includes('Enregistré')", timeout=5000)
+    assert app.state.bot.populations.get()["queue"] == [
+        {"population": "pilote", "mode": "target", "amount": 100, "planet": "6-79-Egide"},
+        {"population": "mineur", "mode": "max", "amount": 0, "planet": ""},
+    ]
+    page.select_option("select[aria-label='Mode de Mineur']", "fixed")
+    page.fill("input[aria-label='Quantité de Mineur']", "25")
+    page.click("button[aria-label='Monter : Mineur']")
+    page.wait_for_function("document.querySelector('#pop-msg').textContent.includes('Enregistré')", timeout=5000)
+    assert [(ln["population"], ln["mode"], ln["amount"]) for ln in app.state.bot.populations.get()["queue"]] == [("mineur", "fixed", 25), ("pilote", "target", 100)]
+    assert errors == []
+
+
+def test_settings_page_has_five_tabs_and_only_one_panel_shows_at_a_time(ui):
+    page, errors, _ = ui
+    page.goto(page.base + "/reglages")
+    ids = ["account", "features", "constructions", "researches", "populations"]
+    assert page.locator("[role=tab]").count() == 5
+    for tab in ids:
+        page.click(f"#tab-{tab}")
+        assert page.get_attribute(f"#tab-{tab}", "aria-selected") == "true"
+        assert [page.locator(f"#panel-{p}").is_visible() for p in ids] == [p == tab for p in ids]
+        assert page.url.endswith(f"#{tab}")
+    page.goto(page.base + "/reglages#constructions")
+    assert page.locator("#panel-constructions").is_visible()  # un lien direct ouvre le bon onglet
+    page.press("#tab-constructions", "ArrowRight")
+    assert page.locator("#panel-researches").is_visible()
+    page.press("#tab-researches", "ArrowRight")
+    assert page.locator("#panel-populations").is_visible()
+    page.press("#tab-populations", "ArrowRight")
+    assert page.locator("#panel-account").is_visible()
+    assert errors == []

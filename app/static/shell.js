@@ -1,5 +1,4 @@
-// Éléments communs à toutes les pages : navigation, interrupteur Bot ON/OFF, bandeau de mode (simulation / réel),
-// vérification « Prêt à démarrer ? » avant de lancer le bot, alertes du navigateur.
+// Éléments communs à toutes les pages : navigation, pastille d'état de connexion, petits outils d'affichage.
 (() => {
   const el = (tag, props = {}, ...children) => {
     const node = Object.assign(document.createElement(tag), props);
@@ -39,9 +38,6 @@
   };
   window.ui = { el, fmt, dur, ago, table, help };
   const LABELS = { idle: "Non connecté", logging_in: "Connexion…", logged_in: "Connecté", error: "Échec" };
-  const buttons = () => [...document.querySelectorAll("#power, [data-power]")];
-  let running = false;
-  let busy = false;
 
   // ------------------------------------------------------------------------- navigation
   const here = location.pathname === "/" ? "/" : location.pathname.replace(/\/$/, "");
@@ -49,113 +45,47 @@
     if (a.getAttribute("href") === here) a.classList.add("active");
   });
 
-  // -------------------------------------------------------------------- bandeau de mode
-  const banner = el("div", { id: "mode-banner", className: "mode-banner", hidden: true, role: "status" });
-  const header = document.querySelector("header.top");
-  if (header) header.after(banner);
-  function paintBanner(mode) {
-    const chip = document.getElementById("mode-chip"); // page Écran : le mode tient dans le bandeau du haut
-    if (chip) {
-      chip.className = "mode-chip " + (mode === "live" ? "live" : "sim");
-      chip.textContent = mode === "live" ? "Mode réel" : "Simulation";
-      chip.title = mode === "live" ? "Le bot clique et dépense vos ressources" : "Le bot ne clique pas";
-    }
-    banner.hidden = false;
-    banner.className = "mode-banner " + (mode === "live" ? "live" : "sim");
-    banner.replaceChildren(
-      el("strong", { textContent: mode === "live" ? "MODE RÉEL" : "SIMULATION" }),
-      mode === "live"
-        ? " — le bot clique sur « Améliorer » et « Rechercher » et dépense vos ressources."
-        : " — le bot lit le jeu et dit ce qu'il ferait, mais ne clique pas.",
-      here === "/" ? "" : el("a", { href: "/#mode", textContent: "Changer de mode" }),
-    );
+  // ------------------------------------------------------------------- état de connexion
+  const power = () => document.getElementById("power");
+  let botOn = false;
+  let toggling = false;
+  function paintPower(on, waiting) {
+    botOn = on;
+    const b = power();
+    if (!b) return;
+    b.classList.toggle("on", on);
+    b.classList.toggle("off", !on);
+    b.textContent = on ? "Bot : ON" : "Bot : OFF";
+    b.setAttribute("aria-pressed", String(on));
+    b.title = on
+      ? (waiting ? `En attente : ${waiting}` : "Les fonctionnalités activées tournent. Cliquer pour arrêter (le passage en cours se termine).")
+      : "Le bot est sur OFF : aucune fonctionnalité ne tourne. Cliquer pour démarrer.";
   }
-
-  // ----------------------------------------------------------------- état du bot (ON/OFF)
+  document.addEventListener("click", async (event) => {
+    if (!event.target.closest("#power") || toggling) return;
+    toggling = true;
+    power().disabled = true;
+    try {
+      const res = await fetch(botOn ? "/api/bot/stop" : "/api/bot/start", { method: "POST" });
+      if (res.ok) paintPower((await res.json()).bot_on, "");
+    } finally {
+      toggling = false;
+      power().disabled = false;
+      poll();
+    }
+  });
   function paint(status) {
-    const a = status.automation;
-    running = !!a.running;
-    buttons().forEach((b) => {
-      b.classList.toggle("on", running);
-      b.classList.toggle("off", !running);
-      b.textContent = running ? "Bot : ON" : "Bot : OFF";
-      b.setAttribute("aria-pressed", String(running));
-      b.title = running
-        ? (a.waiting ? `En attente : ${a.waiting}` : "Le bot est actif. Cliquer pour l'arrêter (OFF = arrêt d'urgence).")
-        : "Le bot est arrêté. Cliquer pour l'activer : il se connecte si besoin, entre dans l'univers choisi, puis travaille.";
-    });
+    if (status.scheduler && !toggling) paintPower(status.scheduler.on, status.scheduler.waiting);
     const badge = document.getElementById("badge");
     if (badge && !document.getElementById("screen")) { // la page Écran met le badge à jour en direct
       badge.className = "badge " + status.state;
       badge.textContent = LABELS[status.state] || status.state;
     }
-    paintBanner(a.mode);
     window.dispatchEvent(new CustomEvent("boleryos:status", { detail: status }));
   }
   async function poll() {
     try { paint(await (await fetch("/api/status?limit=1")).json()); } catch { /* le bot redémarre */ }
   }
-
-  // ----------------------------------------- « Prêt à démarrer ? » avant d'allumer le bot
-  function askAboutMissing(missing) {
-    return new Promise((resolve) => {
-      const dialog = el("dialog", { className: "modal" });
-      const done = (value) => { dialog.close(); dialog.remove(); resolve(value); };
-      dialog.append(
-        el("h2", { textContent: "Il manque quelques réglages" }),
-        el("p", { className: "hint", textContent: "Sans eux, le bot ne pourra pas travailler tout seul :" }),
-        el("ul", { className: "missing" }, ...missing.map((m) => el("li", {},
-          el("strong", { textContent: m.label }), el("span", { textContent: ` — ${m.detail}` }),
-          el("a", { className: "button secondary small", href: m.link, textContent: "Corriger" })))),
-        el("div", { className: "row" },
-          Object.assign(el("button", { type: "button", className: "secondary", textContent: "Annuler" }), { onclick: () => done(false) }),
-          Object.assign(el("button", { type: "button", textContent: "Démarrer quand même" }), { onclick: () => done(true) })),
-      );
-      dialog.addEventListener("cancel", () => done(false));
-      document.body.append(dialog);
-      dialog.showModal();
-    });
-  }
-  async function toggle() {
-    if (busy) return;
-    busy = true;
-    buttons().forEach((b) => (b.disabled = true));
-    try {
-      if (running) {
-        await fetch("/api/automation/stop", { method: "POST" });
-      } else {
-        if (window.beforePowerOn) await window.beforePowerOn(); // la page Réglages enregistre d'abord ses réglages
-        const missing = (await (await fetch("/api/dashboard")).json()).readiness.steps.filter((s) => s.required && !s.ok);
-        if (missing.length && !(await askAboutMissing(missing))) return;
-        await fetch("/api/automation/start", { method: "POST" });
-      }
-    } finally {
-      busy = false;
-      buttons().forEach((b) => (b.disabled = false));
-      poll();
-    }
-  }
-  document.addEventListener("click", (event) => {
-    if (event.target.closest("#power, [data-power]")) toggle();
-  });
-
-  // ------------------------------------------------------------ alertes dans le navigateur
-  let lastEvent = Date.now() / 1000;
-  async function pollAlerts() {
-    let enabled = false;
-    try { enabled = localStorage.getItem("boleryos.alerts") === "1"; } catch { /* stockage indisponible */ }
-    if (!enabled || !("Notification" in window) || Notification.permission !== "granted") return;
-    try {
-      const events = await (await fetch(`/api/events?after=${lastEvent}`)).json();
-      events.forEach((e) => {
-        lastEvent = Math.max(lastEvent, e.t);
-        const title = { launch: "BoLeryos : amélioration lancée", attention: "BoLeryos : attention", attack: "BoLeryos : ATTAQUE EN APPROCHE" }[e.kind];
-        if (title) new Notification(title, { body: e.msg, requireInteraction: e.kind === "attack" });
-      });
-    } catch { /* idem */ }
-  }
-
   poll();
   setInterval(poll, 2000);
-  setInterval(pollAlerts, 5000);
 })();

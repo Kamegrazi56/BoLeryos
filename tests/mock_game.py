@@ -26,10 +26,18 @@ def _buildings():
         _b("Extracteur de Cristal", 38, {"Fer": 71.739e6, "Cristal": 35.869e6}, "12h 22m"),
         _b("Synthétiseur d'Éther", 34, {"Fer": 66.425e6, "Cristal": 22.142e6}, "2h 14m"),
         _b("Centrale Énergétique", 27, {"Fer": 53.73e6, "Cristal": 21.492e6}, "5m 25s"),
+        _b("Centrale à Impulsion", 0, {"Fer": 515, "Cristal": 206, "Éther": 102}, "5.00s"),
         _b("Hangar de Fer", 16, {"Fer": 501.763e6}, "12.75s"),
+        _b("Hangar de Cristal", 20, {"Fer": 7.721e9, "Cristal": 6.177e9}, "43.01s"),
+        _b("Cuve d'Éther", 18, {"Fer": 1.93e9, "Cristal": 1.544e9, "Éther": 965.086e6}, "17.90s"),
+        _b("Usine Robot", 13, {"Fer": 1.206e6, "Cristal": 2.413e6, "Éther": 181.0e3}, "5.00s", "facilities"),
         _b("Chantier Spatial", 10, {"Fer": 160.564e6, "Cristal": 80.282e6, "Éther": 20.071e6}, "12.15s", "facilities"),
         _b("Centre de Recherche", 19, {"Fer": 156.8e3, "Cristal": 313.6e3, "Éther": 62.7e3}, "5.00s", "facilities"),
         _b("Caserne", 18, {"Fer": 200.705e6, "Cristal": 200.705e6}, "1m 33s", "facilities"),
+        _b("Institut de Formation", 20, {"Fer": 231.621e6, "Cristal": 154.414e6, "Éther": 15.441e6}, "11.08s", "facilities"),
+        _b("Matrice de Coalescence", 11, {"Fer": 753.973e6, "Cristal": 753.973e6, "Éther": 30.159e6}, "12h 6m", "facilities"),
+        _b("Tour à Résonance", 12, {"Fer": 361.907e6, "Cristal": 241.271e6, "Éther": 90.477e6}, "1m 14s", "facilities"),
+        _b("Terraformeur", 10, {"Fer": 37.699e6, "Cristal": 75.397e6, "Éther": 37.699e6}, "5.00s", "facilities"),
     ]
 
 
@@ -42,8 +50,13 @@ def _prod_items():
     items = [
         it("population", "Rempart de Fer", rempart, 3182, "Assaut"),
         it("population", "Spectre du Rift", {"Fer": 4361, "Cristal": 2616, "Éther": 218}, 999, "Assaut"),
+        it("population", "Surchargeur Plasmique", {"Fer": 8623, "Cristal": 3880, "Éther": 1034}, 0, "Assaut"),
+        it("population", "Faucheur Cinétique", {"Fer": 3449, "Cristal": 2585, "Éther": 215}, 0, "Assaut"),
         it("population", "Pilote", {"Fer": 1000, "Cristal": 1000}, 10, "Logistique"),
         it("population", "Technicien", {"Fer": 500, "Cristal": 500, "Éther": 50}, 21331, "Logistique"),
+        it("population", "Informaticien", {"Fer": 431, "Cristal": 862}, 0, "Logistique"),
+        it("population", "Scientifique", {"Fer": 172, "Cristal": 258}, 0, "Administration"),
+        it("population", "Ingénieur", {"Fer": 258, "Cristal": 86, "Éther": 86}, 0, "Administration"),
         it("population", "Mineur", {"Fer": 300, "Cristal": 200}, 5, "Administration"),
         it("specialized", "Sonde Spatiale", {"Cristal": 872, "Éther": 43}, 3987),
         it("specialized", "Drone Terrestre", {"Fer": 436, "Cristal": 436}, 10382),
@@ -103,10 +116,14 @@ def initial_state():
             {"name": n, "coords": c, "energy": e, "stocks": copy.deepcopy(s), "busy": False, "buildings": _buildings(), "prod": _prod_items()}
             for (n, c, e), s in zip(planets, stocks)
         ],
+        # Laboratoire : onglets Civil / Militaire ; coûts réglés pour que seule la planète Egide (index 1) ou Concorde (index 0) puisse payer
         "tech": [
-            {"name": "Technologie laser", "level": 22, "costs": {"Fer": 2.686e9, "Cristal": 1.343e9}},
-            {"name": "Technologie ionique", "level": 19, "costs": {"Fer": 3.358e9, "Cristal": 1.007e9, "Éther": 335.756e6}},
-            {"name": "Technologie d’espionnage", "level": 24, "costs": {"Fer": 10.744e9, "Cristal": 53.721e9, "Éther": 10.744e9}},
+            {"name": "Ordinateur Quantique", "tab": "Civil", "level": 21, "costs": {"Fer": 900e6, "Cristal": 1.6e9, "Éther": 600e6}, "duration": "10 h 43 min"},
+            {"name": "Technologie Énergie", "tab": "Civil", "level": 20, "costs": {"Fer": 10e6, "Cristal": 5e6, "Éther": 2e6}, "duration": "5 h 21 min"},
+            {"name": "Efficience Éthérique", "tab": "Civil", "level": 20, "costs": {}, "duration": "", "locked": "Centre de Recherche Niv. 99"},
+            {"name": "Technologie laser", "tab": "Militaire", "level": 24, "costs": {"Fer": 2.6e9, "Cristal": 1.3e9}, "duration": "4 j 18 h"},
+            {"name": "Technologie ionique", "tab": "Militaire", "level": 22, "costs": {"Fer": 3.2e9, "Cristal": 978e6, "Éther": 326e6}, "duration": "1 j 10 h"},
+            {"name": "Technologie d’espionnage", "tab": "Militaire", "level": 26, "costs": {"Fer": 10.4e9, "Cristal": 52e9, "Éther": 10.4e9}, "duration": "19 j 1 h"},
         ],
     }
 
@@ -134,13 +151,21 @@ button{min-width:36px;min-height:28px;margin:2px}.card{border:1px solid #888;mar
 .top{position:relative;height:40px}.abs{position:absolute;bottom:2px;left:4px}.badge{float:right}</style></head>
 <body><div id="cookies"><button type="button" id="refuse">TOUT REFUSER</button></div><div id="root"></div>
 <script>
-let state = null, overlayOpen = false;
+let state = null, overlayOpen = false, navOpen = false;
 const sec = () => location.pathname.split('/').pop();
 const big = (v) => v >= 1e9 ? (v/1e9).toFixed(3).replace('.', ',') + ' G' : v >= 1e6 ? (v/1e6).toFixed(3).replace('.', ',') + ' M' : String(Math.round(v));
 const md = (v) => v >= 1e9 ? (v/1e9).toFixed(1).replace('.', ',') + ' Md' : (v/1e6).toFixed(1).replace('.', ',') + ' M';
 const cost = (v) => v >= 1e9 ? (v/1e9).toFixed(3) + 'G' : v >= 1e6 ? (v/1e6).toFixed(3) + 'M' : v >= 1e3 ? (v/1e3).toFixed(1) + 'k' : String(v);
 const int = (v) => String(v).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ' ');
 const afford = (p, it, busy) => !busy && Object.entries(it.costs).every(([k, v]) => p.stocks[k] >= v);
+function techCard(p, it, busy) {
+  if (it.locked) return `<div class="card"><div><span>Niveau</span><span>${it.level}</span></div><h3>${it.name}</h3><div><span>VERROUILLÉ</span></div><div><span>Prérequis structurels</span><a href="#">${it.locked}</a></div></div>`;
+  const ok = afford(p, it, busy);
+  const costs = Object.entries(it.costs).map(([k, v]) => `<div><span>${k}</span><span>${cost(v)}</span></div>`).join('');
+  return `<div class="card"><div><span>Niveau</span><span>${it.level}</span></div><button type="button" aria-label="Informations"><svg width="8" height="8"></svg></button><h3>${it.name}</h3>`
+    + `${costs}<div><span>Temps de recherche</span><span>${it.duration}</span></div>`
+    + `<button class="act" data-name="${it.name}" data-kind="tech" ${ok ? '' : 'disabled'}>${ok ? 'Rechercher' : 'Ressources insuffisantes'}</button></div>`;
+}
 function card(p, it, kind, busy) {
   const ok = afford(p, it, busy);
   const label = kind === 'tech' ? (ok ? 'Rechercher' : 'Ressources insuffisantes') : 'Améliorer';
@@ -150,13 +175,13 @@ function card(p, it, kind, busy) {
     + `<div class="body">${costs}${dur}<button class="act" data-name="${it.name}" data-kind="${kind}" ${ok ? '' : 'disabled'}>${label}</button></div></div>`;
 }
 const kfmt = (v) => v >= 1e9 ? (v / 1e9).toFixed(3).replace('.', ',') + ' G' : v >= 1e6 ? (v / 1e6).toFixed(3).replace('.', ',') + ' M' : v >= 1000 ? (v / 1000).toFixed(3).replace('.', ',') + ' K' : String(Math.round(v));
-const ui = {tab: 'Assaut', ship: 'Assemblages', way: 'Piliers', mission: 'ATTAQUE'};
+const ui = {tab: 'Assaut', ship: 'Assemblages', way: 'Piliers', mission: 'ATTAQUE', techTab: 'Civil'};
 const CK = {Fer: 'F', Cristal: 'C', 'Éther': 'E'};
 const costLeaves = (c) => Object.entries(c).map(([k, v]) => `<span>${CK[k]}: ${kfmt(v)}</span>`).join('');
 function prodCard(it, verb) {
   const short = it.name === 'Faisceau de Verrouillage' ? 'Faisceau de Verrou' : it.name;
   return `<div class="card"><div class="badge"><span>${int(it.owned)}</span></div><h3>${it.name}</h3><div><span>ATQ</span><span>14</span></div>`
-    + `<div>${costLeaves(it.costs)}</div><div class="ctl"><input type="number" placeholder="Qté" aria-label="Quantité pour ${short}">`
+    + `<div>${costLeaves(it.costs)}</div><div><span>1.00s</span></div><div class="ctl"><input type="number" placeholder="Qté" aria-label="Quantité pour ${short}">`
     + `<button type="button" data-max="1" aria-label="Quantité maximale pour ${short}">MAX</button>`
     + `<button type="button" class="prod" data-section="${it.section}" data-name="${it.name}" aria-label="${verb} ${short}">${verb}</button></div></div>`;
 }
@@ -227,22 +252,24 @@ function sensors() {
 function render() {
   if (!state) return;
   const p = state.planets[state.active], s = sec();
-  const title = {buildings: 'Industrie', facilities: 'Installations', tech: 'Laboratoire'}[s] || 'Vue';
+  const title = {buildings: 'Industrie', facilities: 'Infrastructures', tech: 'Laboratoire'}[s] || 'Vue';
   const isProd = ['staff', 'shipyard', 'specialized', 'defense', 'operations', 'galaxy'].includes(s);
   let cards = '';
   if (isProd) cards = '';
-  else if (s === 'tech') cards = state.tech.map((t) => card(p, t, 'tech', state.research_busy)).join('');
+  else if (s === 'tech') cards = state.tech.filter((t) => t.tab === ui.techTab).map((t) => techCard(p, t, state.research_busy)).join('');
   else cards = p.buildings.filter((b) => b.section === s).map((b) => card(p, b, 'build', p.busy)).join('');
   const planets = state.planets.map((pl, i) => `<button class="pl" data-i="${i}"><span>${pl.name}</span><span>${pl.coords}</span>`
     + `<span>${md(pl.stocks.Fer)}</span><span>${md(pl.stocks.Cristal)}</span><span>${md(pl.stocks['Éther'])}</span></button>`).join('');
   document.getElementById('root').innerHTML =
-    '<div class="launcher"><button id="open-planets"><span class="sr-only">Planètes</span></button><button><span class="sr-only">Capteurs</span><span class="game-utility-badge game-utility-badge--fleet">' + state.movements.length + '</span></button>'
+    '<div class="launcher"><button id="open-planets"><span class="sr-only">Planètes / Favoris / Piliers</span></button><button hidden><span class="sr-only">Planètes</span></button><button><span class="sr-only">Capteurs</span><span class="game-utility-badge game-utility-badge--fleet">' + state.movements.length + '</span></button>'
     + '<button><span class="sr-only">Chat</span></button><button><span class="sr-only">Favoris</span></button></div>'
     + `<div class="planet"><span>${p.name}</span><span>${p.coords}</span></div>`
-    + `<div class="res"><div><span>${big(p.stocks.Fer)}</span><span>FER</span></div><div><span>${big(p.stocks.Cristal)}</span><span>CRISTAL</span></div>`
-    + `<div><span>${big(p.stocks['Éther'])}</span><span>ÉTHER</span></div><div><span>${int(p.energy)}</span><span>ÉNERGIE</span></div>`
+    + `<button type="button" id="planet-btn" aria-label="Sélectionner la planète active"><span>${p.name}</span><span>${p.coords}</span></button>`
+    + `<div id="navlist" ${navOpen ? '' : 'hidden'}><span>Navigation</span>${state.planets.map((pl, i) => `<button type="button" class="npl" data-i="${i}"><span>${pl.name}</span><span>${pl.coords}</span></button>`).join('')}</div>`
+    + `<div class="res"><div aria-label="FER : ${big(p.stocks.Fer)}"><span>${big(p.stocks.Fer)}</span><span>FER</span></div><div aria-label="CRISTAL : ${big(p.stocks.Cristal)}"><span>${big(p.stocks.Cristal)}</span><span>CRISTAL</span></div>`
+    + `<div aria-label="ÉTHER : ${big(p.stocks['Éther'])}"><span>${big(p.stocks['Éther'])}</span><span>ÉTHER</span></div><div><span>${int(p.energy)}</span><span>ÉNERGIE</span></div>`
     + '<div><span>4 808</span><span>ASTRIUM</span></div><div><span>492</span><span>ÉCHOS</span></div></div>'
-    + (isProd ? `<main>${s === 'operations' ? opsMain() : s === 'galaxy' ? galaxyMain() : prodMain(p, s)}</main>` : `<main><h2>${title}</h2><div class="grid">${cards}</div></main>`)
+    + (isProd ? `<main>${s === 'operations' ? opsMain() : s === 'galaxy' ? galaxyMain() : prodMain(p, s)}</main>` : `<main><h2>${title}</h2>${(s === 'buildings' || s === 'facilities') ? '<div>' + [['buildings', 'Industrie'], ['facilities', 'Infrastructures']].map(([k, n]) => `<button type="button" role="tab" class="tabnav" aria-selected="${k === s}" data-s="${k}">${n}</button>`).join('') + '</div>' : ''}${s === 'tech' ? '<div>' + ['Civil', 'Militaire'].map((n) => `<button type="button" role="tab" class="techtab" aria-selected="${n === ui.techTab}" data-t="${n}">${n}</button>`).join('') + '</div>' : ''}<div class="grid">${cards}</div></main>`)
     + '<nav><button class="nav" data-s="facilities"><span class="sr-only">Installations</span></button><button class="nav" data-s="tech"><span class="sr-only">Laboratoire</span></button>'
     + '<button class="nav" data-s="staff"><span class="sr-only">Population</span></button><button class="nav" data-s="shipyard"><span class="sr-only">Chantier spatial</span></button>'
     + '<button class="nav" data-s="specialized"><span class="sr-only">Appareils spécialisés</span></button><button class="nav" data-s="defense"><span class="sr-only">Défenses</span></button><button class="nav" data-s="operations"><span class="sr-only">Opérations</span></button><button class="nav" data-s="galaxy"><span class="sr-only">Galaxie</span></button>'
@@ -253,6 +280,14 @@ function render() {
   document.getElementById('open-planets').onclick = () => { overlayOpen = true; render(); };
   document.getElementById('close-ov').onclick = () => { overlayOpen = false; render(); };
   document.querySelectorAll('.nav').forEach((b) => b.onclick = () => { history.pushState({}, '', '/game/asterion/' + b.dataset.s); render(); });
+  document.querySelectorAll('.techtab').forEach((b) => b.onclick = () => { ui.techTab = b.dataset.t; render(); });
+  document.querySelectorAll('.tabnav').forEach((b) => b.onclick = () => { history.pushState({}, '', '/game/asterion/' + b.dataset.s); render(); });
+  document.getElementById('planet-btn').onclick = () => { navOpen = !navOpen; render(); };
+  document.querySelectorAll('.npl').forEach((b) => b.onclick = async () => {
+    await fetch('/api/select', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({index: +b.dataset.i})});
+    navOpen = false;
+    await load();
+  });
   document.querySelectorAll('.pl').forEach((b) => b.onclick = async () => {
     await fetch('/api/select', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({index: +b.dataset.i})});
     if (state.close_on_select) overlayOpen = false;
@@ -346,12 +381,12 @@ def create_mock_game() -> FastAPI:
         if not g["no_debit"]:
             for k, v in item["costs"].items():
                 planet["stocks"][k] -= v
-        item["level"] += 1
+        item["pending"] = True  # le niveau n'augmente qu'à la fin de la construction (voir _complete)
         if research:
             g["research_busy"] = True
         else:
             planet["busy"] = True
-        g["actions"].append({"kind": "research" if research else "building", "planet": planet["name"], "name": item["name"], "level_after": item["level"]})
+        g["actions"].append({"kind": "research" if research else "building", "planet": planet["name"], "name": item["name"], "level_after": item["level"] + 1})
         if g["popup_after_click"]:
             g["popup"] = True
         return {"ok": True}
@@ -389,7 +424,9 @@ def create_mock_game() -> FastAPI:
         if not g["no_debit"]:
             for k, v in item["costs"].items():
                 planet["stocks"][k] -= v * qty
-        if body["section"] == "population":
+        if g["no_debit"]:
+            pass  # clic sans aucun effet visible : ni débit, ni file d'attente
+        elif body["section"] == "population":
             item["queue"] += qty  # la population est entraînée : elle apparaît dans la file d'attente
         else:
             item["owned"] += qty
@@ -463,8 +500,14 @@ def create_mock_game() -> FastAPI:
     async def complete():
         g = app.state.game
         g["research_busy"] = False
+        for tech in g["tech"]:
+            if tech.pop("pending", False):
+                tech["level"] += 1
         for p in g["planets"]:
             p["busy"] = False
+            for building in p["buildings"]:
+                if building.pop("pending", False):
+                    building["level"] += 1
             for item in p["prod"]:  # la population en file d'attente est terminée
                 item["owned"] += item["queue"]
                 item["queue"] = 0

@@ -23,13 +23,8 @@
   </header>
 
   <main class="settings-page">
-    <div class="tabs" role="tablist" aria-label="Sections du suivi">
-      <button role="tab" id="tab-log" data-tab="log" aria-controls="panel-log">Journal</button>
-      <button role="tab" id="tab-state" data-tab="state" aria-controls="panel-state">État du jeu</button>
-      <button role="tab" id="tab-planets" data-tab="planets" aria-controls="panel-planets">Planètes suivies</button>
-    </div>
-
-    <section class="tabpanel card" id="panel-log" role="tabpanel" aria-labelledby="tab-log">
+    <section class="card" id="panel-log" aria-labelledby="log-title">
+      <h2 id="log-title">Journal</h2>
       <div class="row">
         <label class="switch"><input type="checkbox" id="log-details"> Afficher les détails techniques</label>
         <label class="switch">Niveau
@@ -40,19 +35,6 @@
           </select></label>
       </div>
       <div id="log" class="log"></div>
-    </section>
-
-    <section class="tabpanel card" id="panel-state" role="tabpanel" aria-labelledby="tab-state" hidden>
-      <div class="row"><button id="read-state" type="button" class="secondary small">Lire l'état du jeu</button><span id="read-msg" class="hint" role="status"></span></div>
-      <p class="hint">Lecture seule : ouvre la liste des planètes puis les pages Industrie, Infrastructures et Laboratoire pour montrer ce que le bot comprend. Comparez avec l'écran du jeu. Cela renseigne aussi les niveaux actuels et la liste des planètes dans Réglages. Le bot doit être connecté à une partie, et sa lecture n'est pas possible pendant qu'il travaille.</p>
-      <div id="state-out"></div>
-    </section>
-
-    <section class="tabpanel card" id="panel-planets" role="tabpanel" aria-labelledby="tab-planets" hidden>
-      <h2>Constructions</h2>
-      <div id="cons-pending"></div>
-      <h2>Production</h2>
-      <div id="prod-pending"></div>
     </section>
   </main>
   <script src="/static/shell.js"></script>

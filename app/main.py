@@ -18,12 +18,13 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, SecretStr
 
-from .automation.driver import GameUiError
-from .automation.runner import Interrupted
-from .automation.settings import SettingsError
 from .bot import BotSession
 from .config import Settings, load_settings
-from .notify import FORMATS, NotifyError
+from .constructions import BUILDINGS, ConstructionError
+from .populations import POPULATIONS, PopulationError
+from .researches import RESEARCHES, ResearchError
+from .features import FeaturesError
+from .preferences import MAX_UNIVERSE_LENGTH, PreferencesError
 
 STATIC_DIR = Path(__file__).parent / "static"
 NO_STORE = {"Cache-Control": "no-store"}
@@ -49,27 +50,59 @@ class LoginRequest(BaseModel):
     password: SecretStr = Field(min_length=1, max_length=256)
 
 
-class AutomationSettingsRequest(BaseModel):
-    settings: dict
-    # À vrai uniquement quand l'utilisateur vient de confirmer le passage en mode réel dans l'interface.
-    confirm_live: bool = False
+class PreferencesRequest(BaseModel):
+    # Clés absentes : valeurs inchangées (la page n'envoie que ce qu'elle modifie).
+    universe: str | None = Field(default=None, max_length=MAX_UNIVERSE_LENGTH)
+    login_delay: dict | None = None
+
+
+class FeatureRequest(BaseModel):
+    # Clés absentes : valeurs inchangées.
+    enabled: bool | None = None
+    min_minutes: float | None = None
+    max_minutes: float | None = None
+
+
+class ConstructionLine(BaseModel):
+    building: str = Field(max_length=60)
+    level: int = Field(ge=0, le=100000)
+
+
+class ConstructionsRequest(BaseModel):
+    scope: str = Field(default="all", max_length=10)
+    planet: str = Field(default="", max_length=200)
+    queue: list[ConstructionLine] = Field(default_factory=list, max_length=200)
+
+
+class ResearchLine(BaseModel):
+    research: str = Field(max_length=60)
+    level: int = Field(ge=0, le=100000)
+
+
+class ResearchesRequest(BaseModel):
+    planet: str = Field(default="", max_length=200)
+    queue: list[ResearchLine] = Field(default_factory=list, max_length=200)
+
+
+class PopulationLine(BaseModel):
+    population: str = Field(max_length=60)
+    mode: str = Field(max_length=10)
+    amount: int = Field(default=0, ge=0, le=10**12)
+    planet: str = Field(default="", max_length=200)
+
+
+class PopulationsRequest(BaseModel):
+    queue: list[PopulationLine] = Field(default_factory=list, max_length=500)
+
+
+class OrderRequest(BaseModel):
+    order: list[str] = Field(max_length=50)
 
 
 class CredentialsRequest(BaseModel):
     identifier: str = Field(min_length=1, max_length=254)
     # None : garder le mot de passe déjà enregistré (le champ de la page reste vide, il n'est jamais réaffiché).
     password: Annotated[SecretStr, Field(min_length=1, max_length=256)] | None = None
-
-
-class NotificationsRequest(BaseModel):
-    # None : conserver l'adresse actuelle ; chaîne vide : la supprimer.
-    url: str | None = Field(default=None, max_length=500)
-    format: str = "json"
-    events: dict[str, bool] = Field(default_factory=dict)
-
-
-class ProductionResetRequest(BaseModel):
-    id: str | None = Field(default=None, max_length=16)  # None : toutes les commandes uniques
 
 
 class RecordingRequest(BaseModel):
@@ -191,13 +224,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # --- Compte : identifiants gardés en mémoire seulement ----------------------------
     @app.get("/api/account")
     async def api_account():
-        cfg = bot.automation.store.get()
+        prefs = bot.supervisor.prefs.get()
         return JSONResponse(
             {
                 "has_credentials": bot.has_credentials(),
                 "hint": bot.credentials_hint(),  # jamais l'identifiant complet ni le mot de passe
-                "universe": cfg["universe"],
-                "universes": cfg["catalog"]["universes"],
+                "universe": prefs["universe"],
+                "universes": prefs["catalog"]["universes"],
                 "saved_on_disk": bot.vault.available,  # le mot de passe survit à un redémarrage (chiffré)
                 "ui_protected": settings.ui_user is not None,  # l'interface du bot demande un mot de passe
             },
@@ -219,15 +252,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not bot.set_credentials(body.identifier.strip(), password):
             raise HTTPException(422, "Saisissez le mot de passe.")
         # Comme TBot : une fois les identifiants saisis, le bot se connecte et choisit l'univers tout seul.
-        bot.automation.reset_connection()
-        bot.automation.ensure_keeper()
+        bot.supervisor.reset_connection()
+        bot.supervisor.ensure_keeper()
         return JSONResponse({"has_credentials": True, "hint": bot.credentials_hint()}, headers=NO_STORE)
 
     @app.delete("/api/account/credentials")
     async def api_account_forget(request: Request):
         _check_origin(request)
         bot.forget_credentials()
-        await bot.automation.stop_keeper()
+        await bot.supervisor.stop_keeper()
         return JSONResponse({"has_credentials": False, "hint": ""}, headers=NO_STORE)
 
     @app.post("/api/account/login")
@@ -238,121 +271,154 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             bot.restore_credentials()  # identifiants enregistrés (après une déconnexion, par exemple)
         if not bot.has_credentials():
             raise HTTPException(409, "Aucun identifiant en mémoire : saisissez-les d'abord.")
-        bot.automation.reset_connection()
-        bot.automation.ensure_keeper()
+        bot.supervisor.reset_connection()
+        bot.supervisor.ensure_keeper()
         return JSONResponse({**bot.status(), "message": "Connexion relancée."}, headers=NO_STORE)
 
-    # --- Tableau de bord, événements, alertes -----------------------------------------
-    @app.get("/api/dashboard")
-    async def api_dashboard():
-        return JSONResponse(
-            {**bot.status(), **bot.automation.dashboard(), "events": bot.events(8)}, headers=NO_STORE
-        )
+    # --- Scan des planètes ------------------------------------------------------------
+    @app.get("/api/planets")
+    async def api_planets():
+        """Dernier scan des planètes (liste lue dans le jeu, date, origine, erreur éventuelle)."""
+        return JSONResponse(bot.supervisor.scan_summary(), headers=NO_STORE)
 
+    @app.post("/api/planets/scan")
+    async def api_planets_scan(request: Request):
+        """Relit tout de suite la liste des planètes dans le jeu (le bot doit être dans une partie)."""
+        _check_origin(request)
+        return JSONResponse(await bot.supervisor.scan_planets("manuel"), headers=NO_STORE)
+
+    # --- Tableau de bord, événements, alertes -----------------------------------------
     @app.get("/api/events")
     async def api_events(after: float = 0.0, limit: int = 20):
         events = [e for e in bot.events(200) if e["t"] > after][-max(1, min(limit, 100)):]
         return JSONResponse(events, headers=NO_STORE)
 
-    @app.get("/api/notifications")
-    async def api_notifications():
-        return JSONResponse(bot.notifier.public_config(), headers=NO_STORE)
+    # --- Préférences (univers à rejoindre, délai de connexion) ---------------------------
+    @app.get("/api/preferences")
+    async def api_preferences():
+        return JSONResponse(
+            {"preferences": bot.supervisor.prefs.get(), "persistent": bot.supervisor.prefs.persistent}, headers=NO_STORE
+        )
 
-    @app.put("/api/notifications")
-    async def api_notifications_put(body: NotificationsRequest, request: Request):
+    @app.put("/api/preferences")
+    async def api_preferences_put(body: PreferencesRequest, request: Request):
         _check_origin(request)
-        if body.format not in FORMATS:
-            raise HTTPException(422, "Format inconnu.")
+        previous_universe = bot.supervisor.prefs.get()["universe"]
         try:
-            bot.notifier.configure(url=body.url, fmt=body.format, events=body.events)
-        except NotifyError as exc:
-            raise HTTPException(422, str(exc)) from exc
-        bot.log("Alertes configurées." if bot.notifier.configured else "Alertes désactivées.", event=True)
-        return JSONResponse(bot.notifier.public_config(), headers=NO_STORE)
+            saved = bot.supervisor.prefs.update(body.model_dump(exclude_none=True))
+        except PreferencesError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        if saved["universe"] != previous_universe:  # nouvel univers demandé : le bot réessaie tout de suite
+            bot.supervisor.reset_connection()
+        return JSONResponse(
+            {"preferences": saved, "persistent": bot.supervisor.prefs.persistent}, headers=NO_STORE
+        )
 
-    @app.delete("/api/notifications")
-    async def api_notifications_delete(request: Request):
+    # --- Fonctionnalités : interrupteur général, minuteurs, priorités ----------------------
+    @app.get("/api/features")
+    async def api_features():
+        return JSONResponse(bot.scheduler.summary(), headers=NO_STORE)
+
+    @app.put("/api/features/order")
+    async def api_features_order(body: OrderRequest, request: Request):
         _check_origin(request)
-        bot.notifier.clear()
-        return JSONResponse(bot.notifier.public_config(), headers=NO_STORE)
+        try:
+            bot.scheduler.reorder(body.order)
+        except FeaturesError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        return JSONResponse(bot.scheduler.summary(), headers=NO_STORE)
 
-    @app.post("/api/notifications/test")
-    async def api_notifications_test(request: Request):
+    @app.put("/api/features/{feature_id}")
+    async def api_feature_update(feature_id: str, body: FeatureRequest, request: Request):
         _check_origin(request)
-        if not bot.notifier.configured:
-            raise HTTPException(409, "Aucune adresse d'alerte configurée.")
-        ok = await bot.notifier.send("BoLeryos : message de test. Les alertes fonctionnent.")
-        return JSONResponse({"ok": ok, **bot.notifier.public_config()}, headers=NO_STORE)
+        try:
+            bot.scheduler.update(feature_id, body.model_dump(exclude_none=True))
+        except KeyError as exc:
+            raise HTTPException(404, "Fonctionnalité inconnue.") from exc
+        except FeaturesError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        return JSONResponse(bot.scheduler.summary(), headers=NO_STORE)
 
-    # --- Automatisation ---------------------------------------------------------
-    @app.get("/api/automation")
-    async def api_automation():
+    @app.post("/api/bot/start")
+    async def api_bot_start(request: Request):
+        _check_origin(request)
+        bot.scheduler.start()
+        return JSONResponse(bot.scheduler.summary(), headers=NO_STORE)
+
+    @app.post("/api/bot/stop")
+    async def api_bot_stop(request: Request):
+        _check_origin(request)
+        bot.scheduler.stop()
+        return JSONResponse(bot.scheduler.summary(), headers=NO_STORE)
+
+    # --- Constructions : liste d'objectifs (bâtiment + niveau cible) et choix des planètes ----------
+    def _known_planets() -> list[str]:
+        return [p["name"] for p in bot.supervisor.scan_summary()["planets"]] or bot.supervisor.prefs.get()["catalog"]["planets"]
+
+    @app.get("/api/constructions")
+    async def api_constructions():
         return JSONResponse(
             {
-                "settings": bot.automation.store.get(),
-                "status": bot.automation.summary(),
-                "catalog": bot.automation.catalog_view(),
+                "settings": bot.constructions.get(),
+                "buildings": [{"id": b.id, "label": b.label, "page": b.page} for b in BUILDINGS],
+                "planets": _known_planets(),
+                "persistent": bot.constructions.persistent,
             },
             headers=NO_STORE,
         )
 
-    @app.put("/api/automation/settings")
-    async def api_automation_settings(body: AutomationSettingsRequest, request: Request):
+    @app.put("/api/constructions")
+    async def api_constructions_put(body: ConstructionsRequest, request: Request):
         _check_origin(request)
-        previous_universe = bot.automation.store.get()["universe"]
         try:
-            saved = bot.automation.store.update(body.settings, allow_live=body.confirm_live)
-        except SettingsError as exc:
+            saved = bot.constructions.replace(body.model_dump(), _known_planets)
+        except ConstructionError as exc:
             raise HTTPException(422, detail=exc.errors) from exc
-        if saved["universe"] != previous_universe:  # nouvel univers demandé : le bot réessaie tout de suite
-            bot.automation.reset_connection()
-        if saved["mode"] == "live" and body.confirm_live:
-            bot.log("Mode RÉEL confirmé : le bot cliquera sur « Améliorer » / « Rechercher » quand les règles le permettent.", "warn")
+        return JSONResponse({"settings": saved}, headers=NO_STORE)
+
+    # --- Recherches : liste d'objectifs (recherche + niveau cible) et planète chargée des recherches ----------
+    @app.get("/api/researches")
+    async def api_researches():
         return JSONResponse(
-            {"settings": saved, "status": bot.automation.summary(), "catalog": bot.automation.catalog_view()},
+            {
+                "settings": bot.researches.get(),
+                "researches": [{"id": r.id, "label": r.label, "tab": r.tab} for r in RESEARCHES],
+                "planets": _known_planets(),
+                "persistent": bot.researches.persistent,
+            },
             headers=NO_STORE,
         )
 
-    @app.post("/api/automation/start")
-    async def api_automation_start(request: Request):
-        _check_origin(request)
-        await bot.automation.start()
-        return JSONResponse(bot.automation.summary(), headers=NO_STORE)
-
-    @app.post("/api/automation/stop")
-    async def api_automation_stop(request: Request):
-        _check_origin(request)
-        await bot.automation.stop("arrêt demandé")
-        return JSONResponse(bot.automation.summary(), headers=NO_STORE)
-
-    @app.post("/api/automation/production/reset")
-    async def api_production_reset(body: ProductionResetRequest, request: Request):
-        """Réactive une commande unique « faite » (ou toutes) : elle sera relancée au prochain passage."""
-        _check_origin(request)
-        count = bot.automation.reset_production_done(body.id)
-        return JSONResponse({"reset": count, "status": bot.automation.summary()}, headers=NO_STORE)
-
-    @app.post("/api/automation/raids/reset")
-    async def api_raids_reset(request: Request):
-        """Remet à zéro le compteur d'attaques des errants (le bot peut de nouveau en lancer)."""
-        _check_origin(request)
-        bot.automation.reset_raids()
-        return JSONResponse(bot.automation.summary(), headers=NO_STORE)
-
-    @app.post("/api/automation/read-state")
-    async def api_automation_read_state(request: Request):
+    @app.put("/api/researches")
+    async def api_researches_put(body: ResearchesRequest, request: Request):
         _check_origin(request)
         try:
-            return JSONResponse(await bot.automation.read_state(), headers=NO_STORE)
-        except (GameUiError, Interrupted) as exc:
-            raise HTTPException(409, detail=str(exc)) from exc
+            saved = bot.researches.replace(body.model_dump(), _known_planets)
+        except ResearchError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        return JSONResponse({"settings": saved}, headers=NO_STORE)
 
-    @app.get("/api/automation/export")
-    async def api_automation_export():
+    # --- Population : lignes de recrutement (population, mode, quantité, planète) ----------
+    @app.get("/api/populations")
+    async def api_populations():
         return JSONResponse(
-            bot.automation.store.get(),
-            headers={**NO_STORE, "Content-Disposition": 'attachment; filename="boleryos-reglages.json"'},
+            {
+                "settings": bot.populations.get(),
+                "populations": [{"id": p.id, "label": p.label, "tab": p.tab} for p in POPULATIONS],
+                "planets": _known_planets(),
+                "persistent": bot.populations.persistent,
+            },
+            headers=NO_STORE,
         )
+
+    @app.put("/api/populations")
+    async def api_populations_put(body: PopulationsRequest, request: Request):
+        _check_origin(request)
+        try:
+            saved = bot.populations.replace(body.model_dump(), _known_planets)
+        except PopulationError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        return JSONResponse({"settings": saved}, headers=NO_STORE)
 
     @app.get("/api/status")
     async def api_status(limit: int = 50):
@@ -479,6 +545,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Anciennes adresses : les favoris continuent de fonctionner.
     app.add_api_route("/vision", redirect("/ecran"), methods=["GET"], include_in_schema=False)
     app.add_api_route("/actions", redirect("/reglages"), methods=["GET"], include_in_schema=False)
+    app.add_api_route("/fonctionnalites", redirect("/reglages#features"), methods=["GET"], include_in_schema=False)
     app.mount("/static", NoStoreStaticFiles(directory=STATIC_DIR), name="static")
     if NOVNC_DIR.is_dir():  # client noVNC (paquet « novnc » de l'image Docker)
         app.mount("/novnc", NoStoreStaticFiles(directory=NOVNC_DIR), name="novnc")

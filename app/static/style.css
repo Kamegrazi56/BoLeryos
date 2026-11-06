@@ -254,6 +254,8 @@ tr:nth-child(even) td { background: rgba(79, 216, 255, 0.03); }
 .sim-list li, .events li { padding: 7px 0; border-bottom: 1px solid var(--border); }
 .sim-list .when, .events .ts { color: var(--muted); margin-right: 8px; font: 12px var(--mono); }
 .events li.warn { color: var(--warn); }
+.status-line strong.warn { color: var(--warn); }
+#scan-list { overflow-x: auto; margin-top: 8px; }
 .events li.error { color: var(--err); }
 .attack-card { border-color: rgba(251, 113, 133, 0.7); background: linear-gradient(90deg, rgba(251, 113, 133, 0.22), rgba(10, 20, 44, 0.8)); animation: live-pulse 1.6s ease-in-out infinite; }
 .attack-card h2 { color: var(--err); }
@@ -320,3 +322,19 @@ dialog.modal ul.missing li { margin: 8px 0; }
   .page, .settings-page { padding: 12px; }
   .save-state { flex-basis: 100%; text-align: left; }
 }
+
+/* ------------------------------------------------------------- page Fonctionnalités */
+.features { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.feature { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: rgba(255, 255, 255, 0.02); }
+.feature.enabled { border-color: var(--accent); box-shadow: var(--glow); }
+.feature-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.feature-head .spacer { flex: 1; }
+.feature .rank { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: rgba(79, 216, 255, 0.15); color: var(--accent); font-size: 13px; }
+.feature input[type="number"] { width: 90px; display: inline-block; }
+.feature-status { margin-top: 8px; }
+.cons-queue { list-style: none; margin: 12px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cons-queue li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; }
+.cons-queue .name { flex: 1; min-width: 180px; }
+.cons-queue input[type="number"] { width: 90px; }
+.scope { border: 0; padding: 0; margin: 8px 0; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.scope legend { color: var(--muted); font-size: 13px; padding: 0; margin-bottom: 4px; }

@@ -6,7 +6,8 @@ même sans connexion. La page est capturée en continu pour l'affichage en direc
 Règles sur les identifiants du joueur :
 - ils arrivent par `login()` depuis l'interface web, jamais depuis l'environnement ;
 - ils ne sont ni stockés, ni journalisés, ni renvoyés par l'API ;
-- seule la session du navigateur (cookies) reste en mémoire après la connexion.
+- seule la session du navigateur (cookies) est gardée après la connexion : en mémoire, et dans le dossier de
+  données (droits 0600) pour survivre au redémarrage du conteneur ; elle est effacée à la déconnexion.
 """
 
 from __future__ import annotations
@@ -24,13 +25,21 @@ from urllib.parse import urlsplit
 
 from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
 
-from . import human
-from .automation.runner import AutomationRunner
-from .automation.settings import SettingsStore
+from . import human, interruptions
 from .config import Settings
+from .session_store import SessionStore
 from .display import VirtualDisplay
 from .explore import MAX_SNAPSHOTS, SNAPSHOT_JS, Recorder, should_skip_host
-from .notify import Notifier
+from .preferences import Preferences
+from .builder import ConstructionPass
+from .constructions import ConstructionSettings
+from .populations import PopulationSettings
+from .recruiter import PopulationPass
+from .researcher import ResearchPass
+from .researches import ResearchSettings
+from .features import FEATURES, FeatureStore
+from .scheduler import Scheduler
+from .supervisor import ConnectionSupervisor
 from .vault import CredentialVault
 
 TURNSTILE_SELECTOR = 'iframe[src*="challenges.cloudflare.com"]'
@@ -61,6 +70,7 @@ _KEY_RE = re.compile(
 _MOUSE_BUTTONS = {"left", "middle", "right"}
 VIEWPORT_WIDTH = 1440
 VIEWPORT_MIN_HEIGHT, VIEWPORT_MAX_HEIGHT = 600, 1100
+SESSION_SAVE_INTERVAL = 60.0  # secondes entre deux enregistrements des cookies (connecté)
 SCREENCAST_MIN_INTERVAL = 0.03  # secondes entre deux images acceptées de Chrome
 
 
@@ -92,6 +102,7 @@ class BotSession:
         self._settings = settings
         self._lock = asyncio.Lock()  # connexion / déconnexion
         self._start_lock = asyncio.Lock()  # démarrage du navigateur
+        self.work = asyncio.Lock()  # un seul travail dans le jeu à la fois : passage d'une fonctionnalité ou scan des planètes
         self._boot: asyncio.Future | None = None  # démarrage du navigateur en cours
         self._pw: Playwright | None = None
         self._browser: Browser | None = None
@@ -130,22 +141,33 @@ class BotSession:
                         if settings.vnc and VirtualDisplay.available() else None)
         self._screencasting = False
         self._tasks: set[asyncio.Task] = set()
-        # Automatisation (plages horaires, constructions, recherches) : réglages non secrets
-        self.automation = AutomationRunner(
-            self, SettingsStore(settings.data_dir, settings.min_cycle_minutes), settings.data_dir
+        # Préférences non secrètes (univers, délai de connexion) et supervision : connexion automatique et scan des planètes
+        self.supervisor = ConnectionSupervisor(self, Preferences(settings.data_dir))
+        self.constructions = ConstructionSettings(settings.data_dir)  # liste d'objectifs de construction
+        self.builder = ConstructionPass(self)  # lancement des constructions (clic sur « Améliorer »)
+        self.researches = ResearchSettings(settings.data_dir)  # liste d'objectifs de recherche + planète chargée des recherches
+        self.researcher = ResearchPass(self)  # lancement des recherches (clic sur « Rechercher »)
+        self.populations = PopulationSettings(settings.data_dir)  # lignes de recrutement de population (mode, quantité, planète)
+        self.recruiter = PopulationPass(self)  # recrutement (clic sur « Recruter »)
+        # Ordonnanceur des fonctionnalités (réglages enregistrés ; l'interrupteur général repasse toujours à OFF au démarrage)
+        self.scheduler = Scheduler(
+            self,
+            FeatureStore(settings.data_dir, FEATURES, settings.feature_min_minutes),
+            FEATURES,
+            blocker=self.supervisor.game_blocker,
+            gap=(settings.feature_gap_min, settings.feature_gap_max),
+            tick=settings.scheduler_tick,
         )
-        self.notifier = Notifier(settings.data_dir, settings.allow_private_webhooks)
         # Identifiants enregistrés (chiffrés) : relus en mémoire au démarrage, SANS se connecter tant que
         # l'utilisateur ne le demande pas (« Relancer la connexion »).
         self.vault = CredentialVault(settings.data_dir)
         self.restore_credentials()
+        # Cookies du navigateur : rechargés au démarrage pour rester connecté après un redémarrage du conteneur.
+        self._session_store = SessionStore(settings.data_dir)
+        self._last_state_save = 0.0
+        self._session_restored = False  # les cookies de la session précédente ont été rechargés au démarrage du navigateur
         if self.vault.problem:
             self.log(f"Identifiants : {self.vault.problem}.", "warn", event=True)
-        problems = self.automation.store.load_problems
-        if problems:  # réglages enregistrés en partie refusés : le dire au lieu de les remplacer en silence
-            self.log("Réglages enregistrés : certaines valeurs ont été refusées et remises par défaut ("
-                     + " ; ".join(problems[:3]) + "). Le fichier d'origine est conservé (automation.json.bak).",
-                     "warn", event=True)
         # Exploration de la structure du site (désactivée par défaut)
         self._recorder = Recorder()
         self._snapshot_task: asyncio.Task | None = None
@@ -153,8 +175,7 @@ class BotSession:
     # ------------------------------------------------------------------ état
     def log(self, message: str, level: str = "info", event: bool = False, kind: str = "info") -> None:
         """`event` : fait marquant, affiché dans « Derniers événements » et le journal lisible.
-        `kind` : « launch » (amélioration lancée) ou « attention » (intervention ou arrêt automatique) déclenchent
-        aussi une alerte si l'utilisateur en a configuré une."""
+        `kind` : « attention » signale une intervention nécessaire (c'est aussi un fait marquant)."""
         self._logs.append(
             {
                 "ts": datetime.now(timezone.utc).strftime("%H:%M:%S"),
@@ -165,12 +186,6 @@ class BotSession:
                 "kind": kind,
             }
         )
-        if kind != "info" and self.notifier.wants(kind):
-            try:
-                asyncio.get_running_loop()
-            except RuntimeError:  # hors boucle d'événements : pas d'envoi
-                return
-            self._spawn(self.notifier.send(message))
 
     def logs(self, limit: int = 50) -> list[dict]:
         return list(self._logs)[-limit:]
@@ -186,7 +201,8 @@ class BotSession:
             "manual": self._manual,
             "display": "vnc" if self.display is not None else "images",
             "explore": {"recording": self._recorder.enabled, **self._recorder.counts()},
-            "automation": self.automation.summary(),
+            "supervisor": self.supervisor.summary(),
+            "scheduler": {"on": self.scheduler.on, "waiting": self.scheduler.waiting},
         }
 
     def _page_label(self) -> str:
@@ -305,6 +321,8 @@ class BotSession:
                 raise
             except Exception:  # noqa: BLE001 - navigation ou changement de contexte en cours
                 pass
+            if time.monotonic() - self._last_state_save > SESSION_SAVE_INTERVAL:
+                await self._persist_session()  # le site renouvelle ses cookies : on garde les plus récents
             await asyncio.sleep(self._settings.screenshot_interval)
 
     # ------------------------------------------------------------- navigateur
@@ -329,6 +347,10 @@ class BotSession:
             await self._start_browser()
             await self._open_home()
             self._capture_task = asyncio.create_task(self._capture_loop())
+            if self._session_restored and self.has_credentials():
+                # Session rechargée + identifiants enregistrés : la supervision constate que le site est déjà
+                # connecté, reprend l'univers et lance le scan des planètes, sans qu'il faille relancer la connexion.
+                self.supervisor.ensure_keeper()
         except Exception as exc:  # noqa: BLE001
             self.log(f"Impossible de démarrer le navigateur ({type(exc).__name__}).", "error", kind="attention")
             await self._teardown()
@@ -349,10 +371,13 @@ class BotSession:
             )
         else:
             self._browser = await self._pw.chromium.launch(headless=s.headless, executable_path=s.chromium_path, args=args)
-        await self._new_page()
+        await self._new_page(restore=True)
 
-    async def _new_page(self) -> None:
-        """Nouveau contexte = session vierge (sans cookies) avec une page vide."""
+    async def _new_page(self, *, restore: bool = False) -> None:
+        """Nouveau contexte = session vierge (sans cookies) avec une page vide.
+
+        `restore=True` (démarrage du navigateur seulement) repart des cookies enregistrés lors de la dernière
+        connexion, pour rester connecté après un redémarrage du conteneur."""
         assert self._browser is not None
         if self._context is not None:
             try:
@@ -360,12 +385,30 @@ class BotSession:
             except Exception:  # noqa: BLE001
                 pass
         if self.display is not None:  # la page suit la taille de la fenêtre, comme dans un navigateur normal
-            self._context = await self._browser.new_context(no_viewport=True, locale="fr-FR")
+            options: dict = {"no_viewport": True, "locale": "fr-FR"}
         else:
-            self._context = await self._browser.new_context(viewport=dict(self._viewport), locale="fr-FR")
+            options = {"viewport": dict(self._viewport), "locale": "fr-FR"}
+        saved = self._session_store.load() if restore else None
+        if restore:
+            self._session_restored = False
+        try:
+            self._context = await self._browser.new_context(**options, **({"storage_state": saved} if saved else {}))
+            if saved:
+                self._session_restored = True
+                self.log("Session précédente rechargée : le site devrait rester connecté.", event=True)
+        except Exception as exc:  # noqa: BLE001 - état enregistré refusé : on repart d'une session vierge
+            if not saved:
+                raise
+            self.log(f"Session précédente illisible ({type(exc).__name__}) : session vierge.", "warn")
+            self._session_store.clear()
+            self._context = await self._browser.new_context(**options)
         if self._settings.show_cursor and self.display is None:
             await self._context.add_init_script(CURSOR_SCRIPT)
         self._page = await self._context.new_page()
+        # Fenêtres du jeu qui masquent la page (ex. « Journal de développement ») : fermées dès qu'elles gênent une action
+        await interruptions.install(
+            self._page, lambda name: self.log(f"Fenêtre « {name} » fermée automatiquement.", event=True)
+        )
         self._context.on("response", self._on_response)
         self._page.on("websocket", self._on_websocket)
         self._page.on("framenavigated", self._on_navigated)
@@ -382,6 +425,18 @@ class BotSession:
         await human.move_mouse_randomly(page)
         await human.think(self._settings)
         await self._refuse_cookies(page)
+
+    async def _persist_session(self) -> None:
+        """Enregistre les cookies du navigateur (uniquement connecté, pour ne jamais écraser une bonne session)."""
+        if self._state is not State.LOGGED_IN or self._context is None:
+            return
+        try:
+            saved = self._session_store.save(await self._context.storage_state())
+        except Exception as exc:  # noqa: BLE001 - contexte en cours de fermeture
+            self.log(f"Session non enregistrée ({type(exc).__name__}).", "warn")
+            return
+        if saved:
+            self._last_state_save = time.monotonic()
 
     async def _reset_context(self) -> None:
         await self._new_page()
@@ -463,8 +518,6 @@ class BotSession:
             return {**self.status(), "message": "Une connexion est déjà en cours."}
         if self._manual:
             return {**self.status(), "message": "Désactivez le contrôle manuel pour lancer la connexion automatique."}
-        if self.automation.cycle_running and not supervised:
-            return {**self.status(), "message": "Une automatisation est en cours : coupez le bot (OFF) avant de vous reconnecter."}
         async with self._lock:
             self._set(State.LOGGING_IN, "Connexion en cours…")
             self.log(f"Connexion demandée pour {_mask(identifier)}{' (automatique)' if supervised else ''}.", event=True)
@@ -488,6 +541,7 @@ class BotSession:
                 self._creds = (identifier, password)  # en mémoire, pour se reconnecter si la session expire
                 self._set(State.LOGGED_IN, outcome.message)
                 self.log(outcome.message, event=True)
+                await self._persist_session()
             else:
                 # Le navigateur reste sur la page pour que la vue en direct montre la cause
                 # (ex. Turnstile). La prochaine tentative repart d'une session vierge.
@@ -497,8 +551,8 @@ class BotSession:
 
     async def logout(self) -> dict[str, str]:
         self._creds = None  # se déconnecter : plus de reconnexion automatique (les identifiants enregistrés restent sur disque)
-        await self.automation.stop_keeper()
-        await self.automation.stop("déconnexion")
+        self._session_store.clear()  # les cookies enregistrés partent avec la session
+        await self.supervisor.stop_keeper()
         async with self._lock:
             if self._page is not None:
                 try:
@@ -511,7 +565,7 @@ class BotSession:
             return self.status()
 
     def _login_delay(self) -> tuple[float, float]:
-        d = self.automation.store.get()["login_delay"]
+        d = self.supervisor.prefs.get()["login_delay"]
         return d["min_seconds"], d["max_seconds"]
 
     async def _do_login(self, identifier: str, password: str) -> _Outcome:
@@ -698,7 +752,7 @@ class BotSession:
         """Le bot finit l'action en cours avant de rendre la main (au plus 10 s) : les clics attendent au lieu d'être perdus."""
         end = time.monotonic() + 10
         warned = False
-        while self._manual and (self._lock.locked() or self.automation.cycle_running):
+        while self._manual and self._lock.locked():
             if not warned:
                 warned = True
                 self.log("Contrôle manuel : le bot termine son action en cours, vos clics partiront juste après.", "warn")
@@ -905,7 +959,7 @@ class BotSession:
             names = {u["index"]: u["name"] for u in await self.list_universes()}
             self.log(f"Choix de l'univers : {names.get(index, index)}.", event=True)
             if index in names:
-                self.automation.store.set_universe(names[index])  # mémorisé : le bot y retournera tout seul
+                self.supervisor.prefs.set_universe(names[index])  # mémorisé : le bot y retournera tout seul
             try:
                 await human.think(self._settings)
                 await human.click(self._page, buttons.nth(index), self._settings)
@@ -940,10 +994,11 @@ class BotSession:
                 await self.display.stop()
 
     async def _shutdown(self) -> None:
-        await self.automation.stop_keeper()
-        await self.automation.stop("arrêt du bot")
+        await self.scheduler.shutdown()
+        await self.supervisor.stop_keeper()
         boot = self._boot
         if boot is not None and not boot.done():  # un démarrage de navigateur est en cours : on l'attend avant de tout fermer
             await asyncio.gather(boot, return_exceptions=True)
         async with self._start_lock, self._lock:
+            await self._persist_session()  # dernière version des cookies avant de fermer le navigateur
             await self._teardown()

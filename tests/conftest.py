@@ -54,8 +54,11 @@ def settings(mock_url):
         screenshot_interval=0.1,
         human_mode=False,  # pas de délais artificiels dans les tests (voir test_human.py)
         data_dir=None,
-        min_cycle_minutes=0.01,
         poll_seconds=0.3,
+        feature_min_minutes=0.01,
+        feature_gap_min=0.0,
+        feature_gap_max=0.0,
+        scheduler_tick=0.05,
     )
 
 

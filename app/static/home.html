@@ -23,51 +23,25 @@
   </header>
 
   <main class="page">
-    <section id="attacks" class="card attack-card" role="alert" hidden>
-      <h2>Attaque en approche</h2>
-      <ul id="attack-list" class="events"></ul>
-    </section>
     <section class="card hero" aria-labelledby="hero-title">
       <div style="flex:1; min-width:260px">
-        <h1 id="hero-title">Que fait le bot ?</h1>
+        <h1 id="hero-title">Connexion</h1>
         <p id="sentence" class="sentence" role="status">Chargement…</p>
         <p id="counters" class="counters"></p>
       </div>
-      <button data-power class="power big off" type="button" aria-pressed="false">Bot : OFF</button>
+      <a class="button" href="/reglages">Compte et univers</a>
     </section>
 
     <div class="grid-2">
-      <section class="card" aria-labelledby="ready-title">
-        <h2 id="ready-title">Prêt à démarrer ?</h2>
-        <ul id="checklist" class="checklist"></ul>
+      <section class="card" aria-labelledby="planets-title">
+        <h2 id="planets-title">Mes planètes</h2>
+        <div id="planets"></div>
+        <p id="planets-meta" class="hint"></p>
       </section>
-
-      <section class="card" id="mode" aria-labelledby="mode-title">
-        <h2 id="mode-title">Mode de fonctionnement</h2>
-        <div class="mode-choice">
-          <button id="mode-sim" class="sim secondary" type="button" aria-pressed="true">Simulation (ne clique pas)</button>
-          <button id="mode-live" class="live secondary" type="button" aria-pressed="false">Réel (clique et dépense)</button>
-        </div>
-        <p id="mode-hint" class="hint"></p>
-        <p id="mode-msg" class="msg" role="status"></p>
-      </section>
-    </div>
-
-    <section class="card" aria-labelledby="sim-title">
-      <h2 id="sim-title">Ce que le bot aurait fait</h2>
-      <ul id="sim-list" class="sim-list"></ul>
-      <div class="row"><button id="go-live" type="button" class="small" hidden>Passer en réel</button></div>
-    </section>
-
-    <div class="grid-2">
       <section class="card" aria-labelledby="events-title">
         <h2 id="events-title">Derniers événements</h2>
         <ul id="events" class="events"></ul>
         <p><a href="/suivi">Voir tout le journal</a></p>
-      </section>
-      <section class="card" aria-labelledby="planets-title">
-        <h2 id="planets-title">Planètes suivies</h2>
-        <div id="planets"></div>
       </section>
     </div>
   </main>

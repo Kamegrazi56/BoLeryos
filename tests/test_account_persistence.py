@@ -7,7 +7,7 @@ from dataclasses import replace
 import pytest
 
 from app import human
-from app.automation.settings import SettingsError, SettingsStore, validate
+from app.preferences import Preferences, PreferencesError, validate
 from app.bot import BotSession
 from app.config import Settings
 from app.vault import CredentialVault
@@ -109,8 +109,8 @@ def test_ui_protected_flag(make_client, tmp_path):
 
 # ------------------------------------------------------------------------ délai de connexion
 def test_login_delay_default_and_validation():
-    assert validate({}, allow_live=False)["login_delay"] == {"min_seconds": 0.4, "max_seconds": 1.4}
-    ok = validate({"login_delay": {"min_seconds": 2, "max_seconds": 3.5}}, allow_live=False)
+    assert validate({})["login_delay"] == {"min_seconds": 0.4, "max_seconds": 1.4}
+    ok = validate({"login_delay": {"min_seconds": 2, "max_seconds": 3.5}})
     assert ok["login_delay"] == {"min_seconds": 2.0, "max_seconds": 3.5}
     for bad in (
         {"min_seconds": 3, "max_seconds": 2},  # minimum après le maximum
@@ -120,25 +120,25 @@ def test_login_delay_default_and_validation():
         {"min_seconds": "1", "max_seconds": 2},
         {"min_seconds": 1},
     ):
-        with pytest.raises(SettingsError):
-            validate({"login_delay": bad}, allow_live=False)
+        with pytest.raises(PreferencesError):
+            validate({"login_delay": bad})
 
 
 def test_login_delay_is_saved_and_reloaded(tmp_path):
-    store = SettingsStore(str(tmp_path))
-    store.update({"login_delay": {"min_seconds": 2.0, "max_seconds": 5.0}}, allow_live=False)
-    assert SettingsStore(str(tmp_path)).get()["login_delay"] == {"min_seconds": 2.0, "max_seconds": 5.0}
+    prefs = Preferences(str(tmp_path))
+    prefs.update({"login_delay": {"min_seconds": 2.0, "max_seconds": 5.0}})
+    assert Preferences(str(tmp_path)).get()["login_delay"] == {"min_seconds": 2.0, "max_seconds": 5.0}
 
 
 def test_login_delay_partial_update_keeps_the_other_bound(tmp_path):
-    store = SettingsStore(str(tmp_path))
-    store.update({"login_delay": {"max_seconds": 9}}, allow_live=False)
-    assert store.get()["login_delay"] == {"min_seconds": 0.4, "max_seconds": 9.0}
+    prefs = Preferences(str(tmp_path))
+    prefs.update({"login_delay": {"max_seconds": 9}})
+    assert prefs.get()["login_delay"] == {"min_seconds": 0.4, "max_seconds": 9.0}
 
 
 def test_bot_reads_the_chosen_login_delay(settings, tmp_path):
     bot = BotSession(replace(settings, data_dir=str(tmp_path)))
-    bot.automation.store.update({"login_delay": {"min_seconds": 2, "max_seconds": 3}}, allow_live=False)
+    bot.supervisor.prefs.update({"login_delay": {"min_seconds": 2, "max_seconds": 3}})
     assert bot._login_delay() == (2.0, 3.0)
 
 

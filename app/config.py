@@ -57,14 +57,15 @@ class Settings:
     vnc_port: int = 5901
     # Affiche un point rouge à l'endroit de la souris dans la vue en direct.
     show_cursor: bool = True
-    # Dossier des réglages d'automatisation (JSON, jamais d'identifiants). Utilisé seulement s'il existe.
+    # Dossier des données du bot : préférences, session du navigateur, identifiants chiffrés. Utilisé seulement s'il existe.
     data_dir: str | None = "/data"
-    # Fréquence de vérification de l'écran quand le bot attend (connexion, univers, plage horaire), en secondes.
+    # Fréquence de vérification de l'écran quand le bot attend (connexion, univers), en secondes.
     poll_seconds: float = 10.0
-    # Autorise les alertes vers une adresse locale ou en http (tests uniquement : sinon https public obligatoire).
-    allow_private_webhooks: bool = False
-    # Intervalle minimal autorisé entre deux cycles d'automatisation (minutes).
-    min_cycle_minutes: float = 1.0
+    # Ordonnanceur : plus petit minuteur autorisé (minutes) et pause entre deux passages consécutifs (secondes).
+    feature_min_minutes: float = 1.0
+    feature_gap_min: float = 3.0
+    feature_gap_max: float = 8.0
+    scheduler_tick: float = 1.0
     # Protection facultative de l'interface du bot (HTTP Basic). Ce n'est PAS
     # un identifiant du jeu.
     ui_user: str | None = None
@@ -92,7 +93,6 @@ def load_settings() -> Settings:
         vnc=_env_bool("VNC", defaults.vnc),
         data_dir=os.environ.get("DATA_DIR", defaults.data_dir) or None,
         poll_seconds=_env_float("POLL_SECONDS", defaults.poll_seconds),
-        min_cycle_minutes=_env_float("MIN_CYCLE_MINUTES", defaults.min_cycle_minutes),
         ui_user=os.environ.get("UI_USER") or None,
         ui_password=os.environ.get("UI_PASSWORD") or None,
     )

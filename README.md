@@ -12,18 +12,18 @@ Interface au style inspiré d'Aleryos (espace profond, panneaux translucides, ac
 
 | Page | Rôle |
 |---|---|
-| `/` **Accueil** | Un grand interrupteur **ON / OFF**, une phrase qui dit ce que fait le bot, la liste **« Prêt à démarrer ? »** (✓ / ✗ avec un lien « Corriger »), le choix **Simulation / Réel**, un résumé en phrases de ce que le bot aurait fait, les derniers événements et les planètes suivies. |
+| `/` **Accueil** | État de la connexion, univers, **planètes scannées** (nom, coordonnées, stocks) et derniers événements. |
 | `/ecran` **Écran** | Vue en direct du navigateur du bot, contrôle manuel (jouer soi-même dans la même vue), choix d'univers et exploration de la structure du site. |
-| `/reglages` **Réglages** | 5 onglets : **Compte et univers**, **Constructions**, **Recherches**, **Horaires et rythme**, **Sauvegarde et alertes**. Enregistrement automatique (« Enregistré ✓ »). |
-| `/suivi` **Suivi** | **Journal** lisible (événements importants ; détails techniques en option), **État du jeu** (lecture seule) et **Planètes suivies**. |
+| `/reglages` **Réglages** | 5 onglets : **Compte et univers** (identifiants, univers, délai de connexion, scan des planètes), **Fonctionnalités** (interrupteur, **minuteur entre X et Y minutes**, prochain passage en direct et ordre de **priorité** de chaque fonctionnalité) **Constructions** (liste ordonnée « bâtiment + niveau cible », toutes les planètes ou une seule) et **Recherches** (liste ordonnée « recherche + niveau cible » des 23 recherches du Laboratoire, et **planète chargée des recherches** : une seule recherche à la fois, payée par cette planète ; lancement non vérifié sur le vrai jeu) et **Population** (une ligne par population recrutable : quantité fixe ou MAX à chaque passage, ou effectif à atteindre ; planète au choix ou toutes, chacune traitée séparément ; liste ordonnée = priorité ; recrutement non vérifié sur le vrai jeu). Enregistrement automatique. |
+| `/suivi` **Suivi** | **Journal** lisible (événements importants ; détails techniques en option). |
 
-Un bandeau permanent indique le mode : **SIMULATION** (vert, le bot ne clique pas) ou **MODE RÉEL** (rouge). Les anciennes adresses `/vision` et `/actions` redirigent vers `/ecran` et `/reglages`. Des pastilles **?** expliquent les réglages moins évidents.
+Les anciennes adresses `/vision` et `/actions` redirigent vers `/ecran` et `/reglages`. Des pastilles **?** expliquent les réglages moins évidents.
 
 ### Navigateur complet (page Écran)
 
 Dans l'image Docker, le Chromium du bot tourne avec sa **vraie fenêtre** (onglets, barre d'adresse) sur un écran virtuel, affiché dans la page **Écran** par **noVNC** : on navigue et on joue comme dans un vrai navigateur, au clavier et à la souris, comme avec le conteneur « Chromium » de linuxserver. C'est le même navigateur que celui qu'utilise le bot.
 
-- Le navigateur occupe **toute la page sous le bandeau du haut**. Dans ce bandeau : le mode (Simulation / Réel), « Contrôle manuel », « Plein écran », « Outils & journal » (panneau escamotable : page affichée, univers, exploration de la structure, journal, déconnexion), et l'interrupteur ON/OFF.
+- Le navigateur occupe **toute la page sous le bandeau du haut**. Dans ce bandeau : « Contrôle manuel », « Plein écran », « Outils & journal » (panneau escamotable : page affichée, univers, exploration de la structure, journal, déconnexion).
 - **Regarder** : par défaut, la vue est en lecture seule (le bot peut agir). La **molette fait toujours défiler la page du jeu**, même sans contrôle manuel ; clics et clavier restent bloqués.
 - **Contrôle manuel** : cochez la case pour cliquer, taper, faire défiler, utiliser la barre d'adresse ou les onglets ; le bot se met en pause tant qu'elle est cochée (et la décoche tout seul quand plus aucun écran n'est ouvert).
 - **Plein écran** : bouton au-dessus de la vue (Échap pour sortir). L'écran virtuel prend toujours la taille de la zone d'affichage : image nette, sans bandes vides.
@@ -47,55 +47,38 @@ Le panneau « Exploration de la structure du site » (désactivé par défaut) e
 - Jamais conservés : valeurs de cookies, d'en-têtes et de stockage, valeurs de paramètres d'URL, mots de passe et saisies, e-mails, jetons, identifiants. Des tests le vérifient.
 - Les textes visibles à l'écran (titres, boutons, pseudo) et les courts libellés peuvent contenir des informations de jeu : relisez le fichier avant de le partager. Ne le commitez pas dans un dépôt public.
 
-## Automatisation
+## Connexion automatique et scan des planètes
 
-### Connexion automatique (comme TBot)
+Le bot ne lance **aucune action de jeu** : constructions, recherches, production, expéditions, espionnage, attaques, priorités, horaires, sauvegarde des réglages d'automatisation et alertes ont été supprimés pour repartir de zéro. Il se connecte, entre dans l'univers, reste connecté et lit la liste des planètes.
 
-Dans **Réglages › Compte et univers**, saisissez l'identifiant, le mot de passe et l'univers (champ avec suggestions), puis **« Enregistrer et se connecter »** : le bot se connecte **tout seul**, entre dans l'univers indiqué et **reste connecté** (il se reconnecte si la session expire), sans toucher à l'interrupteur. Le champ « Connexion : … » montre l'avancement en direct. L'interrupteur ON/OFF ne sert qu'à faire **travailler** le bot (constructions, recherches) ; les plages horaires limitent ce travail, pas la connexion. « Oublier le compte » ou « Se déconnecter » (page Écran) arrête la connexion automatique.
-
-### Interrupteur « Bot : ON / OFF »
-
-Un seul interrupteur, dans l'en-tête de chaque page (et en grand sur l'Accueil). Si des éléments obligatoires manquent (identifiants, univers, quelque chose à faire), une fenêtre les liste avec un bouton « Corriger » et un bouton « Démarrer quand même ». **ON** : le bot regarde où en est le site et ne fait que ce qui manque :
+Dans **Réglages › Compte et univers**, saisissez l'identifiant, le mot de passe et l'univers (champ avec suggestions), puis **« Enregistrer et se connecter »** : le bot se connecte **tout seul**, entre dans l'univers indiqué et **reste connecté** (il se reconnecte si la session expire). Le champ « Connexion : … » montre l'avancement en direct. « Oublier le compte » ou « Se déconnecter » (page Écran) arrête la connexion automatique. La session du navigateur est conservée dans le volume `/data` : un redémarrage du conteneur ne déconnecte pas.
 
 | Écran du site | Ce que fait le bot |
 |---|---|
-| Page de connexion | Se connecte avec les identifiants mémorisés (onglet **Compte et univers** de la page Réglages, bouton « Se connecter maintenant » possible, ou connexion faite une fois à la main sur la page Écran). |
-| Choix de l'univers | Entre dans l'univers choisi dans l'onglet Compte et univers (cliquer sur un bouton d'univers le mémorise aussi). |
-| Déjà dans une partie | Saute la connexion et le choix de l'univers, puis travaille. |
+| Page de connexion | Se connecte avec les identifiants mémorisés. |
+| Choix de l'univers | Entre dans l'univers choisi (cliquer sur un bouton d'univers le mémorise aussi). |
+| Déjà dans une partie | Saute la connexion et le choix de l'univers. |
 | Session expirée | Se reconnecte tout seul. |
+| Fenêtre « Journal de développement » | La ferme avant chaque clic ou saisie. |
 
-**Garde-fous :** (valables pour la connexion automatique, ON ou OFF) si le site **refuse** les identifiants, le bot n'essaie qu'**une fois** (risque de blocage du compte) et l'indique ; si la connexion n'aboutit pas (contrôle anti-bot ?), 3 essais espacés (1 min, 5 min) puis il demande de se connecter à la main et **reprend seul** dès que le site est connecté ; le contrôle manuel le met en pause. **OFF** arrête tout (c'est l'arrêt d'urgence).
+**Scan des planètes :** une fois par connexion, dès que le bot est dans la partie, il ouvre la liste des planètes du jeu, lit nom, coordonnées et stocks (Fer, Cristal, Éther), puis la referme. Le bouton **« Scanner les planètes »** (Réglages) la relance à la demande ; le résultat s'affiche aussi sur l'Accueil.
+
+**Garde-fous :** si le site **refuse** les identifiants, le bot n'essaie qu'**une fois** (risque de blocage du compte) et l'indique ; si la connexion n'aboutit pas (contrôle anti-bot ?), 3 essais espacés (1 min, 5 min) puis il demande de se connecter à la main et **reprend seul** dès que le site est connecté ; le contrôle manuel le met en pause.
 
 **Identifiants :** enregistrés par le bot dans le volume `/data` (décision D1 « B », demandée le 05/11/2026) : l'identifiant dans `account.json`, le mot de passe **chiffré** (Fernet) avec une clé aléatoire gardée à côté dans `account.key` (droits 0600). La clé protège contre une lecture du seul fichier, pas contre une copie de tout le dossier : utilisez un compte de test et protégez l'interface (`UI_USER` / `UI_PASSWORD`). Jamais dans le journal, ni dans les réglages exportés ; le mot de passe n'est jamais renvoyé par l'API (le champ reste vide et indique « enregistré »). Au redémarrage ils sont relus mais le bot **ne se connecte pas seul** : « Relancer la connexion ». « Oublier le compte » efface les deux fichiers. Sans volume `/data`, ils restent en mémoire seulement.
 
 
-Les réglages sont dans la page **Réglages**. Tout est en **simulation par défaut** : le bot lit le jeu et dit ce qu'il *ferait* (« Il y a 5 min : sur Egide, j'aurais lancé Mine de Fer niveau 41 »), sans cliquer. Le **mode réel** se choisit à la main, depuis l'Accueil, avec une confirmation (avertissement si aucune simulation n'a encore été observée), et n'est jamais rétabli après un redémarrage ni activé par un fichier importé.
+**Préférences :** univers choisi et délai de connexion sont enregistrés dans le volume Docker `boleryos-data` (`/data/preferences.json`, non secret ; l'ancien `automation.json` est repris au premier démarrage).
 
-Vocabulaire : « fréquence de vérification » (durée aléatoire entre deux passages du bot), « maximum de lancements par jour » ; ces deux réglages et le fuseau horaire sont dans « Avancé » (onglet Horaires et rythme).
+## Fonctionnalités et interrupteur général (Réglages › Fonctionnalités)
 
-| Fonction | Ce que fait le bot |
-|---|---|
-| **Plages horaires** | N'agit que dans les plages choisies (plusieurs plages, jours, fuseau ; plages de nuit possibles). Un cycle en cours s'arrête à la fin de la plage. |
-| **Constructions** | **Toutes les planètes** ou **une seule** (choisie dans une liste). Le joueur compose une **liste d'améliorations par ordre de priorité** (bâtiments choisis dans la liste intégrée des 16, avec un niveau demandé) ; chaque ligne vise soit **« jusqu'au niveau N »** soit **« monter de N niveaux »** (par rapport au niveau vu par le bot la première fois, mémorisé par planète) ; des **listes toutes faites** (les 3 mines ; mines et énergie ; mines, énergie et stockage) donnent un point de départ à modifier. Sur chaque planète, le bot lance la **première** réalisable avec les ressources de la planète (niveau inférieur à l'objectif, bouton actif). Une seule construction à la fois par planète ; si l'énergie est négative, les mines sont ignorées. Si rien n'est réalisable, la planète est mise **en attente** et **revérifiée toutes les X minutes** (réglable, 15 par défaut), sans repasser sur les autres planètes ; une planète où une construction vient d'être lancée est revue à sa fin. Le tableau « Planètes suivies » (page Suivi) montre l'état et la prochaine vérification de chacune. |
-| **Production** | Pages **Population** (Assaut, Logistique, Administration), **Chantier spatial** (vos modèles de vaisseaux, en mode « Construction », et les composants), **Appareils spécialisés** et **Défenses**. Pour chaque ligne : le nombre voulu ou **« maximum »** (le bot clique sur le bouton MAX du jeu), avec trois comportements : **commande unique** (une fois par planète, puis « faite » ; bouton « Relancer »), **objectif de stock** (le bot ne commande que la différence entre l'objectif et le stock + la file d'attente) et **répéter à chaque passage**. Toutes les planètes ou une seule. Le bot ne lance un nombre que si les ressources de la planète le couvrent **en entier** ; sinon la planète est mise en attente et revérifiée toutes les X minutes. Le débit des ressources est vérifié après le clic ; quand il est trop petit pour se voir (le jeu arrondit les gros stocks), le journal le signale. |
-| **Expéditions** *(simulation seulement)* | Réglages › Expéditions : voie **Piliers** (unités au sol) ou **Flotte** (vos modèles de vaisseaux), durée en heures, composition définie dans le bot (pour chaque unité : un nombre, le maximum ou un pourcentage des disponibles). Vous choisissez **combien d'explorations garder actives** ; à chaque passage le bot lit la page Opérations › Exploration (« Explorations actives x/10 », « quotidiennes x/46 », « Disponibles : N ») et, pour chaque place libre, prend la première ligne réalisable **en entier**. Il dit ce qu'il lancerait (« j'aurais lancé une exploration par les Piliers (3 h) avec… ») mais **ne lance rien** : le lancement réel n'est pas codé tant qu'il manque une capture d'une exploration lancée à la main (listes « Durée nominale » et « Copies », bouton de lancement, exploration en cours). |
-| **Espionnage** *(simulation seulement)* | Réglages › Espionnage : **joueurs** et/ou **errants** (tag [AI]), alliance exclue au choix, **intervalle de coordonnées** (minimum et maximum, comparés lettre puis nombres, bornes comprises), envoi par **Sonde**, **Drone** ou les deux, depuis une planète choisie ou la planète active. **Une cible par passage** : d'abord celles jamais espionnées, puis la plus ancienne. Le bot lit la liste de la Galaxie et dit qui il espionnerait, mais **n'envoie rien** : l'envoi réel attend une capture d'un envoi fait à la main (bouton « Sonde » de la Galaxie). Limite actuelle : seules les cibles de la liste affichée autour de la planète de départ sont vues. |
-| **Attaque des errants** *(simulation, rapports non lus)* | Réglages › Attaques : errants [AI] entre une **coordonnée minimum et maximum**, **minimum de Fer, de Cristal et d'Éther**, attaque si **1, 2 ou les 3** ressources dépassent leur minimum (strictement au-dessus), voie **Piliers** ou **Flotte** avec une composition (nombre, maximum ou % des disponibles), **nombre total d'attaques** (compteur remis à zéro à la main). Une attaque par passage, en tournant sur les cibles. Les ressources d'une cible viennent du **rapport d'espionnage** : la lecture des rapports **n'est pas encore codée** (l'export n'en contient aucun), donc le bot repère les errants de l'intervalle et le dit, sans décider. Aucune attaque n'est lancée. Il faut une capture d'un rapport d'espionnage ouvert et d'une attaque lancée à la main sur un errant. |
-| **Alerte d'attaque** | Réglages › Sauvegarde et alertes. Quand le bot est sur **ON**, il lit les « Capteurs interstellaires » du jeu toutes les N secondes (réglable, **sans clic** : le contenu du panneau est dans la page) et signale **une seule fois** chaque **attaque** qui arrive sur une de vos planètes depuis une autre planète : bandeau rouge sur l'Accueil, journal, alerte « attaque en approche » (adresse d'envoi, notification du navigateur). Il **n'agit pas** dans le jeu. Espionnages et mouvements entre vos planètes : ignorés. **Non vérifié sur une vraie attaque** : l'export ne montre qu'un déploiement ; le type d'une attaque est supposé contenir « attaque ». Si les capteurs signalent des mouvements illisibles, le journal le dit. |
-| **Priorités** | Réglages › Priorités : ordre dans lequel le bot sert ses blocs (constructions, recherches, population, chantier spatial, appareils, défenses, expéditions). Le premier dépense les ressources avant les suivants, ce qui compte surtout avec « maximum ». |
-| **Recherches** | Les **23 recherches** du Laboratoire sont intégrées. Même principe avec « Rechercher », sur la planète désignée (ou celle qui a le plus de Fer). |
-| **Alertes** | Message envoyé à une adresse **https** que vous choisissez (Discord, Slack, Mattermost ou ntfy) quand une amélioration est lancée ou que le bot a besoin de vous (connexion à refaire, contrôle anti-bot, arrêt automatique) ; notifications du navigateur en option. L'adresse est enregistrée à part dans le volume (`/data/notifications.json`, droits 0600), n'est **jamais** réaffichée, exportée ni écrite dans le journal ; les adresses du réseau local sont refusées. Les messages ne contiennent ni identifiant ni mot de passe. Telegram n'est pas géré. |
-| **Lecture de l'état** | Bouton « Lire l'état du jeu » (page Suivi) : planètes, ressources, niveaux, coûts, durées, boutons actifs. Sert à vérifier que le bot comprend l'écran. |
-
-**Sécurités :** maximum de lancements par jour, arrêt d'urgence, contrôle manuel prioritaire, relecture de l'écran avant et après chaque clic (les ressources doivent être débitées), arrêt si deux lancements ne sont pas confirmés ou si une fenêtre inattendue s'ouvre, refus d'agir sur un nombre que le bot ne comprend pas, délais humains.
-
-**Réglages :** enregistrés dans le volume Docker `boleryos-data` (`/data/automation.json`, non secret) ; exportables et importables en JSON (un fichier importé ne peut jamais activer le mode réel).
-
-**Pas encore fait :** conservation des identifiants après un redémarrage du conteneur (attend le choix D1 du plan) et expéditions (attendent des captures). Voir [`docs/PLAN.md`](docs/PLAN.md).
-
-**Non vérifié sur le vrai jeu (production) :** les pages Population, Chantier spatial, Appareils spécialisés et Défenses ont été codées d'après votre export de structure du 2026-11-03 et testées sur un faux jeu qui en reproduit les balises, pas sur Aleryos. Points à confirmer : le stock affiché sur chaque carte (pastille avant le titre, « En service : N », « ×N »), le bouton sans libellé des composants, la file d'attente des vaisseaux. Utilisez **Suivi › État du jeu › Lire l'état du jeu** : il affiche stock, file d'attente, coût d'une unité et état du bouton lus par le bot ; comparez avec l'écran avant d'activer la production en réel.
-
-**Non vérifié sur le vrai jeu :** la navigation entre les pages Industrie / Installations / Laboratoire et le changement de planète ont été testés sur un faux jeu reconstitué d'après votre export, pas sur Aleryos. Commencez par « Lire l'état du jeu », puis laissez tourner en simulation et relisez le journal avant d'activer le mode réel.
+- **Bot : ON / OFF** (en haut de chaque page) : à OFF, aucune fonctionnalité ne tourne ; le bot reste pourtant connecté et scanne les planètes. Il repasse **toujours à OFF** après un redémarrage.
+- Chaque fonctionnalité a son interrupteur et son **minuteur** : après chaque passage, le bot attend une durée tirée au hasard entre le minimum et le maximum (le minuteur redémarre à la **fin** du passage). On ne peut pas activer sans minuteur. À l'activation (bot sur ON), le premier passage a lieu tout de suite.
+- **Un seul passage à la fois.** Si plusieurs sont dues, la plus haute de la liste de priorités passe d'abord ; un passage commencé n'est jamais interrompu (même si le bot passe à OFF) ; quelques secondes séparent deux passages.
+- Un passage est repoussé tant que le bot n'est pas dans une partie ou que le contrôle manuel est actif.
+- Activations, minuteurs et priorités sont enregistrés dans `/data/features.json` et survivent au redémarrage.
+- **« Constructions de bâtiments »** (réglée dans l'onglet Constructions) : à chaque passage, pour chaque planète visée, le bot prend la **première ligne** de la liste dont le niveau actuel est sous le niveau cible et dont le bouton « Améliorer » est actif, **clique une fois** (dépense de vraies ressources) et vérifie que le stock a baissé. Au plus **une construction par planète et par passage** ; le même bâtiment n'est pas recliqué avant la fin présumée de sa construction (durée lue sur la carte, +10 %) ; le contrôle manuel l'interrompt ; après **deux lancements de suite dont le débit n'est pas constaté**, la fonctionnalité se désactive. **Non vérifié sur le vrai jeu** : tout a été testé sur un faux jeu reconstitué d'après les pages lues le 06/11 ; commencez par une seule planète et une seule ligne, en regardant la page Écran.
+- La fonctionnalité « Test (ne fait rien) » n'agit pas dans le jeu : elle sert à vérifier minuteurs et priorités, et sera retirée quand la première vraie fonctionnalité arrivera.
 
 ## Données du joueur
 
@@ -137,7 +120,7 @@ Ils se modifient directement dans `app/config.py` (aucune donnée de joueur) :
 | `login_timeout` | Attente maximale du résultat de la connexion, en secondes | `30` |
 | `email_selector`, `password_selector`, `submit_selector` | Sélecteurs du formulaire | relevés sur le site |
 
-Les mêmes réglages peuvent aussi être surchargés par variables d'environnement (`DATA_DIR`, `MIN_CYCLE_MINUTES`, `LOGIN_URL`, `UI_USER`, `UI_PASSWORD`, `LOGIN_TIMEOUT`, `EMAIL_SELECTOR`, `PASSWORD_SELECTOR`, `SUBMIT_SELECTOR`), mais ce n'est pas nécessaire.
+Les mêmes réglages peuvent aussi être surchargés par variables d'environnement (`DATA_DIR`, `LOGIN_URL`, `UI_USER`, `UI_PASSWORD`, `LOGIN_TIMEOUT`, `EMAIL_SELECTOR`, `PASSWORD_SELECTOR`, `SUBMIT_SELECTOR`), mais ce n'est pas nécessaire.
 
 Ne mettez jamais un mot de passe réel dans `app/config.py` si le dépôt est public.
 

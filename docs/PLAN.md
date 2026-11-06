@@ -1,5 +1,8 @@
 # Plan de développement de BoLeryos
 
+> **2026-11-06 — repartir de presque zéro.** Les modules d'automatisation (constructions, recherches, production, expéditions, espionnage, attaques, priorités, horaires, alertes) ont été supprimés. Restent : connexion automatique, session conservée, choix de l'univers, scan des planètes, page Écran. Le reste de ce document décrit l'ancienne conception et sert d'historique.
+
+
 *Dernière mise à jour : 2026-11-01 (phases 1 à 5 codées ; constructions : liste ordonnée, une ou toutes les planètes, timer d'attente ; D1 et F5 en attente). Ce document fait foi : on le met à jour à chaque phase, et on ne repose pas une question dont la réponse y figure.*
 
 ## 1. Objectif

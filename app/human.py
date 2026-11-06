@@ -10,6 +10,7 @@ import random
 
 from playwright.async_api import Locator, Page
 
+from . import interruptions
 from .config import Settings
 
 
@@ -35,7 +36,10 @@ async def move_mouse_randomly(page: Page) -> None:
 
 
 async def click(page: Page, locator: Locator, s: Settings) -> None:
-    """Déplace la souris progressivement vers un point aléatoire de l'élément, puis clique."""
+    """Déplace la souris progressivement vers un point aléatoire de l'élément, puis clique.
+
+    Ferme d'abord une éventuelle fenêtre du jeu (ex. « Journal de développement ») qui intercepterait le clic."""
+    await interruptions.dismiss(page)
     await locator.scroll_into_view_if_needed()
     box = await locator.bounding_box()
     if box is None:
@@ -50,6 +54,7 @@ async def click(page: Page, locator: Locator, s: Settings) -> None:
 
 async def type_text(page: Page, text: str, s: Settings) -> None:
     """Tape le texte caractère par caractère, avec un rythme irrégulier."""
+    await interruptions.dismiss(page)
     for char in text:
         await page.keyboard.type(char)
         if s.human_mode:

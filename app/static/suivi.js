@@ -1,28 +1,6 @@
-// Page Suivi : journal lisible, état du jeu (lecture seule), planètes suivies.
-const { el, fmt, dur, table } = window.ui;
+// Page Suivi : le journal lisible du bot (connexion, scan des planètes, avertissements).
+const { el } = window.ui;
 const $ = (id) => document.getElementById(id);
-const TABS = ["log", "state", "planets"];
-
-function setTab(id) {
-  if (!TABS.includes(id)) id = "log";
-  TABS.forEach((t) => {
-    const active = t === id;
-    $("tab-" + t).setAttribute("aria-selected", String(active));
-    $("tab-" + t).tabIndex = active ? 0 : -1;
-    $("panel-" + t).hidden = !active;
-  });
-  if (location.hash !== "#" + id) history.replaceState(null, "", "#" + id);
-  if (id === "log") $("log").scrollTop = $("log").scrollHeight;
-}
-TABS.forEach((t) => {
-  $("tab-" + t).addEventListener("click", () => setTab(t));
-  $("tab-" + t).addEventListener("keydown", (e) => {
-    const i = TABS.indexOf(t);
-    const next = e.key === "ArrowRight" ? TABS[(i + 1) % TABS.length] : e.key === "ArrowLeft" ? TABS[(i + TABS.length - 1) % TABS.length] : null;
-    if (next) { setTab(next); $("tab-" + next).focus(); }
-  });
-});
-window.addEventListener("hashchange", () => { if (TABS.includes(location.hash.slice(1))) setTab(location.hash.slice(1)); });
 
 // ------------------------------------------------------------------------------------ journal
 let logs = [];
@@ -42,92 +20,11 @@ function renderLog() {
 $("log-details").addEventListener("change", renderLog);
 $("log-level").addEventListener("change", renderLog);
 
-// ------------------------------------------------------------------------- planètes suivies
-const PLANET_STATUS = {
-  pending: "en attente de ressources", busy: "construction en cours", would_launch: "réalisable (simulation)",
-  done: "objectifs atteints", idle: "rien à lancer", retry: "à réessayer",
-};
-const waitText = (s) => (s >= 90 ? `${Math.round(s / 60)} min` : `${s} s`);
-function renderPlanets(rows) {
-  const box = $("cons-pending");
-  if (!rows || !rows.length) {
-    box.replaceChildren(el("p", { className: "empty-state", textContent: "Aucune planète suivie pour l'instant : le bot n'en a pas encore vérifié. Elles apparaissent ici une fois le bot démarré (ON)." }));
-    return;
-  }
-  box.replaceChildren(table(["Planète", "État", "Détail", "Prochaine vérification"], rows.map((r) => [r.planet, PLANET_STATUS[r.status] || r.status, r.detail, `dans ${waitText(r.next_in_s)}`])));
-}
-
-const PROD_STATUS = {
-  pending: "en attente de ressources", launched: "production lancée", would_launch: "réalisable (simulation)",
-  done: "tout est fait", idle: "rien à lancer", retry: "à réessayer",
-};
-function renderProduction(rows) {
-  const box = $("prod-pending");
-  if (!rows || !rows.length) {
-    box.replaceChildren(el("p", { className: "empty-state", textContent: "Aucune production suivie pour l'instant. Elles apparaissent ici une fois le bot démarré (ON) avec des lignes dans Réglages › Production." }));
-    return;
-  }
-  box.replaceChildren(table(["Bloc", "Planète", "État", "Détail", "Prochaine vérification"], rows.map((r) => [r.label, r.planet, PROD_STATUS[r.status] || r.status, r.detail, `dans ${waitText(r.next_in_s)}`])));
-}
-
 async function refresh() {
   try {
-    const data = await (await fetch("/api/status?limit=400")).json();
-    logs = data.logs;
+    logs = (await (await fetch("/api/status?limit=400")).json()).logs;
     renderLog();
-    renderPlanets(data.automation.planets_state);
-    renderProduction(data.automation.production_state);
   } catch { /* le bot redémarre : on réessaie */ }
 }
-
-// ---------------------------------------------------------------------------- état du jeu
-$("read-state").addEventListener("click", async () => {
-  $("read-msg").textContent = "Lecture en cours…";
-  const res = await fetch("/api/automation/read-state", { method: "POST" });
-  const data = await res.json();
-  if (!res.ok) { $("read-msg").textContent = data.detail || "Impossible de lire l'état."; return; }
-  $("read-msg").textContent = "Lecture terminée.";
-  const out = $("state-out");
-  out.replaceChildren(
-    el("h2", { textContent: `Planètes (${data.planets.length})` }),
-    table(["Nom", "Coordonnées", "Fer", "Cristal", "Éther"], data.planets.map((p) => [p.name, p.coords, ...p.stocks.map(fmt)])),
-  );
-  if (data.galaxy) {
-    out.append(el("h2", { textContent: "Galaxie (cibles d'espionnage lues)" }));
-    if (data.galaxy.error) out.append(el("p", { className: "hint", textContent: `Non lue : ${data.galaxy.error}` }));
-    else {
-      out.append(el("p", { className: "hint", textContent: `${data.galaxy.targets.length} planète(s) de joueurs ou d'errants · votre alliance : ${data.galaxy.alliance || "inconnue"}` }));
-      out.append(table(["Joueur", "Tag", "Planète", "Coordonnées", "Errant", "Dans l'intervalle"], data.galaxy.targets.map((t) => [
-        t.player, t.tag, t.planet, t.coords, t.errant ? "oui" : "non", t.in_range ? "oui" : "non"])));
-    }
-  }
-  for (const x of Object.values(data.expeditions || {})) {
-    out.append(el("h2", { textContent: `Expéditions : ${x.label}` }));
-    if (x.error) { out.append(el("p", { className: "hint", textContent: `Non lue : ${x.error}` })); continue; }
-    out.append(el("p", { className: "hint", textContent: `Explorations actives ${x.active ?? "?"}/${x.active_max ?? "?"} · quotidiennes ${x.daily ?? "?"}/${x.daily_max ?? "?"}` }));
-    out.append(table(["Unité", "Disponibles"], x.units.map((u) => [u.name, u.available])));
-  }
-  for (const p of Object.values(data.production || {})) {
-    out.append(el("h2", { textContent: `${p.label}${p.planet ? " — planète " + p.planet : ""}` }));
-    if (p.error) { out.append(el("p", { className: "hint", textContent: `Non lue : ${p.error}` })); continue; }
-    out.append(table(["Nom", "Stock lu", "En file d'attente", "Coût d'une unité", "Bouton"], p.cards.map((c) => [
-      c.name, c.owned ?? "illisible", c.queued, Object.entries(c.costs).map(([k, v]) => `${k} ${fmt(v)}`).join(", "),
-      !c.has_controls ? "absent" : c.can_produce ? "actif" : "inactif",
-    ])));
-  }
-  for (const [key, s] of Object.entries(data.sections)) {
-    const r = s.resources;
-    out.append(
-      el("h2", { textContent: `${s.title || key} — planète ${s.planet}` }),
-      el("p", { className: "hint", textContent: `Fer ${fmt(r.fer)} · Cristal ${fmt(r.cristal)} · Éther ${fmt(r.ether)} · Énergie ${fmt(r.energie)}` }),
-      table(["Nom", "Niveau", "Coût", "Durée", "Bouton"], s.cards.map((c) => [
-        c.name, c.level ?? "?", Object.entries(c.costs).map(([k, v]) => `${k} ${fmt(v)}`).join(", "), dur(c.duration_s),
-        c.action + (c.enabled ? "" : " (inactif)"),
-      ])),
-    );
-  }
-});
-
-setTab(TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "log");
 refresh();
 setInterval(refresh, 2000);
