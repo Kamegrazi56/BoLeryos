@@ -20,11 +20,13 @@ from pydantic import BaseModel, Field, SecretStr
 
 from .bot import BotSession
 from .config import Settings, load_settings
+from .components import COMPONENTS
 from .constructions import BUILDINGS, ConstructionError
 from .populations import POPULATIONS, PopulationError
 from .researches import RESEARCHES, ResearchError
 from .features import FeaturesError
 from .preferences import MAX_UNIVERSE_LENGTH, PreferencesError
+from .quantities import LineError
 
 STATIC_DIR = Path(__file__).parent / "static"
 NO_STORE = {"Cache-Control": "no-store"}
@@ -89,10 +91,23 @@ class PopulationLine(BaseModel):
     mode: str = Field(max_length=10)
     amount: int = Field(default=0, ge=0, le=10**12)
     planet: str = Field(default="", max_length=200)
+    repeat: bool = True
 
 
 class PopulationsRequest(BaseModel):
     queue: list[PopulationLine] = Field(default_factory=list, max_length=500)
+
+
+class QuantityLine(BaseModel):
+    item: str = Field(max_length=200)
+    mode: str = Field(max_length=10)
+    amount: int = Field(default=0, ge=0, le=10**12)
+    planets: list[str] = Field(default_factory=list, max_length=200)
+    repeat: bool = True
+
+
+class QuantityRequest(BaseModel):
+    queue: list[QuantityLine] = Field(default_factory=list, max_length=500)
 
 
 class OrderRequest(BaseModel):
@@ -417,6 +432,60 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             saved = bot.populations.replace(body.model_dump(), _known_planets)
         except PopulationError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        return JSONResponse({"settings": saved}, headers=NO_STORE)
+
+    # --- Chantier spatial : scan des modèles, Assemblages (vaisseaux) et Composants ---------------
+    @app.get("/api/models")
+    async def api_models():
+        """Dernier scan des modèles de vaisseaux (liste lue dans l'onglet Assemblages, date, origine, erreur éventuelle)."""
+        return JSONResponse({**bot.supervisor.models_summary(), "known": bot.supervisor.known_models()}, headers=NO_STORE)
+
+    @app.post("/api/models/scan")
+    async def api_models_scan(request: Request):
+        """Relit tout de suite les modèles dans le jeu (le bot doit être dans une partie)."""
+        _check_origin(request)
+        return JSONResponse({**await bot.supervisor.scan_models("manuel"), "known": bot.supervisor.known_models()}, headers=NO_STORE)
+
+    @app.get("/api/ships")
+    async def api_ships():
+        return JSONResponse(
+            {
+                "settings": bot.ships.get(),
+                "models": bot.supervisor.known_models(),
+                "planets": _known_planets(),
+                "persistent": bot.ships.persistent,
+            },
+            headers=NO_STORE,
+        )
+
+    @app.put("/api/ships")
+    async def api_ships_put(body: QuantityRequest, request: Request):
+        _check_origin(request)
+        try:
+            saved = bot.ships.replace(body.model_dump(), _known_planets, bot.supervisor.known_models)
+        except LineError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        return JSONResponse({"settings": saved}, headers=NO_STORE)
+
+    @app.get("/api/components")
+    async def api_components():
+        return JSONResponse(
+            {
+                "settings": bot.components.get(),
+                "components": [{"id": c.id, "label": c.label, "category": c.category} for c in COMPONENTS],
+                "planets": _known_planets(),
+                "persistent": bot.components.persistent,
+            },
+            headers=NO_STORE,
+        )
+
+    @app.put("/api/components")
+    async def api_components_put(body: QuantityRequest, request: Request):
+        _check_origin(request)
+        try:
+            saved = bot.components.replace(body.model_dump(), _known_planets)
+        except LineError as exc:
             raise HTTPException(422, detail=exc.errors) from exc
         return JSONResponse({"settings": saved}, headers=NO_STORE)
 

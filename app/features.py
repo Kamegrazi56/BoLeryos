@@ -41,6 +41,14 @@ async def _run_populations(bot) -> str:
     return await bot.recruiter.run_pass()
 
 
+async def _run_ships(bot) -> str:
+    return await bot.shipper.run_pass()
+
+
+async def _run_components(bot) -> str:
+    return await bot.producer.run_pass()
+
+
 async def _run_test(bot) -> str:
     return "passage de test : rien n'a été fait dans le jeu"
 
@@ -51,6 +59,8 @@ FEATURES: tuple[Feature, ...] = (
     Feature("constructions", "Constructions de bâtiments", "Monte les bâtiments de la liste (onglet Constructions), dans l'ordre de priorité, jusqu'au niveau voulu : clique sur « Améliorer » et dépense les ressources du jeu.", _run_constructions),
     Feature("researches", "Recherches du Laboratoire", "Lance les recherches de la liste (onglet Recherches), dans l'ordre de priorité, jusqu'au niveau voulu : clique sur « Rechercher » sur la planète chargée des recherches et dépense ses ressources. Une seule recherche à la fois.", _run_researches),
     Feature("populations", "Recrutement de population", "Recrute les populations de la liste (onglet Population) : quantité fixe ou MAX à chaque passage, ou effectif à atteindre, population par population et planète par planète. Clique sur « Recruter » et dépense les ressources de la planète.", _run_populations),
+    Feature("ships", "Assemblages de vaisseaux", "Construit les vaisseaux de la liste (onglet Assemblages) : quantité fixe ou MAX à chaque passage ou une seule fois, ou effectif à atteindre, sur toutes les planètes, une seule ou plusieurs. Construit avec des ressources (mode Construction), clique sur « Lancer » et dépense les ressources de la planète.", _run_ships),
+    Feature("components", "Production de composants", "Produit les composants de la liste (onglet Composants) : quantité fixe ou MAX à chaque passage ou une seule fois, ou effectif à atteindre, sur toutes les planètes, une seule ou plusieurs. Clique sur « Produire » et dépense les ressources de la planète.", _run_components),
     Feature("test", "Test (ne fait rien)", "Écrit une ligne dans le journal à chaque passage. À retirer quand les vraies fonctionnalités arrivent.", _run_test),
 )
 

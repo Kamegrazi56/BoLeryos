@@ -105,7 +105,7 @@ def test_the_removed_features_have_no_settings_and_no_routes(ui):
     page, _, _ = ui
     page.goto(page.base + "/reglages")
     tabs = [t.strip().lower() for t in page.locator("[role=tab]").all_inner_texts()]
-    assert tabs == ["compte et univers", "fonctionnalités", "constructions", "recherches", "population"]
+    assert tabs == ["compte et univers", "fonctionnalités", "constructions", "recherches", "population", "assemblages", "composants"]
     for tab in tabs:  # aucune section supprimée ne réapparaît, quel que soit l'onglet
         page.click(f"[role=tab]:has-text('{tab}')", strict=False)
         text = page.inner_text("main").lower()
@@ -329,33 +329,33 @@ def test_population_panel_sets_mode_quantity_and_planet_for_each_population(ui):
     page.wait_for_function("document.querySelectorAll('#pop-add-planet option').length > 1", timeout=10000)
     assert page.locator("#pop-add-population optgroup").evaluate_all("g => g.map(x => x.label)") == ["Assaut", "Logistique", "Administration"]
     page.select_option("#pop-add-population", "pilote")
-    page.select_option("#pop-add-mode", "target")
+    page.select_option("#pop-add-mode", "target:0")
     page.fill("#pop-add-amount", "100")
     page.select_option("#pop-add-planet", "6-79-Egide")
     page.click("#pop-add")
     page.select_option("#pop-add-population", "mineur")
-    page.select_option("#pop-add-mode", "max")
+    page.select_option("#pop-add-mode", "max:0")  # MAX une seule fois
     page.select_option("#pop-add-planet", "")  # toutes les planètes
     assert page.locator("#pop-add-amount-label").is_hidden()  # MAX : pas de quantité
     page.click("#pop-add")
     page.wait_for_function("document.querySelector('#pop-msg').textContent.includes('Enregistré')", timeout=5000)
     assert app.state.bot.populations.get()["queue"] == [
-        {"population": "pilote", "mode": "target", "amount": 100, "planet": "6-79-Egide"},
-        {"population": "mineur", "mode": "max", "amount": 0, "planet": ""},
+        {"population": "pilote", "mode": "target", "amount": 100, "planet": "6-79-Egide", "repeat": False},
+        {"population": "mineur", "mode": "max", "amount": 0, "planet": "", "repeat": False},
     ]
-    page.select_option("select[aria-label='Mode de Mineur']", "fixed")
+    page.select_option("select[aria-label='Mode de Mineur']", "fixed:0")
     page.fill("input[aria-label='Quantité de Mineur']", "25")
     page.click("button[aria-label='Monter : Mineur']")
     page.wait_for_function("document.querySelector('#pop-msg').textContent.includes('Enregistré')", timeout=5000)
-    assert [(ln["population"], ln["mode"], ln["amount"]) for ln in app.state.bot.populations.get()["queue"]] == [("mineur", "fixed", 25), ("pilote", "target", 100)]
+    assert [(ln["population"], ln["mode"], ln["amount"], ln["repeat"]) for ln in app.state.bot.populations.get()["queue"]] == [("mineur", "fixed", 25, False), ("pilote", "target", 100, False)]
     assert errors == []
 
 
-def test_settings_page_has_five_tabs_and_only_one_panel_shows_at_a_time(ui):
+def test_settings_page_has_seven_tabs_and_only_one_panel_shows_at_a_time(ui):
     page, errors, _ = ui
     page.goto(page.base + "/reglages")
-    ids = ["account", "features", "constructions", "researches", "populations"]
-    assert page.locator("[role=tab]").count() == 5
+    ids = ["account", "features", "constructions", "researches", "populations", "ships", "components"]
+    assert page.locator("[role=tab]").count() == 7
     for tab in ids:
         page.click(f"#tab-{tab}")
         assert page.get_attribute(f"#tab-{tab}", "aria-selected") == "true"
@@ -368,5 +368,61 @@ def test_settings_page_has_five_tabs_and_only_one_panel_shows_at_a_time(ui):
     page.press("#tab-researches", "ArrowRight")
     assert page.locator("#panel-populations").is_visible()
     page.press("#tab-populations", "ArrowRight")
+    assert page.locator("#panel-ships").is_visible()
+    page.press("#tab-ships", "ArrowRight")
+    assert page.locator("#panel-components").is_visible()
+    page.press("#tab-components", "ArrowRight")
     assert page.locator("#panel-account").is_visible()
+    assert errors == []
+
+
+def test_ships_panel_scans_the_models_then_sets_mode_quantity_and_several_planets(ui):
+    page, errors, app = ui
+    page.click("#scan-run")
+    page.wait_for_function("document.querySelectorAll('#scan-list tr').length === 4", timeout=10000)
+    page.goto(page.base + "/reglages#ships")
+    assert page.locator("#shp-add").is_disabled()  # aucun modèle connu tant que le scan n'a pas eu lieu
+    page.click("#shp-scan")
+    page.wait_for_function("document.querySelectorAll('#shp-scan-list li').length === 3", timeout=10000)
+    assert "3 modèle(s)" in page.inner_text("#shp-scan-status")
+    page.wait_for_function("document.querySelectorAll('#shp-add-item option').length === 3", timeout=10000)
+    page.select_option("#shp-add-item", "Anode")
+    page.select_option("#shp-add-mode", "target:0")
+    page.fill("#shp-add-amount", "60")
+    page.click("#shp-add-planets summary")
+    page.wait_for_function("document.querySelectorAll('#shp-add-planets input').length === 4", timeout=10000)
+    page.uncheck("#shp-add-planets input[aria-label^='Toutes']")
+    page.check("#shp-add-planets input[aria-label^='6-79-Egide']")
+    page.check("#shp-add-planets input[aria-label^='9-169-Strate']")
+    page.click("#shp-add")
+    page.select_option("#shp-add-item", "Plasmatique")
+    page.select_option("#shp-add-mode", "max:0")
+    page.click("#shp-add-planets summary")  # le formulaire garde le dernier choix de planètes : on revient à « toutes »
+    page.check("#shp-add-planets input[aria-label^='Toutes']")
+    assert page.locator("#shp-add-amount-label").is_hidden()  # MAX : pas de quantité
+    page.click("#shp-add")
+    page.wait_for_function("document.querySelector('#shp-msg').textContent.includes('Enregistré')", timeout=5000)
+    assert app.state.bot.ships.get()["queue"] == [
+        {"item": "Anode", "mode": "target", "amount": 60, "planets": ["6-79-Egide", "9-169-Strate"], "repeat": False},
+        {"item": "Plasmatique", "mode": "max", "amount": 0, "planets": [], "repeat": False},
+    ]
+    page.select_option("select[aria-label='Mode de Plasmatique']", "fixed:1")
+    page.fill("input[aria-label='Quantité de Plasmatique']", "3")
+    page.click("button[aria-label='Monter : Plasmatique']")
+    page.wait_for_function("document.querySelector('#shp-msg').textContent.includes('Enregistré')", timeout=5000)
+    assert [(ln["item"], ln["mode"], ln["amount"], ln["repeat"]) for ln in app.state.bot.ships.get()["queue"]] == [("Plasmatique", "fixed", 3, True), ("Anode", "target", 60, False)]
+    assert errors == []
+
+
+def test_a_line_removed_by_the_bot_disappears_from_the_page(ui):
+    page, errors, app = ui
+    page.goto(page.base + "/reglages#components")
+    page.wait_for_function("document.querySelectorAll('#cmp-add-item option').length === 37", timeout=5000)
+    assert page.locator("#cmp-add-item optgroup").evaluate_all("g => g.map(x => x.label)") == ["Infrastructures", "Hangars", "Armement", "Blindages", "Boucliers", "Propulsion"]
+    page.select_option("#cmp-add-item", "canon-laser")
+    page.click("#cmp-add")
+    page.wait_for_function("document.querySelector('#cmp-msg').textContent.includes('Enregistré')", timeout=5000)
+    assert page.locator("#cmp-queue li[data-item='canon-laser']").count() == 1
+    app.state.bot.components.replace({"queue": []})  # le bot retire la ligne atteinte
+    page.wait_for_function("document.querySelectorAll('#cmp-queue li.empty-state').length === 1", timeout=8000)
     assert errors == []

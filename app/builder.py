@@ -27,6 +27,8 @@ COOLDOWN_MARGIN = 1.1  # on attend la durée lue + 10 % avant de recliquer sur l
 COOLDOWN_EXTRA_SECONDS = 30.0
 UNCONFIRMED_LIMIT = 2  # lancements non confirmés de suite avant désactivation
 PLANET_SWITCH_SECONDS = 6.0
+SETTLE_SECONDS = 10.0  # attente maximale que la page affiche les chiffres de la NOUVELLE planète
+SETTLE_POLL_SECONDS = 0.4
 PLANET_BUTTON_LABEL = "Sélectionner la planète active"
 PAGE_PATHS = {"Industrie": "buildings", "Infrastructures": "facilities"}
 
@@ -103,6 +105,9 @@ class ConstructionPass:
         self.bot = bot
         self._cooldown: dict[tuple[str, str], float] = {}  # (planète, bâtiment) → fin présumée de la construction
         self._unconfirmed = 0
+        self._reached: dict[str, set[str]] = {}  # bâtiment → planètes où le niveau cible est atteint (passage en cours)
+        self._last_planet: str | None = None  # dernière planète traitée et ce que la page affichait à la fin de son traitement
+        self._last_sig: tuple | None = None
         self._labels = {b.id: b.label for b in BUILDINGS}
         self._pages = {b.id: b.page for b in BUILDINGS}
 
@@ -180,7 +185,7 @@ class ConstructionPass:
                 break
         if target is None:
             raise GameUiError(f"planète « {name} » absente de la liste")
-        await human.click(page, target, self.settings)
+        await human.click(page, target, self.settings)  # masquée par la barre du bas (écran bas) : human.click passe au clavier
         end = time.monotonic() + PLANET_SWITCH_SECONDS
         while time.monotonic() < end:
             if norm(await self._current_planet()) == norm(name):
@@ -188,6 +193,30 @@ class ConstructionPass:
                 return
             await asyncio.sleep(0.25)
         raise GameUiError(f"le changement vers la planète « {name} » n'a pas abouti")
+
+    # ------------------------------------------------------------------ chiffres de la bonne planète
+    async def _signature(self, read=None) -> tuple:
+        """Ce que la page affiche : les stocks, plus (selon la page) les effectifs ou niveaux lus par `read`."""
+        stocks = await self._stocks()
+        return (tuple(sorted(stocks.items())), await read() if read else ())
+
+    async def _settle(self, planet: str, read=None) -> None:
+        """Après un changement de planète : attend deux lectures identiques de la page, différentes de celles de la planète
+        précédente (sinon la page affiche encore l'ancienne planète). Échec → GameUiError : rien n'est cliqué."""
+        previous = self._last_sig if self._last_planet not in (None, planet) else None
+        end = time.monotonic() + SETTLE_SECONDS
+        last = None
+        while time.monotonic() < end:
+            signature = await self._signature(read)
+            if signature == last and signature != previous:
+                return
+            last = signature
+            await asyncio.sleep(SETTLE_POLL_SECONDS)
+        raise GameUiError(f"les chiffres affichés pour « {planet} » ne sont pas stables ou sont ceux de la planète précédente, rien n'a été fait")
+
+    async def _remember(self, planet: str, read=None) -> None:
+        """Note ce que la page affiche une fois la planète traitée, pour détecter une page pas encore rafraîchie ensuite."""
+        self._last_planet, self._last_sig = planet, await self._signature(read)
 
     # ------------------------------------------------------------------ lancement
     async def _upgrade(self, label: str) -> None:
@@ -230,9 +259,11 @@ class ConstructionPass:
             return "aucune planète connue : lancez un scan des planètes (Réglages › Compte et univers)"
         launched: list[str] = []
         waiting = 0
+        self._reached = {}
         try:
             for planet in planets:
                 outcome = await self._planet(planet, settings["queue"])
+                await self._remember(planet)
                 if outcome is None:
                     waiting += 1
                 else:
@@ -242,7 +273,14 @@ class ConstructionPass:
         except GameUiError as exc:
             self.bot.log(f"Constructions : {exc}.", "warn", event=True)
             return self._summary(launched, waiting, f"arrêté ({exc})")
+        self._drop_reached(settings["queue"], planets)
         return self._summary(launched, waiting, "")
+
+    def _drop_reached(self, queue: list[dict], planets: list[str]) -> None:
+        """Retire de la liste les lignes dont le niveau cible est atteint sur TOUTES les planètes visées (passage complet seulement)."""
+        finished = [(ln["building"], ln["level"]) for ln in queue if set(planets) <= self._reached.get(ln["building"], set())]
+        for building, level in self.bot.constructions.drop(finished):
+            self.bot.log(f"Construction : {self._labels[building]} a atteint le niveau {level} sur toutes les planètes visées, ligne retirée de la liste.", event=True, kind="launch")
 
     @staticmethod
     def _summary(launched: list[str], waiting: int, stop: str) -> str:
@@ -261,11 +299,16 @@ class ConstructionPass:
                 tabs.append(tab)
         await self._open_page(tabs[0])
         await self._select_planet(planet)
+        await self._settle(planet)
         cards: dict[str, tuple[str, Card]] = {}
         for tab in tabs:
             await self._open_page(tab)
             for key, card in (await self._read_cards()).items():
                 cards[key] = (tab, card)
+        for line in queue:  # lignes déjà atteintes sur cette planète (retirées en fin de passage si c'est vrai partout)
+            seen = cards.get(norm(self._labels[line["building"]]))
+            if seen is not None and seen[1].level is not None and seen[1].level >= line["level"]:
+                self._reached.setdefault(line["building"], set()).add(planet)
         for line in queue:  # ordre de la liste = priorité
             label = self._labels[line["building"]]
             found = cards.get(norm(label))

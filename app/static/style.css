@@ -338,3 +338,10 @@ dialog.modal ul.missing li { margin: 8px 0; }
 .cons-queue input[type="number"] { width: 90px; }
 .scope { border: 0; padding: 0; margin: 8px 0; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .scope legend { color: var(--muted); font-size: 13px; padding: 0; margin-bottom: 4px; }
+
+/* Chantier spatial : choix de la ou des planètes d'une ligne */
+.planet-picker { display: inline-block; position: relative; }
+.planet-picker > summary { cursor: pointer; padding: 4px 8px; border: 1px solid var(--line, #2a3a5a); border-radius: 6px; list-style: none; }
+.planet-picker[open] > summary { border-color: var(--accent, #3ab4ff); }
+.planet-picker label { display: block; padding: 2px 8px; white-space: nowrap; }
+.picker-slot { display: inline-block; }

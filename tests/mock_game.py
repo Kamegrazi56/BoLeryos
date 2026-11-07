@@ -64,10 +64,14 @@ def _prod_items():
         it("defense", "Sentinelle de Rempart", {"Fer": 2093, "Cristal": 251}, 19962),
         it("defense", "Faisceau de Verrouillage", {"Fer": 4186, "Cristal": 3349}, 436),
         it("defense", "Éclateur Ionique", {"Fer": 10047, "Cristal": 8373, "Éther": 418}, 8694),
-        it("component", "Chasseur", {"Fer": 436, "Cristal": 87, "Éther": 43}, 0),
-        it("component", "Destroyer", {"Fer": 479710, "Cristal": 104664, "Éther": 71520}, 91),
-        it("ship", "Anode", {"Fer": 410152, "Cristal": 100311, "Éther": 95959}, 47),
-        it("ship", "Plasmatique", {"Fer": 1.5e9, "Cristal": 1e6, "Éther": 1e6}, 0),
+        it("component", "Chasseur", {"Fer": 431, "Cristal": 86, "Éther": 43}, 0, "Infrastructures"),
+        it("component", "Destroyer", {"Fer": 475145, "Cristal": 103668, "Éther": 70839}, 50, "Infrastructures"),
+        it("component", "Canon laser", {"Fer": 431, "Cristal": 86, "Éther": 0}, 100, "Armement"),
+        it("component", "Coque des Monarques", {"Fer": 1727, "Cristal": 431, "Éther": 431}, 0, "Blindages"),
+        it("component", "Réacteur antimatière", {"Fer": 38875, "Cristal": 17278, "Éther": 25917}, 100, "Propulsion"),
+        it("ship", "Anode", {"Fer": 410152, "Cristal": 100311, "Éther": 95959}, 47, "Militaire"),
+        it("ship", "Plasmatique", {"Fer": 1.5e9, "Cristal": 1e6, "Éther": 1e6}, 0, "Militaire"),
+        it("ship", "Transpo civil cuir", {"Fer": 406248, "Cristal": 99357, "Éther": 95046}, 0, "Civil"),
     ]
     return items
 
@@ -90,6 +94,7 @@ def initial_state():
         "active": 0,
         "close_on_select": True,
         "no_debit": False,
+        "slow_build": False,  # vaisseaux et composants : l'effectif n'augmente qu'à la fin de la fabrication
         "popup_after_click": False,
         "require_auth": False,  # vrai : connexion → choix de l'univers → partie, avec session qui peut expirer
         "logged_in": False,
@@ -202,21 +207,25 @@ function prodMain(p, s) {
     return '<h2>DÉFENSE</h2><div data-testid="defense-grid"><div class="card"><h3>Iris des Piliers</h3><button type="button">Activer +1</button></div>'
       + items('defense').map((i) => prodCard(i, 'Lancer')).join('') + '</div>';
   }
-  const tabs = ['Assemblages', 'Réparation', 'Composants', 'Modèle', 'Recyclage'].map((t) => `<button type="button" class="stab" data-stab="${t}">${t}</button>`).join('');
+  const tabs = ['Assemblages', 'Réparation', 'Composants', 'Modèle', 'Recyclage'].map((t) => `<button type="button" role="tab" class="stab" data-stab="${t}">${t}</button>`).join('');
   if (ui.ship === 'Composants') {
-    const rows = items('component').map((i) => `<div data-testid="component-production-row"><div data-testid="component-row-layout"><span>${i.name}</span>`
-      + `<span>×${i.owned}</span><div data-testid="component-row-cost">${costLeaves(i.costs)}</div>`
-      + `<div data-testid="component-row-controls"><input type="number" placeholder="Qté"><button type="button" data-max="1">MAX</button>`
-      + `<button type="button" class="prod" data-section="component" data-name="${i.name}"></button></div></div></div>`).join('');
-    return '<h2>Chantier spatial</h2><div>' + tabs + '</div><div data-testid="component-stock-summary"><span>Gestion des stocks</span></div><div>' + rows + '</div>';
+    const rows = items('component').map((i) => `<div class="crow"><div><span title="${i.name}">${i.name}</span><span>×${int(i.owned)}</span></div>`
+      + `<div><span title="Capacité de fret">400</span><span title="Unités logistiques">1 UL</span></div>`
+      + `<div><div>${costLeaves(i.costs)}</div><span>1,00 s<svg width="8" height="8"></svg></span></div>`
+      + `<div><input type="number" placeholder="Qté"><button type="button" data-max="1">MAX</button>`
+      + `<button type="button" class="prod" title="Produire" data-section="component" data-name="${i.name}"><svg width="8" height="8"></svg></button></div></div>`).join('');
+    return '<h2>Chantier spatial</h2><div>' + tabs + '</div><h3>Gestion des stocks</h3><div>' + rows + '</div>';
   }
-  const cost = (c) => Object.entries(c).map(([k, v]) => `<span aria-label="${k.toUpperCase()} : ${kfmt(v)}">${kfmt(v)}</span>`).join('');
-  const ships = items('ship').map((i) => `<article data-testid="ship-assembly-card"><button type="button"><span>${i.name}</span><span>En service : <b>${i.owned}</b></span><span>MILITAIRE</span></button>`
-    + `<section data-testid="ship-production-control"><button type="button" class="mode" data-mode="construction">Construction</button><button type="button" class="mode" data-mode="assemblages">Assemblages</button>`
-    + `<div>${cost(i.costs)}</div><div data-testid="ship-production-quantity-row"><button type="button" aria-label="Qté -">-</button><input type="number" placeholder="1" aria-label="Qté">`
-    + `<button type="button" aria-label="Qté +">+</button><button type="button" data-max="1">MAX</button><button type="button" class="prod" data-section="ship" data-name="${i.name}">Lancer</button></div></section></article>`).join('');
-  const catalogue = '<article data-testid="ship-assembly-card"><button type="button"><span>Intercepteur</span><span>Inactif</span></button><button type="button">Ajouter à mes modèles</button></article>';
-  return '<h2>Chantier spatial</h2><div>' + tabs + '</div><div data-testid="ship-assembly-grid">' + ships + '</div><div data-testid="shipyard-catalog-grid">' + catalogue + '</div>';
+  if (ui.ship !== 'Assemblages') return '<h2>Chantier spatial</h2><div>' + tabs + '</div><p>Aucun vaisseau endommagé à réparer</p>';
+  const cost = (c) => Object.entries(c).map(([k, v]) => `<span aria-label="${k.toUpperCase()} : ${kfmt(v)}">${kfmt(v)}<img alt=""></span>`).join('');
+  const ships = items('ship').map((i) => `<article><div><button type="button"><span class="truncate">${i.name}</span><span>En service : ${i.owned}<svg width="8" height="8"></svg></span><span>${i.tab}</span></button></div>`
+    + `<div><span>Actif</span></div><section><div><button type="button" class="mode" aria-pressed="${state.ship_mode === 'construction'}" data-mode="construction">Construction</button>`
+    + `<button type="button" class="mode" aria-pressed="${state.ship_mode === 'assemblages'}" data-mode="assemblages">Assemblages</button></div>`
+    + (state.ship_mode === 'construction' ? `<div>${cost(i.costs)}</div>` : '<div><b>Composants insuffisants</b></div>')
+    + `<div><button type="button" aria-label="Qté -">-</button><input type="number" placeholder="1" aria-label="Qté"><button type="button" aria-label="Qté +">+</button>`
+    + `<button type="button" data-max="1">MAX</button><span>1,00 s<svg width="8" height="8"></svg></span>`
+    + `<button type="button" class="prod" data-section="ship" data-name="${i.name}">${state.ship_mode === 'construction' ? 'Lancer' : 'Composants insuffisants'}</button></div></section></article>`).join('');
+  return '<h2>Chantier spatial</h2><h3>Actifs — Militaire : 6 · Civil : 3 · Total : 9/11</h3><div>' + tabs + '</div><div>' + ships + '</div>';
 }
 function galaxyMain() {
   const rows = state.galaxy.map((r) => {
@@ -426,8 +435,8 @@ def create_mock_game() -> FastAPI:
                 planet["stocks"][k] -= v * qty
         if g["no_debit"]:
             pass  # clic sans aucun effet visible : ni débit, ni file d'attente
-        elif body["section"] == "population":
-            item["queue"] += qty  # la population est entraînée : elle apparaît dans la file d'attente
+        elif body["section"] == "population" or g.get("slow_build"):
+            item["queue"] += qty  # entraînement ou fabrication longue : l'effectif n'augmente qu'à la fin (voir _complete)
         else:
             item["owned"] += qty
         g["actions"].append({"kind": "production", "section": body["section"], "planet": planet["name"], "name": item["name"],
@@ -471,7 +480,7 @@ def create_mock_game() -> FastAPI:
         app.state.game = initial_state()
         patch = await request.json() if (await request.body()) else {}
         g = app.state.game
-        for key in ("close_on_select", "no_debit", "popup_after_click", "require_auth"):
+        for key in ("close_on_select", "no_debit", "popup_after_click", "require_auth", "slow_build"):
             if key in patch:
                 g[key] = patch[key]
         for index, energy in (patch.get("energy") or {}).items():

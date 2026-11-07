@@ -30,6 +30,8 @@
         <button role="tab" id="tab-constructions" data-tab="constructions" aria-controls="panel-constructions">Constructions</button>
         <button role="tab" id="tab-researches" data-tab="researches" aria-controls="panel-researches">Recherches</button>
         <button role="tab" id="tab-populations" data-tab="populations" aria-controls="panel-populations">Population</button>
+        <button role="tab" id="tab-ships" data-tab="ships" aria-controls="panel-ships">Assemblages</button>
+        <button role="tab" id="tab-components" data-tab="components" aria-controls="panel-components">Composants</button>
       </div>
       <span id="save-msg" class="save-state" role="status" aria-live="polite"></span>
     </div>
@@ -118,6 +120,38 @@
       </div>
       <p id="pop-msg" class="msg" role="status" aria-live="polite"></p>
     </section>
+    <section class="tabpanel card" id="panel-ships" role="tabpanel" aria-labelledby="tab-ships" hidden>
+      <h2 id="shp-title">Assemblages : construction de vaisseaux</h2>
+      <p class="hint">Chaque ligne règle <strong>un modèle de vaisseau</strong> (créé dans le jeu, onglet Modèle) : <strong>quantité fixe</strong> ou <strong>MAX</strong>, <strong>à chaque passage</strong> ou <strong>une seule fois</strong> (une fois par planète, puis la ligne disparaît), ou <strong>effectif à atteindre</strong> (le bot construit ce qui manque, planète par planète, puis la ligne disparaît). Planètes : toutes, une seule ou plusieurs. Le bot construit <strong>uniquement avec des ressources</strong> (mode « Construction » de la carte, jamais « Assemblages »). L'ordre de la liste est la priorité. Quand la fonctionnalité « Assemblages de vaisseaux » est activée (onglet Fonctionnalités) et le bot sur ON, il clique sur « Lancer » et <strong>dépense les ressources de la planète</strong> : attention au MAX, qui vide les stocks.</p>
+      <div class="row">
+        <button id="shp-scan" type="button">Scanner les modèles</button>
+        <span id="shp-scan-msg" class="hint" role="status" aria-live="polite"></span>
+      </div>
+      <p id="shp-scan-status" class="status-line" role="status" aria-live="polite">Aucun scan pour l'instant.</p>
+      <ul id="shp-scan-list" class="hint"></ul>
+      <ol id="shp-queue" class="cons-queue"></ol>
+      <div class="row">
+        <label>Ajouter <select id="shp-add-item" aria-label="Modèle à ajouter"></select></label>
+        <label>mode <select id="shp-add-mode" aria-label="Mode de construction"></select></label>
+        <label id="shp-add-amount-label">quantité <input id="shp-add-amount" type="number" min="1" step="1" value="1"></label>
+        <span id="shp-add-planets" class="picker-slot"></span>
+        <button id="shp-add" type="button">Ajouter à la liste</button>
+      </div>
+      <p id="shp-msg" class="msg" role="status" aria-live="polite"></p>
+    </section>
+    <section class="tabpanel card" id="panel-components" role="tabpanel" aria-labelledby="tab-components" hidden>
+      <h2 id="cmp-title">Composants : production</h2>
+      <p class="hint">Chaque ligne règle <strong>un composant</strong> (37 au total, en 6 catégories) : <strong>quantité fixe</strong> ou <strong>MAX</strong>, <strong>à chaque passage</strong> ou <strong>une seule fois</strong> (une fois par planète, puis la ligne disparaît), ou <strong>effectif à atteindre</strong> (le bot produit ce qui manque, planète par planète, puis la ligne disparaît). Planètes : toutes, une seule ou plusieurs. L'ordre de la liste est la priorité. Quand la fonctionnalité « Production de composants » est activée (onglet Fonctionnalités) et le bot sur ON, il clique sur « Produire » et <strong>dépense les ressources de la planète</strong> : attention au MAX, qui vide les stocks.</p>
+      <ol id="cmp-queue" class="cons-queue"></ol>
+      <div class="row">
+        <label>Ajouter <select id="cmp-add-item" aria-label="Composant à ajouter"></select></label>
+        <label>mode <select id="cmp-add-mode" aria-label="Mode de production"></select></label>
+        <label id="cmp-add-amount-label">quantité <input id="cmp-add-amount" type="number" min="1" step="1" value="1"></label>
+        <span id="cmp-add-planets" class="picker-slot"></span>
+        <button id="cmp-add" type="button">Ajouter à la liste</button>
+      </div>
+      <p id="cmp-msg" class="msg" role="status" aria-live="polite"></p>
+    </section>
   </main>
   <script src="/static/shell.js"></script>
   <script src="/static/reglages.js"></script>
@@ -125,5 +159,6 @@
   <script src="/static/constructions.js"></script>
   <script src="/static/recherches.js"></script>
   <script src="/static/population.js"></script>
+  <script src="/static/chantier.js"></script>
 </body>
 </html>

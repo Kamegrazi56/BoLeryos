@@ -15,12 +15,12 @@ from pathlib import Path
 MAX_UNIVERSE_LENGTH = 60
 MAX_DELAY_SECONDS = 60.0
 MAX_SUGGESTIONS = 200
-CATALOG_KINDS = ("universes", "planets")
+CATALOG_KINDS = ("universes", "planets", "models")
 
 DEFAULTS: dict = {
     "universe": "",  # univers où entrer automatiquement (nom affiché sur la page de choix) ; vide = demander
     "login_delay": {"min_seconds": 0.4, "max_seconds": 1.4},  # pause avant chaque clic ou saisie de la connexion
-    "catalog": {"universes": [], "planets": []},  # suggestions, entretenues par le bot
+    "catalog": {"universes": [], "planets": [], "models": []},  # suggestions, entretenues par le bot
 }
 
 
@@ -113,6 +113,13 @@ class Preferences:
         fresh = {n.strip() for n in names if n.strip()} - known
         if fresh:
             self._data["catalog"][kind] = sorted(known | fresh)[:MAX_SUGGESTIONS]
+            self._save()
+
+    def set_catalog(self, kind: str, names: list[str]) -> None:
+        """Remplace la liste (les modèles supprimés dans le jeu disparaissent au scan suivant)."""
+        fresh = sorted({n.strip() for n in names if n.strip()})[:MAX_SUGGESTIONS]
+        if fresh != self._data["catalog"][kind]:
+            self._data["catalog"][kind] = fresh
             self._save()
 
     def _save(self) -> None:

@@ -125,6 +125,15 @@ class ResearchSettings:
         self._save()
         return self.get()
 
+    def drop(self, finished: list[tuple[str, int]]) -> list[tuple[str, int]]:
+        """Retire les lignes (id, niveau cible) atteintes ; une ligne modifiée entre-temps reste. Retourne celles retirées."""
+        wanted = set(finished)
+        gone = [(ln["research"], ln["level"]) for ln in self._data["queue"] if (ln["research"], ln["level"]) in wanted]
+        if gone:
+            self._data = {**self._data, "queue": [ln for ln in self._data["queue"] if (ln["research"], ln["level"]) not in wanted]}
+            self._save()
+        return gone
+
     def _save(self) -> None:
         if not self._path:
             return

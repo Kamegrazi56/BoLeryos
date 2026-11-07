@@ -2,7 +2,7 @@
 
 Un passage (`run_pass`) parcourt les planètes (toutes celles du scan) ; sur chacune, il applique les lignes de la liste qui la
 concernent, dans l'ordre de priorité, UNE SEULE ligne par population (la première de la liste qui s'applique). Pour chaque ligne :
-  - « fixed » : recrute N unités ; « max » : clique sur MAX ; « target » : recrute ce qui manque pour atteindre l'effectif voulu ;
+  - « fixed » : recrute N unités ; « max » : clique sur MAX (à chaque passage, ou une seule fois par planète si `repeat` est faux) ; « target » : recrute ce qui manque pour atteindre l'effectif voulu ;
   - le bot clique d'abord sur MAX pour connaître le maximum payable selon le jeu, puis ne demande jamais plus que ce maximum
     (quantité = minimum entre ce qui est voulu et ce qui est payable ; rien si l'on ne peut pas payer une seule unité).
 Les populations sont indépendantes : chaque ligne a son mode, sa quantité et sa planète.
@@ -27,7 +27,7 @@ from .populations import POPULATIONS
 
 TAB_SWITCH_SECONDS = 8.0
 TARGET_ATTRIBUTE = "data-bot-target"
-UNVERIFIABLE_WAIT_SECONDS = 3.0
+UNVERIFIABLE_WAIT_SECONDS = 6.0  # débit invisible : le jeu met ~3 s (« Validation par le serveur ») avant d'afficher l'effectif à jour
 COST_KEYS = {"F": "Fer", "C": "Cristal", "E": "Éther"}
 
 _PRELUDE_JS = """
@@ -105,6 +105,13 @@ MARK_POP_JS = (
 CLEAR_MARK_JS = "(attribute) => document.querySelectorAll('[' + attribute + ']').forEach((e) => e.removeAttribute(attribute))"
 
 
+async def clear_quantity(quantity) -> None:
+    """Vide le champ de quantité quand rien n'est lancé : une valeur laissée fait afficher au jeu des coûts TOTAUX, que le passage
+    suivant prendrait pour des coûts unitaires (et le jeu garde la valeur d'une planète à l'autre en Population)."""
+    if await quantity.count() and await quantity.input_value():
+        await quantity.fill("")
+
+
 def parse_count(text: str | None) -> int | None:
     """« 20 150 » → 20150 ; None si illisible."""
     cleaned = re.sub(r"[\s  ]", "", str(text or ""))
@@ -157,12 +164,17 @@ class PopulationPass(ConstructionPass):
     def __init__(self, bot) -> None:
         super().__init__(bot)
         self._pops = {p.id: p for p in POPULATIONS}
+        self._last_qty = 0  # quantité du dernier recrutement lancé
 
     # ------------------------------------------------------------------ lecture
     async def _read_pop_cards(self) -> dict[str, PopCard]:
         raw = await self._eval(READ_POP_JS)
         queue = {norm(name): count for name, count in raw["queue"].items()}
         return {norm(c["name"]): parse_card(c, queue.get(norm(c["name"]), 0)) for c in raw["cards"]}
+
+    async def _cards_signature(self) -> tuple:
+        """Effectifs et files affichés (comparés d'une lecture à l'autre pour savoir si la page est à jour)."""
+        return tuple(sorted((name, card.owned, card.queued) for name, card in (await self._read_pop_cards()).items()))
 
     async def _open_staff(self) -> None:
         page = self.page
@@ -221,22 +233,33 @@ class PopulationPass(ConstructionPass):
         try:
             for planet in planets:
                 now = time.monotonic()
-                due = [ln for ln in self._lines_for(planet, queue) if self._cooldown.get((planet, ln["population"]), 0.0) <= now]
+                due = [
+                    ln
+                    for ln in self._lines_for(planet, queue)
+                    if self._cooldown.get((planet, ln["population"]), 0.0) <= now and not self.bot.populations.is_done(ln, planet)
+                ]
                 if not due:
                     continue
                 await self._open_staff()
                 await self._select_planet(planet)
+                await self._settle(planet, self._cards_signature)
                 for line in due:
                     outcome = await self._line(planet, line)
                     if outcome is None:
                         report.idle += 1
                     else:
                         report.launched.append(outcome)
+                        if line["mode"] != "target":  # « une seule fois » : ne recommence plus sur cette planète (l'effectif à atteindre est géré dans _line)
+                            self.bot.populations.mark_done(line, planet)
+                await self._remember(planet, self._cards_signature)
         except Interrupted as exc:
             return self._report(report, f"interrompu ({exc})")
         except GameUiError as exc:
             self.bot.log(f"Population : {exc}.", "warn", event=True)
             return self._report(report, f"arrêté ({exc})")
+        for line in self.bot.populations.drop_done(planets):  # faites partout : la ligne disparaît de la liste
+            what = self._pops[line["population"]].label
+            self.bot.log(f"Population : ligne « {what} » terminée sur {line['planet'] or 'toutes les planètes'}, retirée de la liste.", event=True, kind="launch")
         return self._report(report, "")
 
     @staticmethod
@@ -272,8 +295,12 @@ class PopulationPass(ConstructionPass):
             return None
         wanted = self._wanted(line, card)
         if wanted == 0:
+            self.bot.populations.mark_done(line, planet)  # effectif déjà atteint (les lignes « à chaque passage » ne sont jamais « faites »)
             return None
-        return await self._recruit(planet, pop, card, wanted)
+        sentence = await self._recruit(planet, pop, card, wanted)
+        if sentence is not None and line["mode"] == "target" and self._last_qty == wanted:
+            self.bot.populations.mark_done(line, planet)  # tout ce qui manquait est lancé : l'effectif sera atteint
+        return sentence
 
     # ------------------------------------------------------------------ recrutement
     async def _recruit(self, planet: str, pop, card: PopCard, wanted: int | None) -> str | None:
@@ -290,6 +317,7 @@ class PopulationPass(ConstructionPass):
             await asyncio.sleep(0.3)
             affordable = parse_count(await quantity.input_value()) or 0
             if affordable < 1:
+                await clear_quantity(quantity)
                 return None  # pas de quoi payer une seule unité
             qty = affordable if wanted is None else min(wanted, affordable)
             if qty != affordable:
@@ -297,9 +325,11 @@ class PopulationPass(ConstructionPass):
                 await quantity.fill(str(qty))
                 await asyncio.sleep(0.3)
             if parse_count(await quantity.input_value()) != qty:
+                await clear_quantity(quantity)
                 raise GameUiError(f"la quantité saisie pour {pop.label} n'est pas celle demandée")
             go = box.get_by_role("button", name=re.compile(r"^Recruter\b", re.I)).first
             if not await go.count() or not await go.is_enabled():
+                await clear_quantity(quantity)
                 return None
             await self._guard()
             await human.click(page, go, self.settings)
@@ -307,6 +337,7 @@ class PopulationPass(ConstructionPass):
             await page.evaluate(CLEAR_MARK_JS, TARGET_ATTRIBUTE)
         wait = (card.unit_seconds or 1.0) * qty * COOLDOWN_MARGIN + COOLDOWN_EXTRA_SECONDS
         self._cooldown[(planet, pop.id)] = time.monotonic() + wait
+        self._last_qty = qty
         sentence = f"{qty} × {pop.label} sur {planet}"
         await self._confirm(pop, card, qty, before, sentence)
         return sentence

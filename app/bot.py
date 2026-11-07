@@ -33,10 +33,13 @@ from .explore import MAX_SNAPSHOTS, SNAPSHOT_JS, Recorder, should_skip_host
 from .preferences import Preferences
 from .builder import ConstructionPass
 from .constructions import ConstructionSettings
+from . import components
 from .populations import PopulationSettings
+from .quantities import LineSettings, LineSpec
 from .recruiter import PopulationPass
 from .researcher import ResearchPass
 from .researches import ResearchSettings
+from .shipyard import ComponentPass, ShipPass
 from .features import FEATURES, FeatureStore
 from .scheduler import Scheduler
 from .supervisor import ConnectionSupervisor
@@ -149,6 +152,10 @@ class BotSession:
         self.researcher = ResearchPass(self)  # lancement des recherches (clic sur « Rechercher »)
         self.populations = PopulationSettings(settings.data_dir)  # lignes de recrutement de population (mode, quantité, planète)
         self.recruiter = PopulationPass(self)  # recrutement (clic sur « Recruter »)
+        self.ships = LineSettings(settings.data_dir, LineSpec("ships.json", "modèle"))  # Assemblages : modèle + mode + quantité + planètes
+        self.shipper = ShipPass(self, self.ships)  # construction de vaisseaux avec des ressources (mode Construction, bouton « Lancer »)
+        self.components = LineSettings(settings.data_dir, components.SPEC)  # Composants : composant + mode + quantité + planètes
+        self.producer = ComponentPass(self, self.components)  # production de composants (bouton « Produire »)
         # Ordonnanceur des fonctionnalités (réglages enregistrés ; l'interrupteur général repasse toujours à OFF au démarrage)
         self.scheduler = Scheduler(
             self,
@@ -173,6 +180,13 @@ class BotSession:
         self._snapshot_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------ état
+    def reset_failures(self, feature_id: str) -> None:
+        """Remet à zéro les lancements non confirmés d'une fonctionnalité (appelé quand l'utilisateur la réactive)."""
+        passes = {"constructions": self.builder, "researches": self.researcher, "populations": self.recruiter,
+                  "ships": self.shipper, "components": self.producer}
+        if feature_id in passes:
+            passes[feature_id]._unconfirmed = 0
+
     def log(self, message: str, level: str = "info", event: bool = False, kind: str = "info") -> None:
         """`event` : fait marquant, affiché dans « Derniers événements » et le journal lisible.
         `kind` : « attention » signale une intervention nécessaire (c'est aussi un fait marquant)."""

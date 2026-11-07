@@ -10,7 +10,7 @@ from app.features import FEATURES
 from app.main import create_app
 from app.populations import POPULATIONS, PopulationError, PopulationSettings, describe, validate
 
-FIXED = {"population": "pilote", "mode": "fixed", "amount": 50, "planet": ""}
+FIXED = {"population": "pilote", "mode": "fixed", "amount": 50, "planet": "", "repeat": True}
 PLANET = "6-79-Egide"
 
 
@@ -62,6 +62,7 @@ def test_the_same_population_can_have_one_line_per_planet_but_not_two_for_the_sa
         {"population": "pilote", "mode": "fixed", "amount": "5", "planet": ""},
         {"population": "pilote", "mode": "fixed", "amount": 5_000_000_000, "planet": ""},
         {"population": "pilote", "mode": "fixed", "amount": 5, "planet": 12},
+        {"population": "pilote", "mode": "fixed", "amount": 5, "planet": "", "repeat": "non"},
         "pilote",
     ],
 )
@@ -82,6 +83,8 @@ def test_describe_gives_a_readable_sentence():
     assert describe(validate({})) == "aucune ligne de population réglée"
     text = describe(validate({"queue": [FIXED, {"population": "mineur", "mode": "max", "planet": PLANET}]}))
     assert "Pilote : recruter 50 à chaque passage sur toutes les planètes" in text and "Mineur : MAX à chaque passage sur 6-79-Egide" in text
+    once = describe(validate({"queue": [{**FIXED, "repeat": False}]}))
+    assert "recruter 50 une seule fois" in once
 
 
 # ------------------------------------------------------------------------------ enregistrement
@@ -101,6 +104,29 @@ def test_a_refused_change_keeps_the_previous_settings(tmp_path):
 def test_a_corrupt_file_gives_an_empty_list(tmp_path):
     (tmp_path / "populations.json").write_text("{pas du json", encoding="utf8")
     assert PopulationSettings(str(tmp_path)).get() == {"queue": []}
+
+
+def test_repeat_defaults_to_every_pass_and_is_always_off_for_a_target():
+    assert validate({"queue": [{k: v for k, v in FIXED.items() if k != "repeat"}]})["queue"][0]["repeat"] is True
+    target = {"population": "pilote", "mode": "target", "amount": 9, "planet": "", "repeat": False}
+    assert validate({"queue": [target]})["queue"][0]["repeat"] is False  # un effectif à atteindre ne se répète pas : il est retiré une fois atteint
+    assert validate({"queue": [{**target, "repeat": True}]})["queue"][0]["repeat"] is False
+
+
+def test_a_once_line_is_done_per_planet_until_it_is_edited_and_survives_a_restart(tmp_path):
+    once = {**FIXED, "repeat": False}
+    store = PopulationSettings(str(tmp_path))
+    store.replace({"queue": [once]})
+    assert not store.is_done(once, PLANET)
+    store.mark_done(once, PLANET)
+    assert store.is_done(once, PLANET) and not store.is_done(once, "8-50-Concorde")
+    assert PopulationSettings(str(tmp_path)).is_done(once, PLANET)
+    store.replace({"queue": [{**once, "amount": 60}]})  # quantité modifiée : la ligne repart de zéro
+    assert not store.is_done({**once, "amount": 60}, PLANET)
+    every = {**FIXED}
+    store.replace({"queue": [every]})
+    store.mark_done(every, PLANET)
+    assert not store.is_done(every, PLANET)  # « à chaque passage » n'est jamais « fait »
 
 
 # ------------------------------------------------------------------------------ API

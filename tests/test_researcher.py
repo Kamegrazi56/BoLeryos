@@ -60,6 +60,7 @@ def test_a_line_whose_target_level_is_reached_is_skipped(game_client, game):
     _set(game_client, [{"research": "ordinateur-quantique", "level": 21}, LASER])  # déjà niveau 21
     _run(game_client)
     assert _launched(game) == [(EGIDE, "Technologie laser", 25)]
+    assert [ln["research"] for ln in game_client.get("/api/researches").json()["settings"]["queue"]] == ["technologie-laser"]  # la ligne atteinte a disparu
 
 
 def test_a_line_the_planet_cannot_pay_is_skipped_for_the_next_one(game_client, game):

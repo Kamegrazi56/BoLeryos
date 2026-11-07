@@ -157,6 +157,7 @@ class ResearchPass(ConstructionPass):
         """Retourne « Technologie Laser niveau 23 sur Egide » si une recherche est lancée, sinon None."""
         await self._open_lab()
         await self._select_planet(planet)
+        await self._settle(planet)
         tabs: list[str] = []
         for line in queue:
             tab = self._tabs[line["research"]]
@@ -167,6 +168,14 @@ class ResearchPass(ConstructionPass):
             for key, card in (await self._read_tab(tab)).items():
                 if key in self._tab_names[tab]:
                     found[key] = (tab, card)
+        finished = [
+            (ln["research"], ln["level"])
+            for ln in queue
+            if (e := found.get(norm(self._labels[ln["research"]]))) is not None and e[1].level is not None and e[1].level >= ln["level"]
+        ]
+        for research, level in self.bot.researches.drop(finished):  # niveau cible atteint : la ligne est retirée de la liste
+            self.bot.log(f"Recherche : {self._labels[research]} a atteint le niveau {level}, ligne retirée de la liste.", event=True, kind="launch")
+        queue = [ln for ln in queue if (ln["research"], ln["level"]) not in set(finished)]
         for line in queue:  # ordre de la liste = priorité
             label = self._labels[line["research"]]
             entry = found.get(norm(label))

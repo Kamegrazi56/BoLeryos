@@ -138,7 +138,7 @@ setInterval(refreshAccount, 8000);
 setInterval(refreshScan, 5000);
 
 // ------------------------------------------------------------------------------------ onglets
-const TABS = ["account", "features", "constructions", "researches", "populations"];
+const TABS = ["account", "features", "constructions", "researches", "populations", "ships", "components"];
 function setTab(id) {
   if (!TABS.includes(id)) id = "account";
   TABS.forEach((t) => {

@@ -5,14 +5,20 @@
   const $ = (id) => document.getElementById(id);
 
   const MODES = [
-    ["fixed", "Quantité fixe à chaque passage"],
-    ["max", "MAX à chaque passage"],
-    ["target", "Effectif à atteindre"],
+    ["fixed:1", "Quantité à chaque passage"],
+    ["fixed:0", "Quantité une seule fois"],
+    ["max:1", "MAX à chaque passage"],
+    ["max:0", "MAX une seule fois"],
+    ["target:0", "Effectif à atteindre"],
   ];
+  const modeValue = (line) => `${line.mode}:${line.mode !== "target" && line.repeat !== false ? 1 : 0}`;
+  const applyMode = (line, value) => { const [mode, repeat] = value.split(":"); line.mode = mode; line.repeat = repeat === "1"; };
   let populations = [];
   let planets = [];
   let state = { queue: [] };
   let saveTimer = null;
+  let saving = false; // enregistrement en cours
+  let rev = 0; // change à chaque modification locale : une lecture partie avant ne doit pas écraser la liste
   const label = (id) => (populations.find((p) => p.id === id) || { label: id }).label;
 
   function say(text, kind) {
@@ -23,14 +29,16 @@
 
   async function save() {
     saveTimer = null;
+    saving = true;
     try {
       const res = await fetch("/api/populations", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state) });
       if (res.ok) { say("Enregistré.", "ok"); return; }
       say(errorText(await res.json().catch(() => ({}))), "error");
-    } catch { say("Enregistrement impossible : le bot ne répond pas.", "error"); }
+    } catch { say("Enregistrement impossible : le bot ne répond pas.", "error"); } finally { saving = false; rev++; }
   }
   function scheduleSave() {
     clearTimeout(saveTimer);
+    rev++;
     say("Enregistrement…");
     saveTimer = setTimeout(save, 500);
   }
@@ -50,11 +58,11 @@
     list.replaceChildren(...state.queue.map((line, i) => {
       const name = label(line.population);
       const mode = el("select", { ariaLabel: `Mode de ${name}` }, ...modeOptions());
-      mode.value = line.mode;
+      mode.value = modeValue(line);
       const amount = el("input", { type: "number", min: "1", step: "1", value: line.amount || 1, ariaLabel: `Quantité de ${name}`, disabled: line.mode === "max" });
       const planet = el("select", { ariaLabel: `Planète de ${name}` }, ...planetOptions(line.planet));
       planet.value = line.planet;
-      mode.addEventListener("change", () => { line.mode = mode.value; amount.disabled = line.mode === "max"; if (line.mode !== "max" && !line.amount) line.amount = 1; scheduleSave(); });
+      mode.addEventListener("change", () => { applyMode(line, mode.value); amount.disabled = line.mode === "max"; if (line.mode !== "max" && !line.amount) line.amount = 1; scheduleSave(); });
       amount.addEventListener("input", () => { if (amount.value !== "") { line.amount = Number(amount.value); scheduleSave(); } });
       planet.addEventListener("change", () => { line.planet = planet.value; scheduleSave(); });
       const button = (text, title, onClick, disabled = false) => {
@@ -91,7 +99,7 @@
       $("pop-add-planet").replaceChildren(...planetOptions(chosen));
       $("pop-add-planet").value = chosen;
     }
-    $("pop-add-amount-label").hidden = $("pop-add-mode").value === "max";
+    $("pop-add-amount-label").hidden = $("pop-add-mode").value.startsWith("max");
   }
 
   function renderAll() {
@@ -102,12 +110,12 @@
   $("pop-add-mode").addEventListener("change", renderAddForm);
   $("pop-add").addEventListener("click", () => {
     const population = $("pop-add-population").value;
-    const mode = $("pop-add-mode").value;
+    const [mode, repeat] = $("pop-add-mode").value.split(":");
     const planet = $("pop-add-planet").value;
     const amount = mode === "max" ? 0 : Number($("pop-add-amount").value);
     if (!population) return;
     if (mode !== "max" && (!Number.isInteger(amount) || amount < 1)) { say("La quantité est un nombre entier d'au moins 1.", "error"); return; }
-    state.queue.push({ population, mode, amount, planet });
+    state.queue.push({ population, mode, amount, planet, repeat: repeat === "1" });
     renderAll();
     scheduleSave();
   });
@@ -124,8 +132,12 @@
   load();
   setInterval(async () => { // les planètes arrivent après le scan : on rafraîchit leurs listes, sans toucher à une ligne en cours de saisie
     try {
-      planets = (await (await fetch("/api/populations")).json()).planets;
+      const at = rev;
+      const data = await (await fetch("/api/populations")).json();
+      planets = data.planets;
       renderAddForm();
+      const idle = at === rev && !saveTimer && !saving && !$("pop-queue").contains(document.activeElement);
+      if (idle && JSON.stringify(data.settings.queue) !== JSON.stringify(state.queue)) state = data.settings; // lignes retirées par le bot
       if (!$("pop-queue").contains(document.activeElement)) renderQueue();
     } catch { /* idem */ }
   }, 5000);

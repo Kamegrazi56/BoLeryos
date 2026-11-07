@@ -69,10 +69,38 @@ def test_a_line_whose_target_level_is_reached_is_skipped(game_client, game):
     assert _launched(game) == [("6-79-Egide", "Caserne", 19)]
 
 
+def test_a_reached_line_leaves_the_list_but_an_unfinished_one_stays(game_client, game):
+    _scan(game_client)
+    _set(game_client, [{"building": "mine-de-fer", "level": 40}, CASERNE], scope="one", planet="6-79-Egide")
+    _run(game_client)
+    assert [ln["building"] for ln in game_client.get("/api/constructions").json()["settings"]["queue"]] == [CASERNE["building"]]
+
+
+def test_with_all_planets_a_line_leaves_the_list_only_when_reached_everywhere(game_client, game):
+    _scan(game_client)
+    _set(game_client, [{"building": "mine-de-fer", "level": 1}, {"building": "mine-de-fer".replace("mine-de-fer", CASERNE["building"]), "level": 500}])
+    _run(game_client)
+    assert [ln["building"] for ln in game_client.get("/api/constructions").json()["settings"]["queue"]] == [CASERNE["building"]]
+
+
 def test_a_single_chosen_planet_is_the_only_one_touched(game_client, game):
     _scan(game_client)
     _set(game_client, [CENTRALE], scope="one", planet="8-50-Concorde")
     _run(game_client)
+    assert _launched(game) == [("8-50-Concorde", "Centrale Énergétique", 28)]
+
+
+def test_a_planet_entry_the_mouse_cannot_reach_is_selected_with_the_keyboard(game_client, game):
+    """Écran bas : la barre du bas masque les dernières planètes de la liste (constaté sur le vrai jeu), le clic tomberait à côté."""
+    _scan(game_client)
+    _set(game_client, [CENTRALE], scope="one", planet="8-50-Concorde")
+    page = _bot(game_client)._page
+
+    async def hide_list_from_the_mouse():
+        await page.add_style_tag(content="#navlist { pointer-events: none; }")  # la souris traverse la liste
+
+    game_client.portal.call(hide_list_from_the_mouse)
+    assert "1 construction(s)" in _run(game_client)
     assert _launched(game) == [("8-50-Concorde", "Centrale Énergétique", 28)]
 
 

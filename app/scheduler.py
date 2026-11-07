@@ -96,6 +96,9 @@ class Scheduler:
         label = self._features[fid].label
         if saved["enabled"] and not was:
             rt.next_at = self._clock()  # lancée tout de suite (dès que le bot est sur ON)
+            reset = getattr(self.bot, "reset_failures", None)
+            if reset is not None:
+                reset(fid)  # réactivée après vérification : les échecs d'avant ne comptent plus
             self.bot.log(f"Fonctionnalité « {label} » activée.", event=True)
         elif was and not saved["enabled"]:
             rt.next_at = None

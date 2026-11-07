@@ -12,6 +12,7 @@ import time
 
 from .numbers import norm
 from .planets import GameUiError, Interrupted, PlanetsReader
+from .shipyard import ModelScanner
 from .preferences import Preferences
 
 SCAN_AUTO_ATTEMPTS = 3  # tentatives du scan de démarrage par connexion (pas d'acharnement si le jeu change)
@@ -34,6 +35,15 @@ class ConnectionSupervisor:
         self.scanning = False
         self._scan_done_session = False  # le scan de démarrage a réussi pour cette connexion
         self._scan_attempts = 0  # tentatives automatiques pour cette connexion
+        # Scan des modèles de vaisseaux (onglet Assemblages du Chantier spatial) : même principe que les planètes.
+        self._models_reader = ModelScanner(bot)
+        self.scanned_models: list[dict] = []
+        self.models_scan_at: float | None = None
+        self.models_scan_source = ""
+        self.models_scan_error = ""
+        self.scanning_models = False
+        self._models_done_session = False
+        self._models_attempts = 0
         # Connexion automatique
         self.connection = ""  # état affiché dans l'interface
         self._keeper: asyncio.Task | None = None
@@ -121,6 +131,51 @@ class ConnectionSupervisor:
             self.scanning = False
         return self.scan_summary()
 
+    # ------------------------------------------------------------ scan des modèles
+    def models_summary(self) -> dict:
+        return {
+            "models": list(self.scanned_models),
+            "scanned_at": self.models_scan_at,
+            "source": self.models_scan_source,
+            "error": self.models_scan_error,
+            "scanning": self.scanning_models,
+        }
+
+    def known_models(self) -> list[str]:
+        """Noms des modèles : dernier scan, sinon ceux gardés des scans précédents."""
+        return [m["name"] for m in self.scanned_models] or self.prefs.get()["catalog"]["models"]
+
+    async def scan_models(self, source: str) -> dict:
+        """Ouvre l'onglet Assemblages du Chantier spatial et lit les modèles. Ne lève jamais : l'échec est dans `error`."""
+        if self.scanning_models:
+            return self.models_summary()
+        busy = "une fonctionnalité est en cours, réessayez dans un instant" if self.bot.work.locked() else None
+        reason = self.game_blocker() or busy
+        if reason:
+            self.models_scan_error = reason[0].upper() + reason[1:]
+            return self.models_summary()
+        self.scanning_models = True
+        try:
+            async with self.bot.work:  # jamais en même temps qu'un passage de fonctionnalité
+                models = await self._models_reader.list_models()
+        except (Interrupted, GameUiError) as exc:
+            self.models_scan_error = f"Scan impossible : {exc}"
+            self.bot.log(f"Scan des modèles impossible : {exc}.", "warn", event=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            self.models_scan_error = f"Scan impossible : erreur technique ({type(exc).__name__})"
+            self.bot.log(f"Scan des modèles : erreur technique ({type(exc).__name__}).", "error", event=True)
+        else:
+            self.scanned_models = models
+            self.models_scan_at, self.models_scan_source, self.models_scan_error = time.time(), source, ""
+            self._models_done_session = True
+            self.prefs.set_catalog("models", [m["name"] for m in models])
+            self.bot.log(f"Scan des modèles ({source}) : {len(models)} modèle(s) trouvé(s).", event=True)
+        finally:
+            self.scanning_models = False
+        return self.models_summary()
+
     # ------------------------------------------------------------ supervision de la connexion
     async def ensure_ready(self) -> str | None:
         async with self._ready_lock:  # une seule vérification de l'écran à la fois
@@ -148,6 +203,7 @@ class ConnectionSupervisor:
             self._in_game = False
         if screen in ("login", "universes"):  # nouvelle connexion : la liste des planètes est à relire
             self._scan_done_session, self._scan_attempts = False, 0
+            self._models_done_session, self._models_attempts = False, 0
         if screen == "game":
             self._universe_attempts = 0
             if not self._in_game:  # arrivée (ou retour) dans la partie
@@ -156,6 +212,9 @@ class ConnectionSupervisor:
             if not self._scan_done_session and self._scan_attempts < SCAN_AUTO_ATTEMPTS and not b.work.locked():
                 self._scan_attempts += 1
                 await self.scan_planets("démarrage")  # une fois par connexion
+            if self._scan_done_session and not self._models_done_session and self._models_attempts < SCAN_AUTO_ATTEMPTS and not b.work.locked():
+                self._models_attempts += 1
+                await self.scan_models("démarrage")  # une fois par connexion, après les planètes
             return None
         if screen == "universes":
             return await self._pick_universe()

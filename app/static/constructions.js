@@ -7,6 +7,8 @@
   let planets = [];
   let state = { scope: "all", planet: "", queue: [] };
   let saveTimer = null;
+  let saving = false; // enregistrement en cours
+  let rev = 0; // change à chaque modification locale : une lecture partie avant ne doit pas écraser la liste
   const label = (id) => (buildings.find((b) => b.id === id) || { label: id }).label;
 
   function say(text, kind) {
@@ -16,14 +18,17 @@
   const errorText = (data) => (Array.isArray(data.detail) ? data.detail.join(" · ") : data.detail || "Refusé.");
 
   async function save() {
+    saveTimer = null;
+    saving = true;
     try {
       const res = await fetch("/api/constructions", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state) });
       if (res.ok) { say("Enregistré.", "ok"); return; }
       say(errorText(await res.json().catch(() => ({}))), "error");
-    } catch { say("Enregistrement impossible : le bot ne répond pas.", "error"); }
+    } catch { say("Enregistrement impossible : le bot ne répond pas.", "error"); } finally { saving = false; rev++; }
   }
   function scheduleSave() {
     clearTimeout(saveTimer);
+    rev++;
     say("Enregistrement…");
     saveTimer = setTimeout(save, 500);
   }
@@ -109,7 +114,13 @@
     } catch { /* le bot redémarre : on réessaie */ }
   }
   load();
-  setInterval(async () => { // les planètes arrivent après le scan : on rafraîchit seulement leur liste
-    try { planets = (await (await fetch("/api/constructions")).json()).planets; renderPlanets(); } catch { /* idem */ }
+  setInterval(async () => { // les planètes arrivent après le scan, et le bot retire lui-même les lignes atteintes
+    try {
+      const at = rev;
+      const data = await (await fetch("/api/constructions")).json();
+      planets = data.planets;
+      const idle = at === rev && !saveTimer && !saving && !$("cons-queue").contains(document.activeElement);
+      if (idle && JSON.stringify(data.settings.queue) !== JSON.stringify(state.queue)) { state = data.settings; renderAll(); } else renderPlanets();
+    } catch { /* idem */ }
   }, 5000);
 })();
