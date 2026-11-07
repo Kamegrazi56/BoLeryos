@@ -288,7 +288,7 @@ def api(settings, tmp_path):
 def test_features_api_lists_the_test_feature_with_no_timer_and_bot_off(api):
     data = api.get("/api/features").json()
     assert data["bot_on"] is False
-    assert [f["id"] for f in data["features"]] == ["constructions", "researches", "populations", "ships", "components", "explorations", "test"]
+    assert [f["id"] for f in data["features"]] == ["constructions", "researches", "populations", "ships", "components", "explorations", "excavations", "hackings", "test"]
     assert all(f["enabled"] is False and f["min_minutes"] is None for f in data["features"])
 
 

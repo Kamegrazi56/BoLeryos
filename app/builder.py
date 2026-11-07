@@ -163,6 +163,20 @@ class ConstructionPass:
             await asyncio.sleep(0.25)
         raise GameUiError(f"la page « {tab} » ne s'affiche pas")
 
+    async def _goto(self, path: str) -> None:
+        """Ouvre une page de la partie par son adresse (ex. « galaxy », « operations?… »)."""
+        page = self.page
+        await self._guard()
+        root = page.url.split("/game/")[0] + "/game/" + page.url.split("/game/")[1].split("/")[0]
+        await page.goto(f"{root}/{path}", wait_until="domcontentloaded", timeout=30_000)
+
+    async def _click_named(self, name: str) -> None:
+        button = self.page.get_by_role("button", name=name, exact=True)
+        if not await button.count():
+            raise GameUiError(f"bouton « {name} » introuvable")
+        await self._guard()
+        await human.click(self.page, button.first, self.settings)
+
     async def _current_planet(self) -> str:
         button = self.page.get_by_role("button", name=PLANET_BUTTON_LABEL).first
         if not await button.count():

@@ -105,7 +105,7 @@ def test_the_removed_features_have_no_settings_and_no_routes(ui):
     page, _, _ = ui
     page.goto(page.base + "/reglages")
     tabs = [t.strip().lower() for t in page.locator("[role=tab]").all_inner_texts()]
-    assert tabs == ["compte et univers", "fonctionnalités", "constructions", "recherches", "population", "assemblages", "composants", "exploration"]
+    assert tabs == ["compte et univers", "fonctionnalités", "constructions", "recherches", "population", "assemblages", "composants", "exploration", "fouilles", "piratage", "espionnage"]
     for tab in tabs:  # aucune section supprimée ne réapparaît, quel que soit l'onglet
         page.click(f"[role=tab]:has-text('{tab}')", strict=False)
         text = page.inner_text("main").lower()
@@ -351,11 +351,11 @@ def test_population_panel_sets_mode_quantity_and_planet_for_each_population(ui):
     assert errors == []
 
 
-def test_settings_page_has_eight_tabs_and_only_one_panel_shows_at_a_time(ui):
+def test_settings_page_has_eleven_tabs_and_only_one_panel_shows_at_a_time(ui):
     page, errors, _ = ui
     page.goto(page.base + "/reglages")
-    ids = ["account", "features", "constructions", "researches", "populations", "ships", "components", "explorations"]
-    assert page.locator("[role=tab]").count() == 8
+    ids = ["account", "features", "constructions", "researches", "populations", "ships", "components", "explorations", "excavations", "hackings", "spying"]
+    assert page.locator("[role=tab]").count() == 11
     for tab in ids:
         page.click(f"#tab-{tab}")
         assert page.get_attribute(f"#tab-{tab}", "aria-selected") == "true"
@@ -374,7 +374,59 @@ def test_settings_page_has_eight_tabs_and_only_one_panel_shows_at_a_time(ui):
     page.press("#tab-components", "ArrowRight")
     assert page.locator("#panel-explorations").is_visible()
     page.press("#tab-explorations", "ArrowRight")
+    assert page.locator("#panel-excavations").is_visible()
+    page.press("#tab-excavations", "ArrowRight")
+    assert page.locator("#panel-hackings").is_visible()
+    page.press("#tab-hackings", "ArrowRight")
+    assert page.locator("#panel-spying").is_visible()
+    page.press("#tab-spying", "ArrowRight")
     assert page.locator("#panel-account").is_visible()
+    assert errors == []
+
+
+def test_excavation_panel_saves_a_line_with_its_team_and_the_delay(ui):
+    page, errors, app = ui
+    page.click("#scan-run")  # scan des planètes (page Compte et univers), comme les autres onglets
+    page.wait_for_function("document.querySelectorAll('#scan-list tr').length === 4", timeout=10000)
+    page.goto(page.base + "/reglages#excavations")
+    page.reload()  # même page (seul l'onglet change) : on la recharge pour relire les planètes scannées
+    page.wait_for_selector("#exc-add")
+    planets = page.evaluate("fetch('/api/excavations').then((r) => r.json()).then((d) => d.planets)")
+    page.wait_for_function("document.getElementById('exc-daily').textContent !== \"Aucun relevé pour l'instant.\"")  # données chargées
+    page.click("#exc-add")
+    page.select_option("#exc-lines select[aria-label='Planète de départ, ligne 1']", planets[0])
+    page.select_option("#exc-lines select[aria-label='Durée, ligne 1']", "12")
+    page.fill("#exc-lines input[aria-label='Places, ligne 1']", "2")
+    page.fill("#exc-lines input[aria-label='Scientifique, ligne 1']", "3000")
+    page.fill("#exc-lines input[aria-label='Mineur, ligne 1']", "2000")
+    page.check("#exc-lines input[aria-label='Mira Venn, ligne 1']")
+    page.click("#exc-save")  # délai pas encore choisi : refusé avec un message en français
+    page.wait_for_function("document.getElementById('exc-msg').classList.contains('error')")
+    assert "Délai" in page.text_content("#exc-msg")
+    page.fill("#exc-delay-min", "5")
+    page.fill("#exc-delay-max", "15")
+    page.click("#exc-save")
+    page.wait_for_function("document.getElementById('exc-msg').textContent === 'Enregistré.'")
+    assert app.state.bot.excavations.get() == {"lines": [{"planet": planets[0], "units": {"Scientifique": 3000, "Mineur": 2000},
+                                                          "duration": 12, "slots": 2, "mira": True}], "delay_min": 5, "delay_max": 15}
+    assert "Équipe : 5000 / 5000" in page.text_content("#exc-lines")
+    assert errors == []
+
+
+def test_spying_panel_saves_the_minimums_and_refuses_a_launch_without_planet(ui):
+    page, errors, app = ui
+    page.goto(page.base + "/reglages#spying")
+    page.wait_for_selector("#spy-minimums input[aria-label='Minimum Fer']")
+    page.fill("#spy-minimums input[aria-label='Minimum Fer']", "1000000")
+    page.fill("#spy-minimums input[aria-label='Minimum Éther']", "250000")
+    page.select_option("#spy-required", "2")
+    page.click("#spy-save")
+    page.wait_for_function("document.getElementById('spy-msg').textContent === 'Enregistré.'")
+    assert app.state.bot.spying.get() == {"planet": "", "minimums": {"Fer": 1000000, "Cristal": 0, "Éther": 250000}, "required": 2}
+    page.click("#spy-start")  # aucune planète choisie : refusé avec un message en français
+    page.wait_for_function("document.getElementById('spy-msg').classList.contains('error')")
+    assert "planète" in page.text_content("#spy-msg")
+    assert page.text_content("#spy-status") == "Aucun espionnage lancé." and page.text_content("#spy-closed-title") == "Piliers fermés (0)"
     assert errors == []
 
 

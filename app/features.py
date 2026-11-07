@@ -53,6 +53,14 @@ async def _run_explorations(bot) -> str:
     return await bot.explorer.run_pass()
 
 
+async def _run_excavations(bot) -> str:
+    return await bot.excavator.run_pass()
+
+
+async def _run_hackings(bot) -> str:
+    return await bot.hacker.run_pass()
+
+
 async def _run_test(bot) -> str:
     return "passage de test : rien n'a été fait dans le jeu"
 
@@ -66,6 +74,8 @@ FEATURES: tuple[Feature, ...] = (
     Feature("ships", "Assemblages de vaisseaux", "Construit les vaisseaux de la liste (onglet Assemblages) : quantité fixe ou MAX à chaque passage ou une seule fois, ou effectif à atteindre, sur toutes les planètes, une seule ou plusieurs. Construit avec des ressources (mode Construction), clique sur « Lancer » et dépense les ressources de la planète.", _run_ships),
     Feature("components", "Production de composants", "Produit les composants de la liste (onglet Composants) : quantité fixe ou MAX à chaque passage ou une seule fois, ou effectif à atteindre, sur toutes les planètes, une seule ou plusieurs. Clique sur « Produire » et dépense les ressources de la planète.", _run_components),
     Feature("explorations", "Explorations", "Envoie des explorations (onglet Exploration) vers la brèche la plus proche de chaque planète choisie : Piliers ou Flotte, modèle du jeu ou quantités, copies et durée au choix. Relève brèches et modèles une fois par jour, respecte les quotas quotidien et d'explorations actives, et saute une planète à qui il manque quelque chose.", _run_explorations),
+    Feature("excavations", "Fouilles", "Lance les Fouilles des lignes réglées (onglet Fouilles) : planète de départ, équipe (1 à 5 000 unités), durée, nombre de places et Mira Venn. Vise le site libre le plus proche sans Fouille en cours, relève les sites une fois par jour, et relance une place à la fin de sa Fouille plus le délai choisi.", _run_excavations),
+    Feature("hackings", "Piratage (expérience de Naël)", "Fait pirater en boucle par Naël Soryn l'Errant le plus proche de la planète choisie (onglet Piratage), pour son expérience : relance dès que le piratage précédent est fini et que le délai choisi est passé, et passe à l'Errant suivant si le jeu refuse la cible. Relève les Errants une fois par jour.", _run_hackings),
     Feature("test", "Test (ne fait rien)", "Écrit une ligne dans le journal à chaque passage. À retirer quand les vraies fonctionnalités arrivent.", _run_test),
 )
 

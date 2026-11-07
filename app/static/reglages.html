@@ -33,6 +33,9 @@
         <button role="tab" id="tab-ships" data-tab="ships" aria-controls="panel-ships">Assemblages</button>
         <button role="tab" id="tab-components" data-tab="components" aria-controls="panel-components">Composants</button>
         <button role="tab" id="tab-explorations" data-tab="explorations" aria-controls="panel-explorations">Exploration</button>
+        <button role="tab" id="tab-excavations" data-tab="excavations" aria-controls="panel-excavations">Fouilles</button>
+        <button role="tab" id="tab-hackings" data-tab="hackings" aria-controls="panel-hackings">Piratage</button>
+        <button role="tab" id="tab-spying" data-tab="spying" aria-controls="panel-spying">Espionnage</button>
       </div>
       <span id="save-msg" class="save-state" role="status" aria-live="polite"></span>
     </div>
@@ -182,6 +185,58 @@
       <div class="row"><button id="exp-save" type="button">Enregistrer</button></div>
       <p id="exp-msg" class="msg" role="status" aria-live="polite"></p>
     </section>
+    <section class="tabpanel card" id="panel-excavations" role="tabpanel" aria-labelledby="tab-excavations" hidden>
+      <h2 id="exc-title">Fouilles : vers le site libre le plus proche</h2>
+      <p class="hint">Chaque ligne réserve des <strong>places</strong> de Fouille depuis une planète, avec son équipe (de 1 à 5 000 unités) et sa durée. Une fois par jour, le bot relève les <strong>sites libres les plus proches</strong> de chaque planète de départ. À chaque passage, il lit les Fouilles en cours dans le jeu et relance une place quand sa Fouille est finie <strong>et</strong> que le délai tiré au hasard entre votre minimum et votre maximum est écoulé. Mira Venn part avec la ligne cochée quand elle est disponible, sinon la Fouille part sans héros. Quand la fonctionnalité « Fouilles » est activée et le bot sur ON, il clique sur « Lancer la fouille » : <strong>une Fouille ne peut pas être rappelée</strong>.</p>
+      <div class="row">
+        <button id="exc-scan" type="button">Refaire le relevé du jour</button>
+        <span id="exc-scan-msg" class="hint" role="status" aria-live="polite"></span>
+      </div>
+      <p id="exc-daily" class="status-line" role="status" aria-live="polite">Aucun relevé pour l'instant.</p>
+      <ul id="exc-sites" class="hint"></ul>
+      <div id="exc-lines"></div>
+      <div class="row"><button id="exc-add" type="button">Ajouter une ligne</button></div>
+      <div class="row">
+        <label>Délai avant relance : de <input id="exc-delay-min" type="number" min="0" step="1" aria-label="Délai minimum avant relance (minutes)"></label>
+        <label>à <input id="exc-delay-max" type="number" min="0" step="1" aria-label="Délai maximum avant relance (minutes)"> minutes</label>
+      </div>
+      <div class="row"><button id="exc-save" type="button">Enregistrer</button></div>
+      <p id="exc-msg" class="msg" role="status" aria-live="polite"></p>
+      <h3>Fouilles suivies</h3>
+      <ul id="exc-tracked" class="hint"></ul>
+    </section>
+    <section class="tabpanel card" id="panel-hackings" role="tabpanel" aria-labelledby="tab-hackings" hidden>
+      <h2 id="hack-title">Piratage : expérience de Naël Soryn</h2>
+      <p class="hint">Naël Soryn pirate en boucle <strong>l'Errant le plus proche</strong> de la planète de départ (dans le ratio ×2), pour gagner de l'expérience. Un piratage dure 30 minutes et ne s'annule pas ; l'Errant est prévenu. Le bot relance dès que le piratage précédent est fini <strong>et</strong> que le délai tiré au hasard entre votre minimum et votre maximum est écoulé. Si le jeu refuse l'Errant (piliers désactivés…), le suivant le plus proche est pris. Les Errants sont relevés une fois par jour. Activez la fonctionnalité « Piratage » dans l'onglet Fonctionnalités.</p>
+      <div class="row">
+        <label>Planète de départ <select id="hack-planet" aria-label="Planète de départ du piratage"></select></label>
+        <label>Délai avant relance : de <input id="hack-delay-min" type="number" min="0" step="1" aria-label="Délai minimum avant relance du piratage (minutes)"></label>
+        <label>à <input id="hack-delay-max" type="number" min="0" step="1" aria-label="Délai maximum avant relance du piratage (minutes)"> minutes</label>
+      </div>
+      <div class="row"><button id="hack-save" type="button">Enregistrer</button><button id="hack-scan" type="button">Refaire le relevé des Errants</button></div>
+      <p id="hack-msg" class="msg" role="status" aria-live="polite"></p>
+      <p id="hack-status" class="status-line" role="status" aria-live="polite">Aucun relevé pour l'instant.</p>
+      <ul id="hack-targets" class="hint"></ul>
+    </section>
+    <section class="tabpanel card" id="panel-spying" role="tabpanel" aria-labelledby="tab-spying" hidden>
+      <h2 id="spy-title">Espionnage des Errants par drone</h2>
+      <p class="hint">Le bouton « Lancer l'espionnage » met le bot sur <strong>OFF</strong> (les autres automatismes restent arrêtés jusqu'à ce que vous les relanciez), centre la Galaxie sur la planète choisie au zoom ×17,5, puis envoie <strong>un drone</strong> (Piliers) vers chaque planète d'Errant [AI] de la fenêtre visible. Un rapport est <strong>gardé</strong> si au moins le nombre choisi de ressources atteint son minimum ; sinon il est <strong>supprimé</strong> dans le jeu. Les Errants aux piliers désactivés sont notés dans la liste « Piliers fermés », vidée à chaque lancement.</p>
+      <div class="row">
+        <label>Planète <select id="spy-planet" aria-label="Planète autour de laquelle espionner"></select></label>
+        <label>Ressources à atteindre <select id="spy-required" aria-label="Nombre de ressources à atteindre">
+          <option value="1">au moins 1</option><option value="2">au moins 2</option><option value="3">les 3</option>
+        </select></label>
+      </div>
+      <div id="spy-minimums" class="row"></div>
+      <div class="row"><button id="spy-save" type="button">Enregistrer</button></div>
+      <p id="spy-msg" class="msg" role="status" aria-live="polite"></p>
+      <div class="row">
+        <button id="spy-start" type="button">Lancer l'espionnage</button>
+        <button id="spy-stop" type="button" hidden>Arrêter</button>
+      </div>
+      <p id="spy-status" class="status-line" role="status" aria-live="polite">Aucun espionnage lancé.</p>
+      <details><summary id="spy-closed-title">Piliers fermés (0)</summary><ul id="spy-closed" class="hint"></ul></details>
+    </section>
   </main>
   <script src="/static/shell.js"></script>
   <script src="/static/reglages.js"></script>
@@ -191,5 +246,8 @@
   <script src="/static/population.js"></script>
   <script src="/static/chantier.js"></script>
   <script src="/static/exploration.js"></script>
+  <script src="/static/excavation.js"></script>
+  <script src="/static/hacking.js"></script>
+  <script src="/static/spying.js"></script>
 </body>
 </html>

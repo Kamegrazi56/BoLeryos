@@ -28,6 +28,13 @@ from .features import FeaturesError
 from .preferences import MAX_UNIVERSE_LENGTH, PreferencesError
 from .quantities import LineError
 from .explorations import METHODS, PILLAR_UNITS, ExplorationError
+from .excavations import DURATIONS as EXCAVATION_DURATIONS
+from .excavations import MAX_TEAM as EXCAVATION_MAX_TEAM
+from .excavations import UNITS as EXCAVATION_UNITS
+from .excavations import ExcavationError
+from .hackings import HackingError
+from .spying import RESOURCES as SPY_RESOURCES
+from .spying import SpyingError
 
 STATIC_DIR = Path(__file__).parent / "static"
 NO_STORE = {"Cache-Control": "no-store"}
@@ -121,6 +128,32 @@ class ExplorationRequest(BaseModel):
     planets: list[str] = Field(default_factory=list, max_length=200)
     rhythm: str = Field(default="fixed", max_length=10)
     per_pass: int = Field(default=1, ge=0, le=1000)
+
+
+class ExcavationLine(BaseModel):
+    planet: str = Field(default="", max_length=200)
+    units: dict[str, int] = Field(default_factory=dict, max_length=10)
+    duration: int = Field(default=3, ge=0, le=100)
+    slots: int = Field(default=1, ge=0, le=100)
+    mira: bool = False
+
+
+class ExcavationRequest(BaseModel):
+    lines: list[ExcavationLine] = Field(default_factory=list, max_length=50)
+    delay_min: int | None = Field(default=None, ge=0, le=100_000)
+    delay_max: int | None = Field(default=None, ge=0, le=100_000)
+
+
+class HackingRequest(BaseModel):
+    planet: str = Field(default="", max_length=200)
+    delay_min: int | None = Field(default=None, ge=0, le=100_000)
+    delay_max: int | None = Field(default=None, ge=0, le=100_000)
+
+
+class SpyingRequest(BaseModel):
+    planet: str = Field(default="", max_length=200)
+    minimums: dict[str, int] = Field(default_factory=dict, max_length=3)
+    required: int = Field(default=1, ge=0, le=10)
 
 
 class OrderRequest(BaseModel):
@@ -534,6 +567,99 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _check_origin(request)
         await bot.explorer.scan("manuel")
         return JSONResponse(_explorations_payload(), headers=NO_STORE)
+
+    # --- Fouilles : lignes, délai avant relance, relevé du jour (sites libres), Fouilles suivies -----------
+    def _excavations_payload() -> dict:
+        return {
+            "settings": bot.excavations.get(),
+            "daily": bot.excavations.daily(),
+            "tracked": bot.excavations.tracked(),
+            "planets": _known_planets(),
+            "units": list(EXCAVATION_UNITS),
+            "durations": list(EXCAVATION_DURATIONS),
+            "max_team": EXCAVATION_MAX_TEAM,
+            "scanning": bot.excavator.scanning,
+            "persistent": bot.excavations.persistent,
+        }
+
+    @app.get("/api/excavations")
+    async def api_excavations():
+        return JSONResponse(_excavations_payload(), headers=NO_STORE)
+
+    @app.put("/api/excavations")
+    async def api_excavations_put(body: ExcavationRequest, request: Request):
+        _check_origin(request)
+        try:
+            bot.excavations.replace(body.model_dump(), _known_planets())
+        except ExcavationError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        return JSONResponse(_excavations_payload(), headers=NO_STORE)
+
+    @app.post("/api/excavations/scan")
+    async def api_excavations_scan(request: Request):
+        """Refait tout de suite le relevé du jour : sites libres les plus proches de chaque planète de départ."""
+        _check_origin(request)
+        await bot.excavator.scan("manuel")
+        return JSONResponse(_excavations_payload(), headers=NO_STORE)
+
+    # --- Piratage : planète de départ, délai avant relance, Errants les plus proches, suivi de Naël -----------
+    def _hackings_payload() -> dict:
+        return {"settings": bot.hackings.get(), "daily": bot.hackings.daily(), "state": bot.hackings.state(),
+                "planets": _known_planets(), "scanning": bot.hacker.scanning, "persistent": bot.hackings.persistent}
+
+    @app.get("/api/hackings")
+    async def api_hackings():
+        return JSONResponse(_hackings_payload(), headers=NO_STORE)
+
+    @app.put("/api/hackings")
+    async def api_hackings_put(body: HackingRequest, request: Request):
+        _check_origin(request)
+        try:
+            bot.hackings.replace(body.model_dump(), _known_planets())
+        except HackingError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        return JSONResponse(_hackings_payload(), headers=NO_STORE)
+
+    @app.post("/api/hackings/scan")
+    async def api_hackings_scan(request: Request):
+        """Refait tout de suite le relevé : Errants les plus proches de la planète de départ, dans le ratio ×2."""
+        _check_origin(request)
+        if bot.hackings.get()["planet"]:
+            await bot.hacker.scan("manuel")
+        return JSONResponse(_hackings_payload(), headers=NO_STORE)
+
+    # --- Espionnage des Errants : réglages et campagne manuelle (le bot passe sur OFF) -----------
+    def _spying_payload() -> dict:
+        return {"settings": bot.spying.get(), "status": bot.spy.status(), "planets": _known_planets(),
+                "resources": list(SPY_RESOURCES), "persistent": bot.spying.persistent, "bot_on": bot.scheduler.on}
+
+    @app.get("/api/spying")
+    async def api_spying():
+        return JSONResponse(_spying_payload(), headers=NO_STORE)
+
+    @app.put("/api/spying")
+    async def api_spying_put(body: SpyingRequest, request: Request):
+        _check_origin(request)
+        try:
+            bot.spying.replace(body.model_dump(), _known_planets())
+        except SpyingError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        return JSONResponse(_spying_payload(), headers=NO_STORE)
+
+    @app.post("/api/spying/start")
+    async def api_spying_start(request: Request):
+        """Lance la campagne d'espionnage ; les autres automatismes s'arrêtent (bot sur OFF) jusqu'à ce que l'utilisateur les relance."""
+        _check_origin(request)
+        refused = bot.spy.start()
+        if refused:
+            raise HTTPException(409, detail=refused)
+        return JSONResponse(_spying_payload(), headers=NO_STORE)
+
+    @app.post("/api/spying/stop")
+    async def api_spying_stop(request: Request):
+        _check_origin(request)
+        bot.spy.stop()
+        return JSONResponse(_spying_payload(), headers=NO_STORE)
 
     @app.get("/api/status")
     async def api_status(limit: int = 50):

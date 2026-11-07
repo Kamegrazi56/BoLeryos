@@ -43,7 +43,13 @@ from .shipyard import ComponentPass, ShipPass
 from .explorations import ExplorationStore
 from .explorer import ExplorationPass
 from .features import FEATURES, FeatureStore
+from .excavations import ExcavationStore
+from .excavator import ExcavationPass
+from .hacker import HackingPass
+from .hackings import HackingStore
 from .scheduler import Scheduler
+from .spy import SpyCampaign
+from .spying import SpySettings
 from .supervisor import ConnectionSupervisor
 from .vault import CredentialVault
 
@@ -160,6 +166,12 @@ class BotSession:
         self.producer = ComponentPass(self, self.components)  # production de composants (bouton « Produire »)
         self.explorations = ExplorationStore(settings.data_dir)  # réglages d'exploration + relevé du jour (brèches, modèles)
         self.explorer = ExplorationPass(self, self.explorations)  # explorations vers la brèche la plus proche de chaque planète
+        self.excavations = ExcavationStore(settings.data_dir)  # Fouilles : lignes, délai, relevé du jour, Fouilles suivies
+        self.excavator = ExcavationPass(self, self.excavations)  # Fouilles vers le site libre le plus proche
+        self.hackings = HackingStore(settings.data_dir)  # Piratage : planète de départ, délai, Errants les plus proches, suivi
+        self.hacker = HackingPass(self, self.hackings)  # Naël Soryn pirate en boucle l'Errant le plus proche
+        self.spying = SpySettings(settings.data_dir)  # espionnage des Errants : planète, minimums, nombre de ressources
+        self.spy = SpyCampaign(self, self.spying)  # campagne manuelle : un drone par Errant visible, rapports gardés ou supprimés
         # Ordonnanceur des fonctionnalités (réglages enregistrés ; l'interrupteur général repasse toujours à OFF au démarrage)
         self.scheduler = Scheduler(
             self,
@@ -187,7 +199,7 @@ class BotSession:
     def reset_failures(self, feature_id: str) -> None:
         """Remet à zéro les lancements non confirmés d'une fonctionnalité (appelé quand l'utilisateur la réactive)."""
         passes = {"constructions": self.builder, "researches": self.researcher, "populations": self.recruiter,
-                  "ships": self.shipper, "components": self.producer, "explorations": self.explorer}
+                  "ships": self.shipper, "components": self.producer, "explorations": self.explorer, "excavations": self.excavator, "hackings": self.hacker}
         if feature_id in passes:
             passes[feature_id]._unconfirmed = 0
 
@@ -1013,6 +1025,7 @@ class BotSession:
 
     async def _shutdown(self) -> None:
         await self.scheduler.shutdown()
+        await self.spy.shutdown()
         await self.supervisor.stop_keeper()
         boot = self._boot
         if boot is not None and not boot.done():  # un démarrage de navigateur est en cours : on l'attend avant de tout fermer

@@ -39,11 +39,17 @@ LAUNCH_NAME = re.compile(r"^Lancer l.exploration", re.I)
 _PRELUDE_JS = """
 const text = (el) => (el.textContent || '').replace(/\\s+/g, ' ').trim();
 const ADDRESS = /^[A-Z]\\d{2} \\d{2} \\d{2}$/;
+const visible = (el) => el.getClientRects().length > 0;
 function targetInput() {
-  const label = [...document.querySelectorAll('main *')].find((e) => e.children.length === 0 && text(e) === 'Cible');
-  let box = label;
-  while (box && !box.querySelector('input[type=text], input:not([type])')) box = box.parentElement;
-  return box ? box.querySelector('input[type=text], input:not([type])') : null;
+  // La page Opérations garde les formulaires des autres missions, cachés (vu sur le vrai jeu) : seul le champ visible compte.
+  for (const label of document.querySelectorAll('main *')) {
+    if (label.children.length !== 0 || text(label) !== 'Cible' || !visible(label)) continue;
+    let box = label;
+    while (box && !box.querySelector('input[type=text], input:not([type])')) box = box.parentElement;
+    const input = box && [...box.querySelectorAll('input[type=text], input:not([type])')].find(visible);
+    if (input) return input;
+  }
+  return null;
 }
 function modelsDialog() {
   return [...document.querySelectorAll('[role=dialog]')].find((d) => /^Modèles de/i.test(d.getAttribute('aria-label') || '')) || null;
@@ -221,19 +227,6 @@ class ExplorationPass(ConstructionPass):
     def _coords(self, planet: str) -> str | None:
         return next((p.get("coords") for p in self.bot.supervisor.scanned_planets if p["name"] == planet), None)
 
-    async def _goto(self, path: str) -> None:
-        page = self.page
-        await self._guard()
-        root = page.url.split("/game/")[0] + "/game/" + page.url.split("/game/")[1].split("/")[0]
-        await page.goto(f"{root}/{path}", wait_until="domcontentloaded", timeout=30_000)
-
-    async def _click_named(self, name: str) -> None:
-        button = self.page.get_by_role("button", name=name, exact=True)
-        if not await button.count():
-            raise GameUiError(f"bouton « {name} » introuvable")
-        await self._guard()
-        await human.click(self.page, button.first, self.settings)
-
     # ------------------------------------------------------------------ relevé du jour
     async def scan(self, source: str) -> dict:
         """Relevé à la demande (brèches + modèles). Ne lève jamais : l'échec est dans `error`."""
@@ -280,6 +273,18 @@ class ExplorationPass(ConstructionPass):
 
     async def _find_breach(self, planet: str) -> dict:
         """Brèche la plus proche de la planète : carte recentrée sur elle, puis dézooms jusqu'à voir au moins une brèche."""
+        coords = self._coords(planet)
+        found = await self._search_map(planet, lambda objects, bounds: nearest_from_objects(objects, coords, bounds))
+        if found is not None:
+            return found
+        fallback = await self._formula_breach(coords)
+        if fallback is not None:
+            return fallback
+        raise GameUiError("aucune brèche trouvée autour de la planète")
+
+    async def _search_map(self, planet: str, pick):
+        """Galaxie recentrée sur la planète, puis dézooms : renvoie le premier résultat non vide de `pick(objets, bornes)`
+        sur une fenêtre détaillée de la carte (positions réelles reçues du serveur), ou None."""
         page = self.page
         if page.url.split("?")[0].rstrip("/").rsplit("/", 1)[-1] != "galaxy":
             await self._goto("galaxy")
@@ -288,7 +293,6 @@ class ExplorationPass(ConstructionPass):
             await asyncio.sleep(0.25)
         await self._select_planet(planet)
         await self._settle(planet)
-        coords = self._coords(planet)
         pending: list[asyncio.Future] = []
 
         def on_response(response) -> None:
@@ -308,8 +312,8 @@ class ExplorationPass(ConstructionPass):
                 objects = projection.get("objects") or []
                 if projection.get("mode") == "DETAIL" or objects:
                     seen_detail = True
-                    found = nearest_from_objects(objects, coords, projection.get("boundsMilli"))
-                    if found is not None:
+                    found = pick(objects, projection.get("boundsMilli"))
+                    if found:
                         return found
                     action = "Dézoomer"
                     continue
@@ -319,10 +323,7 @@ class ExplorationPass(ConstructionPass):
                 break
         finally:
             page.remove_listener("response", on_response)
-        fallback = await self._formula_breach(coords)
-        if fallback is not None:
-            return fallback
-        raise GameUiError("aucune brèche trouvée autour de la planète")
+        return None
 
     async def _next_window(self, pending: list, before: int) -> dict | None:
         end = time.monotonic() + RESPONSE_WAIT_SECONDS

@@ -9,6 +9,7 @@ Le serveur garde l'état (planète active, stocks, niveaux) pour que les recharg
 """
 
 import copy
+import time
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -89,6 +90,9 @@ def _exp_units(index: int) -> dict:
                     "Surchargeur Plasmique": 0, "Faucheur Cinétique": 1380303 if rich else 0, "Grand Transporteur": 43025 if rich else 0,
                     "Petit Transporteur": 0},
         "FLEET": {"Testo Civil Transpo Destroy Def": 43 if rich else 0, ">Lentus": 2},
+        # Fouille (relevé du vrai jeu) : unités d'assaut, Scientifiques et Mineurs
+        "EXCAVATION": {"Soldat": 17827181 if rich else 10, "Rempart de Fer": 968163 if rich else 0, "Spectre du Rift": 0,
+                       "Surchargeur Plasmique": 0, "Faucheur Cinétique": 0, "Scientifique": 1185896 if rich else 0, "Mineur": 1686319 if rich else 0},
     }
 
 
@@ -119,17 +123,33 @@ def initial_state():
             "FLEET": [{"name": "Planète minière", "units": {"Testo Civil Transpo Destroy Def": 5}}]}},
         # Carte continue : positions réelles (unités de carte) des planètes et des brèches ; Strate n'a aucune brèche proche
         "map": {"api": True, "positions": {"Z25 95 16": [0, 0], "M69 38 06": [11570, 1544], "R59 75 43": [-60000, 40000]},
-                "breaches": [["Z26 10 20", 520, 90], ["Z25 60 80", -300, 250], ["M79 50 37", 11629, 2112], ["M69 99 99", 12900, 1600]]},
+                "breaches": [["Z26 10 20", 520, 90], ["Z25 60 80", -300, 250], ["M79 50 37", 11629, 2112], ["M69 99 99", 12900, 1600]],
+                # Emplacements libres (Fouille possible) : M58 80 21 est le plus proche d'Egide (relevé du vrai jeu)
+                "free": [["M68 75 95", 11234, 1931], ["M58 80 21", 11260, 1171], ["Z25 70 30", 200, -150], ["Z25 99 01", 700, 400]],
+                # Planètes d'Errants autour d'Egide (mêmes adresses que la liste de la Galaxie) : Torek est la plus proche mais
+                # son Drone est grisé (hors du ratio ×2), Bryn a ses piliers fermés, Kairo est la première piratable.
+                "errants": [["M97 50 19", "Torek-Veine-165 2", 11575, 1540], ["M69 37 24", "Bryn-Socle-176 3", 11560, 1552],
+                            ["M69 34 68", "Kairo-Vigie-378 7", 11600, 1600], ["M69 41 02", "Lyra-Voile-12 1", 11700, 1700]]},
+        # Piratage : Naël Soryn (occupé ou non), piratage en cours (cible, fin), clic sans effet
+        "hack": {"busy": False, "active": None, "no_effect": False},
+        # Fouilles : plafond personnel, Fouilles en cours (origine, site, durée, fin), Mira Venn, autres missions actives
+        "exc": {"max": 6, "active": [], "mira_busy": False, "other_missions": 0, "no_effect": False},
         # Capteurs interstellaires : un déploiement du joueur, comme dans l'export (aucune attaque au départ)
         "movements": [_movement("Déploiement", ("6-79-Egide", "M69 38 06", "KameGrazi"), ("8-50-Concorde", "Z25 95 16", "KameGrazi"))],
         # Liste de la Galaxie autour de la planète active (structure de l'export du 2026-11-03)
         "galaxy": [
             {"player": "KameGrazi", "tag": "REPCO", "planet": "6-79-Egide", "coords": "M69 38 06", "actions": []},
-            {"player": "Kairo-Vigie-378", "tag": "AI", "planet": "Kairo-Vigie-378 7", "coords": "M69 34 68", "actions": ["Flotte", "Piliers", "Sonde", "Drone"]},
-            {"player": "Bryn-Socle-176", "tag": "AI", "planet": "Bryn-Socle-176 3", "coords": "M69 37 24", "actions": ["Flotte", "Piliers", "Sonde", "Drone"]},
+            # Errants : ressources du rapport de drone, piliers fermés, Drone grisé (hors du ratio ×2)
+            {"player": "Kairo-Vigie-378", "tag": "AI", "planet": "Kairo-Vigie-378 7", "coords": "M69 34 68", "actions": ["Flotte", "Piliers", "Sonde", "Drone"],
+             "spy": {"Fer": 2147794, "Cristal": 900000, "Éther": 300000}},
+            {"player": "Bryn-Socle-176", "tag": "AI", "planet": "Bryn-Socle-176 3", "coords": "M69 37 24", "actions": ["Flotte", "Piliers", "Sonde", "Drone"],
+             "closed": True},
+            {"player": "Lyra-Voile-12", "tag": "AI", "planet": "Lyra-Voile-12 1", "coords": "M69 41 02", "actions": ["Flotte", "Piliers", "Sonde", "Drone"],
+             "spy": {"Fer": 1200, "Cristal": 800, "Éther": 50}},
             {"player": "Splif", "tag": "REPCO", "planet": "F5", "coords": "M69 06 25", "actions": ["Flotte", "Piliers", "Sonde", "Drone"]},
             {"player": "Hades33", "tag": "", "planet": "Gaia - M", "coords": "M69 99 83", "actions": ["Flotte", "Piliers", "Sonde", "Drone"]},
-            {"player": "Torek-Veine-165", "tag": "AI", "planet": "Torek-Veine-165 2", "coords": "M97 50 19", "actions": ["Flotte", "Piliers", "Sonde", "Drone"]},
+            {"player": "Torek-Veine-165", "tag": "AI", "planet": "Torek-Veine-165 2", "coords": "M97 50 19", "actions": ["Flotte", "Piliers", "Sonde", "Drone"],
+             "spy": {"Fer": 9e9, "Cristal": 9e9, "Éther": 9e9}, "drone_off": True},
             {"mining": True, "planet": "Planete miniere", "coords": "M69 40 68", "actions": ["Miner", "Sonde"]},
         ],
         "ship_mode": "assemblages",  # mode de production affiché sur les cartes de vaisseaux (« Construction » à choisir)
@@ -198,7 +218,8 @@ function card(p, it, kind, busy) {
 }
 const kfmt = (v) => v >= 1e9 ? (v / 1e9).toFixed(3).replace('.', ',') + ' G' : v >= 1e6 ? (v / 1e6).toFixed(3).replace('.', ',') + ' M' : v >= 1000 ? (v / 1000).toFixed(3).replace('.', ',') + ' K' : String(Math.round(v));
 const ui = {tab: 'Assaut', ship: 'Assemblages', way: 'Piliers', mission: 'ATTAQUE', techTab: 'Civil', zoom: 1, windowRows: [], modelsOpen: false,
-            form: {target: '', units: {}, copies: '1', duration: '1'}};
+            zoomLevel: 4.64, listShown: 25, toasts: [], report: null, freeRows: [],
+            form: {target: '', units: {}, copies: '1', duration: '1', hours: 6, mira: false}};
 (() => { const q = new URLSearchParams(location.search); if (q.get('mission')) ui.mission = q.get('mission'); if (q.get('method')) ui.way = q.get('method') === 'FLEET' ? 'Flotte' : 'Piliers'; })();
 const CK = {Fer: 'F', Cristal: 'C', 'Éther': 'E'};
 const costLeaves = (c) => Object.entries(c).map(([k, v]) => `<span>${CK[k]}: ${kfmt(v)}</span>`).join('');
@@ -247,16 +268,27 @@ function prodMain(p, s) {
   return '<h2>Chantier spatial</h2><h3>Actifs — Militaire : 6 · Civil : 3 · Total : 9/11</h3><div>' + tabs + '</div><div>' + ships + '</div>';
 }
 function galaxyMain() {
-  const rows = state.galaxy.map((r) => {
-    const actions = r.actions.map((a) => `<button type="button" aria-label="${a}"></button>`).join('');
+  const shown = state.galaxy.slice(0, ui.listShown);
+  const rows = shown.map((r) => {
+    const actions = r.actions.map((a) => a === 'Drone'
+      ? `<button type="button" aria-label="Drone" class="drone" data-c="${r.coords}" ${r.drone_off ? 'disabled' : ''}></button>`
+      : `<button type="button" aria-label="${a}"></button>`).join('');
     if (r.mining) return `<div class="continuous-inspector__list-row"><button type="button">${r.planet} ${r.coords}</button>${actions}</div>`;
     const who = r.tag ? `${r.player} [${r.tag}]` : r.player;
     return `<div class="continuous-inspector__list-row"><button type="button"></button><button type="button">${who}</button><button type="button">${r.planet} · ${r.coords}</button>${actions}</div>`;
   }).join('');
   const breaches = ui.windowRows.map((a) => `<div class="continuous-inspector__list-row"><button type="button">Brèches${a}</button><button type="button" aria-label="Flotte"></button><button type="button" aria-label="Piliers"></button></div>`).join('');
   const zoom = '<div><button type="button" class="zoom" data-z="-1" aria-label="Zoomer">+</button><button type="button" class="zoom" data-z="1" aria-label="Dézoomer">-</button>'
-    + '<button type="button" class="zoom" data-z="0" aria-label="Recentrer la carte">o</button></div>';
-  return '<h2>Galaxie</h2><input aria-label="Recherche de destination">' + zoom + '<section class="continuous-inspector__list">' + rows + breaches + '</section>';
+    + '<button type="button" class="zoom" data-z="0" aria-label="Recentrer la carte">o</button>'
+    + `<input type="range" id="zoom-level" aria-label="Niveau de zoom" min="0" max="6" step="0.01" value="${ui.zoomLevel}"></div>`;
+  const free = ui.freeRows.map((a) => `<div class="continuous-inspector__list-row"><button type="button">Planètes libres${a}</button><button type="button" aria-label="Coloniser"></button><button type="button" aria-label="Fouille"></button></div>`).join('');
+  const more = state.galaxy.length > ui.listShown ? '<button type="button" id="more">Afficher la suite</button>' : '';
+  const toast = ui.toasts.length ? `<div class="toasts">${ui.toasts.map((t) => `<div>${t.text}</div>`).join('')}</div>` : '';
+  const rep = ui.report;
+  const report = rep ? `<div role="dialog" aria-label="Espionnage"><div><span>Rapport de drone : ${rep.planet}</span>`
+    + '<button type="button" id="rclose" aria-label="Fermer le message">x</button><button type="button" id="rdel" aria-label="Supprimer le message">d</button></div>'
+    + Object.entries(rep.resources).map(([k, v]) => `<div><span>${k}</span><span>${int(v)}</span></div>`).join('') + '</div>' : '';
+  return '<h2>Galaxie</h2><input aria-label="Recherche de destination">' + zoom + '<section class="continuous-inspector__list">' + rows + breaches + free + more + '</section>' + toast + report;
 }
 // Opérations › Exploration : cible, modèles, unités, copies, durée, lancement (structure du vrai jeu).
 const METHOD = () => (ui.way === 'Flotte' ? 'FLEET' : 'PILLARS');
@@ -283,13 +315,68 @@ function expForm(p) {
     + `<button type="button">Mobilisation générale</button><button type="button" id="launch" ${ok ? '' : 'disabled'}>${ok ? 'Lancer l’exploration' : 'Aucune unité sélectionnée.'}</button>`
     + `<button type="button" id="recall" aria-label="Préparer le retour de la flotte">r</button>` + dialog;
 }
+// Opérations › Fouille : cible, héros, équipe (1 à 5 000), durée en boutons, compteurs, « Missions en cours » (vrai jeu, 07/11).
+const two = (n) => String(n).padStart(2, '0');
+function excCards() {
+  const now = Date.now() / 1000;
+  return state.exc.active.map((a) => {
+    const left = Math.max(0, Math.round(a.end - now)), end = new Date(a.end * 1000);
+    return `<div class="mcard"><div><span>Fouille</span><span>${a.hours} heures · 0 résultat</span></div>`
+      + `<div><span>Active : ${two(end.getHours())}:${two(end.getMinutes())}</span><span>${two(Math.floor(left / 3600))}:${two(Math.floor(left % 3600 / 60))}:${two(left % 60)}</span></div>`
+      + `<div><span>Origine</span><span>${a.origin}</span></div><div><span>Destination</span><span>${a.name}</span><span>${a.site}</span></div></div>`;
+  }).join('');
+}
+function excForm(p) {
+  const exc = state.exc, units = p.units.EXCAVATION, f = ui.form;
+  const missions = exc.active.length + exc.other_missions;
+  const total = Object.values(f.units).reduce((s, q) => s + (+q || 0), 0);
+  const valid = /^[A-Z]\\d{2} \\d{2} \\d{2}$/.test(f.target);
+  const ok = valid && total >= 1 && total <= 5000 && exc.active.length < exc.max && missions < 29
+    && Object.entries(f.units).every(([n, q]) => (+q || 0) <= (units[n] || 0));
+  const rows = Object.entries(units).map(([n, c]) => `<div><span>${n}</span><span>Stock : ${int(c)}</span><input type="number" placeholder="0" class="unit" data-u="${n}" aria-label="Quantité ${n}" value="${f.units[n] || ''}"></div>`).join('');
+  const hero = '<div><span>Héros de mission</span>'
+    + `<label><input type="radio" name="hero" class="hero" value="none" ${f.mira ? '' : 'checked'}> Lancer sans héros</label>`
+    + `<label><input type="radio" name="hero" class="hero" value="mira" ${f.mira ? 'checked' : ''} ${exc.mira_busy ? 'disabled' : ''}><span>Mira Venn · Niveau 8</span><span>${exc.mira_busy ? 'En mission' : 'Disponible'}</span></label></div>`;
+  const hours = [3, 6, 12, 24].map((h) => `<button type="button" class="edur" data-h="${h}" aria-pressed="${f.hours === h}">${h} heures</button>`).join('');
+  return `<div class="cible"><label>Cible</label><button type="button">Favoris</button><input type="text" id="target" placeholder="G46 50 50" value="${f.target}">${valid ? `<span class="font-mono">${f.target}</span>` : ''}</div>`
+    + hero + `<div><h3>2. Composition de mission</h3><button type="button">Modèles</button>${rows}</div><button type="button">Mobilisation générale</button>`
+    + `<div><h3>Durée et lancement</h3>${hours}<div><span>Fouilles actives</span><span>${exc.active.length} / ${exc.max}</span></div>`
+    + `<div><span>Missions actives</span><span>${missions} / 29</span></div>`
+    + `<button type="button" id="elaunch" ${ok ? '' : 'disabled'}>Lancer la fouille</button></div>`
+    + `<section><h3>Missions en cours</h3>${excCards()}</section>`;
+}
+// Opérations › Piratage : cible, carte de Naël Soryn, durée fixe, « Missions en cours » (vrai jeu, 07/11).
+function hackCards() {
+  const h = state.hack.active;
+  if (!h) return '';
+  const now = Date.now() / 1000, left = Math.max(0, Math.round(h.end - now)), end = new Date(h.end * 1000);
+  return `<div class="mcard"><div><span>Piratage</span><span># 102-02971</span><span>0 U</span></div>`
+    + `<div><span>Arrivée : ${two(end.getHours())}:${two(end.getMinutes())}:${two(end.getSeconds())}</span><span>${two(Math.floor(left / 3600))}:${two(Math.floor(left % 3600 / 60))}:${two(left % 60)}</span></div>`
+    + `<div><span>Origine</span><span>${h.origin}</span><span>${h.origin_coords}</span><span>KameGrazi</span></div>`
+    + `<div><span>Destination</span><span>${h.name}</span><span>${h.target}</span></div></div>`;
+}
+function hackForm() {
+  const f = ui.form, busy = state.hack.busy || !!state.hack.active;
+  const valid = /^[A-Z]\\d{2} \\d{2} \\d{2}$/.test(f.target);
+  // Un formulaire d'une autre mission reste caché dans la page, comme sur le vrai jeu.
+  return '<div hidden><label>Cible</label><input type="text" placeholder="G46 50 50"><span>Naël Soryn</span><span>Disponible</span></div>'
+    + `<div class="cible"><label>Cible</label><input type="text" id="target" placeholder="G46 50 50" value="${f.target}">${valid ? `<span class="font-mono">${f.target}</span>` : ''}</div>`
+    + `<div><h3>Piratage par les Piliers</h3><div><span>Naël Soryn</span><span>Niveau 11</span><span>${busy ? 'Indisponible' : 'Disponible'}</span></div>`
+    + `<div><span>Durée fixe</span><span>30 min</span></div><div><span>Quota cible du jour</span><span>${valid ? '0 / ∞' : 'Inconnu'}</span></div></div>`
+    + `<button type="button" id="hlaunch" ${valid && !busy ? '' : 'disabled'}>Lancer le piratage</button>`
+    + `<section><h3>Missions en cours</h3>${hackCards()}${excCards()}</section>`
+    + (ui.toasts.length ? `<div class="toasts">${ui.toasts.map((t) => `<div>${t.text}</div>`).join('')}</div>` : '');
+}
 function opsMain() {
   const ex = state.exp;
   const ways = ['Piliers', 'Flotte'].map((w) => `<button type="button" class="way" data-way="${w}">${w.toUpperCase()}</button>`).join('');
-  const missions = ['ATTAQUE', 'TRANSPORT', 'EXPLORATION', 'FOUILLE'].map((m) => `<button type="button" class="mission" data-m="${m}">${m}</button>`).join('');
+  const missions = [['ATTAQUE', 'Attaque'], ['TRANSPORT', 'Transport'], ['EXPLORATION', 'Exploration'], ['EXCAVATION', 'Fouille'], ['HACKING', 'Piratage']]
+    .map(([m, label]) => `<button type="button" class="mission" data-m="${m}">${label}</button>`).join('');
   let body = '';
   if (ui.mission === 'ATTAQUE') body = '<div><span>2. Composition de mission</span></div><button type="button">LANCEMENT BLOQUÉ</button>';
   if (ui.mission === 'EXPLORATION') body = expForm(state.planets[state.active]);
+  if (ui.mission === 'EXCAVATION') body = excForm(state.planets[state.active]);
+  if (ui.mission === 'HACKING') body = hackForm();
   return '<h2>Opérations</h2><div><span>Moyen de lancement</span>' + ways + '</div><div><span>Mission</span>' + missions + '</div>' + body;
 }
 function sensors() {
@@ -347,8 +434,31 @@ function render() {
     ui.zoom = Math.max(0, Math.min(3, ui.zoom + (+b.dataset.z)));
     const r = await (await post('/map/continuous/window', {zoom: ui.zoom})).json();
     ui.windowRows = r.rows || [];
+    ui.freeRows = r.free_rows || [];
     render();
   });
+  const zl = document.getElementById('zoom-level');
+  if (zl) {
+    zl.oninput = () => { ui.zoomLevel = +zl.value; };
+    zl.onchange = () => { ui.zoomLevel = +zl.value; post('/api/_zoom', {level: +zl.value}); };
+  }
+  const mo = document.getElementById('more'); if (mo) mo.onclick = () => { ui.listShown += 25; render(); };
+  document.querySelectorAll('.drone').forEach((b) => b.onclick = async () => {
+    const r = await (await post('/map/continuous/destination', {coords: b.dataset.c, action: 'DRONE'})).json();
+    if (r.refused) {  // les messages s'empilent et disparaissent chacun après 3 s ; un message identique encore affiché n'est pas répété
+      if (ui.toasts.some((x) => x.text === r.refused)) return;
+      const t = {text: r.refused};
+      ui.toasts.push(t);
+      setTimeout(() => { ui.toasts = ui.toasts.filter((x) => x !== t); render(); }, 3000);
+    } else ui.report = r.report;
+    render();
+  });
+  const rcl = document.getElementById('rclose'); if (rcl) rcl.onclick = () => { ui.report = null; render(); };
+  const rdl = document.getElementById('rdel'); if (rdl) rdl.onclick = async () => {
+    await post('/api/_spy_delete', {planet: ui.report.planet});
+    ui.report = null;
+    render();
+  };
   const tgt = document.getElementById('target');
   if (tgt) tgt.oninput = () => { ui.form.target = fmtTarget(tgt.value); render(); };
   document.querySelectorAll('.unit').forEach((i) => i.oninput = () => { ui.form.units[i.dataset.u] = i.value; render(); });
@@ -364,6 +474,26 @@ function render() {
   });
   document.querySelectorAll('.del').forEach((b) => b.onclick = () => post('/api/_forbidden', {what: 'Supprimer un modèle'}));
   const rc = document.getElementById('recall'); if (rc) rc.onclick = () => post('/api/_forbidden', {what: 'Préparer le retour de la flotte'});
+  document.querySelectorAll('.edur').forEach((b) => b.onclick = () => { ui.form.hours = +b.dataset.h; render(); });
+  document.querySelectorAll('.hero').forEach((r) => r.onchange = () => { ui.form.mira = r.value === 'mira' && r.checked; render(); });
+  const hg = document.getElementById('hlaunch');
+  if (hg) hg.onclick = async () => {
+    const r = await (await post('/api/hack', {target: ui.form.target})).json();
+    if (r.refused) {
+      const t = {text: r.refused};
+      ui.toasts.push(t);
+      setTimeout(() => { ui.toasts = ui.toasts.filter((x) => x !== t); render(); }, 3000);
+    }
+    await load();
+  };
+  const eg = document.getElementById('elaunch');
+  if (eg) eg.onclick = async () => {
+    const f = ui.form;
+    const r = await post('/api/excavate', {target: f.target, hours: f.hours, mira: f.mira,
+                                           units: Object.fromEntries(Object.entries(f.units).map(([k, v]) => [k, +v || 0]))});
+    if (r.ok) ui.form = {target: '', units: {}, copies: '1', duration: '1', hours: 6, mira: false};
+    await load();
+  };
   const go = document.getElementById('launch');
   if (go) go.onclick = async () => {
     const f = ui.form;
@@ -556,12 +686,40 @@ def create_mock_game() -> FastAPI:
 
         objects = [{"kind": "PLANET", "address": c, "positionMilli": [x * 1000, y * 1000]} for c, (x, y) in positions.items() if inside(x, y)]
         objects += [{"kind": "BREACH", "address": a, "positionMilli": [x * 1000, y * 1000]} for a, x, y in breaches if inside(x, y)]
+        objects += [{"kind": "PVE_PLANET", "address": a, "name": n, "positionMilli": [x * 1000, y * 1000]}
+                    for a, n, x, y in g["map"]["errants"] if inside(x, y)]
+        free = g["map"]["free"]
+        objects += [{"kind": "FREE_SLOT", "address": a, "positionMilli": [x * 1000, y * 1000], "capabilities": ["COLONIZE", "EXCAVATION"]}
+                    for a, x, y in free if inside(x, y)]
+        free_rows = [a for a, x, y in free if inside(x, y, radius if g["map"]["api"] else ZOOM_RADII[2])]
         detail = zoom <= 2 and g["map"]["api"]
         # Sans le détail (secours), la liste « Ensemble » montre quand même les brèches proches
         rows = [a for a, x, y in breaches if inside(x, y, radius if g["map"]["api"] else ZOOM_RADII[2])]
         bounds = [[(cx - radius) * 1000, (cy - radius) * 1000], [(cx + radius) * 1000, (cy + radius) * 1000]]
-        return {"success": True, "rows": rows,
+        return {"success": True, "rows": rows, "free_rows": free_rows,
                 "projection": {"mode": "DETAIL" if detail else "SUMMARY", "boundsMilli": bounds, "objects": objects if detail else []}}
+
+    @app.post("/map/continuous/destination")
+    async def destination(request: Request):
+        """Clic sur Drone d'une ligne de la Galaxie : message (piliers fermés, refus) ou rapport de drone."""
+        g, body = app.state.game, await request.json()
+        row = next(r for r in g["galaxy"] if r["coords"] == body["coords"])
+        g["actions"].append({"kind": "drone", "target": row["coords"], "planet": row["planet"]})
+        if row.get("closed"):
+            return {"refused": "Impossible d'atteindre la cible : les piliers de la colonie de destination sont désactivés."}
+        if row.get("refuse"):
+            return {"refused": row["refuse"]}
+        return {"report": {"planet": row["planet"], "resources": row.get("spy") or {"Fer": 0, "Cristal": 0, "Éther": 0}}}
+
+    @app.post("/api/_spy_delete")
+    async def spy_delete(request: Request):
+        app.state.game["actions"].append({"kind": "spy_delete", "planet": (await request.json())["planet"]})
+        return {"ok": True}
+
+    @app.post("/api/_zoom")
+    async def zoom_level(request: Request):
+        app.state.game["actions"].append({"kind": "zoom", "level": (await request.json())["level"]})
+        return {"ok": True}
 
     @app.post("/api/explore")
     async def explore(request: Request):
@@ -581,6 +739,69 @@ def create_mock_game() -> FastAPI:
             avail[n] -= q * copies
         g["actions"].append({"kind": "exploration", "planet": planet["name"], "method": body["method"], "target": body["target"],
                              "units": units, "copies": copies, "duration": int(body["duration"])})
+        return {"ok": True}
+
+    @app.post("/api/excavate")
+    async def excavate(request: Request):
+        """« Lancer la fouille » : refusée si l'équipe, les places ou le site ne conviennent pas (comme le vrai jeu)."""
+        g, body = app.state.game, await request.json()
+        exc, planet = g["exc"], g["planets"][g["active"]]
+        units = {k: int(v) for k, v in body["units"].items() if int(v) > 0}
+        avail = planet["units"]["EXCAVATION"]
+        if (not 1 <= sum(units.values()) <= 5000 or len(exc["active"]) >= exc["max"]
+                or any(q > avail.get(n, 0) for n, q in units.items())
+                or any(a["site"] == body["target"] for a in exc["active"]) or (body["mira"] and exc["mira_busy"])):
+            raise HTTPException(409, "fouille refusée")
+        if exc["no_effect"]:
+            return {"ok": True}  # clic sans effet visible : le compteur ne bouge pas
+        for n, q in units.items():
+            avail[n] -= q
+        hours = int(body["hours"])
+        exc["active"].append({"origin": planet["name"], "site": body["target"], "name": f"Site {body['target']}", "hours": hours,
+                              "end": time.time() + hours * 3600})
+        exc["mira_busy"] = exc["mira_busy"] or bool(body["mira"])
+        g["actions"].append({"kind": "excavation", "planet": planet["name"], "target": body["target"], "units": units,
+                             "hours": hours, "mira": bool(body["mira"])})
+        return {"ok": True}
+
+    @app.post("/api/hack")
+    async def hack(request: Request):
+        """« Lancer le piratage » : refusé (message) si les piliers de l'Errant sont fermés, sinon Naël part 30 minutes."""
+        g, body = app.state.game, await request.json()
+        h, planet = g["hack"], g["planets"][g["active"]]
+        if h["busy"] or h["active"]:
+            raise HTTPException(409, "Naël est indisponible")
+        row = next((r for r in g["galaxy"] if r.get("coords") == body["target"]), None)
+        g["actions"].append({"kind": "hack", "planet": planet["name"], "target": body["target"]})
+        if row is not None and row.get("closed"):
+            return {"refused": "Impossible d'atteindre la cible : les piliers de la colonie de destination sont désactivés."}
+        if h["no_effect"]:
+            return {"ok": True}
+        h["active"] = {"origin": planet["name"], "origin_coords": planet["coords"], "target": body["target"],
+                       "name": row["planet"] if row else body["target"], "end": time.time() + 1800}
+        return {"ok": True}
+
+    @app.post("/api/_hack")
+    async def set_hack(request: Request):
+        """Crochet de test : Naël occupé, piratage en cours (« end_in » secondes) ou terminé (active: null), clic sans effet."""
+        body, h = await request.json(), app.state.game["hack"]
+        for key in ("busy", "no_effect"):
+            if key in body:
+                h[key] = body[key]
+        if "active" in body:
+            a = body["active"]
+            h["active"] = None if a is None else {"origin_coords": "M69 38 06", "name": a["target"], **a, "end": time.time() + a.pop("end_in", 1800)}
+        return {"ok": True}
+
+    @app.post("/api/_exc")
+    async def set_exc(request: Request):
+        """Crochet de test : plafond, Fouilles en cours (« end_in » en secondes), Mira, autres missions, clic sans effet."""
+        body, exc = await request.json(), app.state.game["exc"]
+        for key in ("max", "mira_busy", "other_missions", "no_effect"):
+            if key in body:
+                exc[key] = body[key]
+        if "active" in body:
+            exc["active"] = [{"name": f"Site {a['site']}", **a, "end": time.time() + a.pop("end_in", 3600)} for a in body["active"]]
         return {"ok": True}
 
     @app.post("/api/_forbidden")
