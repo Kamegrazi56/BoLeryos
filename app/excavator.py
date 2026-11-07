@@ -84,6 +84,43 @@ MISSIONS_JS = (
 }"""
 )
 
+# La page a reçu ses données : « Missions en cours » montre des cartes ou « Aucune mission disponible » (vrai jeu : ~1,5 s
+# après l'ouverture ; avant, les stocks, Naël et les missions affichent des valeurs provisoires).
+MISSIONS_READY_JS = (
+    "() => {"
+    + _PRELUDE_JS
+    + """
+  const head = [...document.querySelectorAll('main *')].find((e) => own(e) === 'Missions en cours' && visible(e));
+  let box = head;
+  while (box && box.parentElement && text(box) === text(head)) box = box.parentElement;
+  return !!box && (/Aucune mission/i.test(text(box)) || (/Origine/.test(text(box)) && /Destination/.test(text(box))));
+}"""
+)
+
+READY_SECONDS = 4.0  # attente d'un bouton ou d'un état qui se met à jour après le chargement des données
+
+
+async def wait_missions_loaded(page, seconds: float = PAGE_WAIT_SECONDS) -> None:
+    """Attend que la page Opérations ait reçu ses données (« Missions en cours » rempli), puis une courte pause."""
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if await page.evaluate(MISSIONS_READY_JS):
+            await asyncio.sleep(0.5)
+            return
+        await asyncio.sleep(0.25)
+    raise GameUiError("la liste « Missions en cours » ne se charge pas")
+
+
+async def wait_enabled(locator, seconds: float = READY_SECONDS) -> bool:
+    end = time.monotonic() + seconds
+    while True:
+        if await locator.count() and await locator.first.is_enabled():
+            return True
+        if time.monotonic() >= end:
+            return False
+        await asyncio.sleep(0.25)
+
+
 # Héros : marque la ligne « Mira Venn » si elle est disponible. Réponses : checked, marked, busy, absent.
 MARK_MIRA_JS = (
     "(attribute) => {"
@@ -240,6 +277,7 @@ class ExcavationPass(ExplorationPass):
         while time.monotonic() < end:
             if await self.page.evaluate(MARK_TARGET_JS, TARGET_ATTRIBUTE) and (await self._eval(COUNTERS_JS)).get("excavations"):
                 await self.page.evaluate(CLEAR_MARK_JS, TARGET_ATTRIBUTE)
+                await wait_missions_loaded(self.page)
                 return
             await asyncio.sleep(0.25)
         raise GameUiError("la page Opérations › Fouille ne s'affiche pas")
@@ -349,8 +387,8 @@ class ExcavationPass(ExplorationPass):
             return None
         hero = await self._pick_mira() if line["mira"] else ""
         go = page.get_by_role("button", name=LAUNCH_NAME)
-        if not await go.count() or not await go.first.is_enabled():
-            self._skip(planet, "pas assez d'unités, d'énergie ou de RT")
+        if not await wait_enabled(go):  # le jeu valide l'équipe et les coûts un instant après la saisie
+            self._skip(planet, "« Lancer la fouille » reste grisé (unités, énergie ou RT insuffisants, ou site déjà fouillé)")
             return None
         before = await self._counters()
         await self._guard()

@@ -16,7 +16,7 @@ import time
 
 from . import builder, human
 from .builder import UNCONFIRMED_LIMIT
-from .excavator import MISSIONS_JS
+from .excavator import MISSIONS_JS, READY_SECONDS, wait_enabled, wait_missions_loaded
 from .explorer import CLEAR_MARK_JS, MARK_TARGET_JS, TARGET_ATTRIBUTE, ExplorationPass
 from .hackings import TARGETS_KEPT
 from .planets import GameUiError, Interrupted
@@ -109,6 +109,7 @@ class HackingPass(ExplorationPass):
         while time.monotonic() < end:
             if await self.page.evaluate(MARK_TARGET_JS, TARGET_ATTRIBUTE) and await self.page.evaluate(NAEL_JS):
                 await self.page.evaluate(CLEAR_MARK_JS, TARGET_ATTRIBUTE)
+                await wait_missions_loaded(self.page)
                 return
             await asyncio.sleep(0.25)
         raise GameUiError("la page Opérations › Piratage ne s'affiche pas")
@@ -125,7 +126,7 @@ class HackingPass(ExplorationPass):
             wait = self._sync(s, await self.page.evaluate(MISSIONS_JS, "Piratage"))
             if wait:
                 return wait
-            if await self.page.evaluate(NAEL_JS) != "available":
+            if not await self._nael_available():
                 return "Naël Soryn n'est pas disponible"
             return await self._launch_next(s)
         except Interrupted as exc:
@@ -133,6 +134,16 @@ class HackingPass(ExplorationPass):
         except GameUiError as exc:
             self.bot.log(f"Piratage : {exc}.", "warn", event=True)
             return f"arrêté ({exc})"
+
+    async def _nael_available(self) -> bool:
+        """Vu sur le vrai jeu : l'état de Naël peut s'afficher un instant après le reste de la page."""
+        end = time.monotonic() + READY_SECONDS
+        while True:
+            if await self.page.evaluate(NAEL_JS) == "available":
+                return True
+            if time.monotonic() >= end:
+                return False
+            await asyncio.sleep(0.25)
 
     def _sync(self, s: dict, missions: list[dict]) -> str:
         """Met à jour la fin du piratage en cours ; renvoie pourquoi on attend, ou "" si l'on peut relancer."""
@@ -179,10 +190,10 @@ class HackingPass(ExplorationPass):
         if not await self._fill_target(target["address"]):
             self.bot.log(f"Piratage : cible {label} refusée par le jeu.", "warn", event=True)
             return "refused"
-        if await page.evaluate(NAEL_JS) != "available":
+        if not await self._nael_available():
             return "Naël Soryn n'est pas disponible"
         go = page.get_by_role("button", name=LAUNCH_NAME)
-        if not await go.count() or not await go.first.is_enabled():
+        if not await wait_enabled(go):
             return "« Lancer le piratage » est grisé (énergie ou RT insuffisants ?)"
         before = len(await page.evaluate(MESSAGES_JS))
         await self._guard()

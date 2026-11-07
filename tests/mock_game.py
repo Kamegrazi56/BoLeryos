@@ -343,7 +343,7 @@ function excForm(p) {
     + `<div><h3>Durée et lancement</h3>${hours}<div><span>Fouilles actives</span><span>${exc.active.length} / ${exc.max}</span></div>`
     + `<div><span>Missions actives</span><span>${missions} / 29</span></div>`
     + `<button type="button" id="elaunch" ${ok ? '' : 'disabled'}>Lancer la fouille</button></div>`
-    + `<section><h3>Missions en cours</h3>${excCards()}</section>`;
+    + `<section><h3>Missions en cours</h3>${excCards() || '<p>Aucune mission disponible</p>'}</section>`;
 }
 // Opérations › Piratage : cible, carte de Naël Soryn, durée fixe, « Missions en cours » (vrai jeu, 07/11).
 function hackCards() {
@@ -364,7 +364,7 @@ function hackForm() {
     + `<div><h3>Piratage par les Piliers</h3><div><span>Naël Soryn</span><span>Niveau 11</span><span>${busy ? 'Indisponible' : 'Disponible'}</span></div>`
     + `<div><span>Durée fixe</span><span>30 min</span></div><div><span>Quota cible du jour</span><span>${valid ? '0 / ∞' : 'Inconnu'}</span></div></div>`
     + `<button type="button" id="hlaunch" ${valid && !busy ? '' : 'disabled'}>Lancer le piratage</button>`
-    + `<section><h3>Missions en cours</h3>${hackCards()}${excCards()}</section>`
+    + `<section><h3>Missions en cours</h3>${(hackCards() + excCards()) || '<p>Aucune mission disponible</p>'}</section>`
     + (ui.toasts.length ? `<div class="toasts">${ui.toasts.map((t) => `<div>${t.text}</div>`).join('')}</div>` : '');
 }
 function opsMain() {
