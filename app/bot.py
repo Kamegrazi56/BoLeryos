@@ -43,7 +43,8 @@ from .shipyard import ComponentPass, ShipPass
 from .explorations import ExplorationStore
 from .explorer import ExplorationPass
 from .features import FEATURES, FeatureStore
-from . import bonus
+from . import bonus, planning
+from .planning import PlanningStore
 from .excavations import ExcavationStore
 from .excavator import ExcavationPass
 from .hacker import HackingPass
@@ -171,6 +172,7 @@ class BotSession:
         self.excavator = ExcavationPass(self, self.excavations)  # Fouilles vers le site libre le plus proche
         self.hackings = HackingStore(settings.data_dir)  # Piratage : planète de départ, délai, Errants les plus proches, suivi
         self.hacker = HackingPass(self, self.hackings)  # Naël Soryn pirate en boucle l'Errant le plus proche
+        self.planning = PlanningStore(settings.data_dir)  # plages horaires actives par jour (heure française)
         self.spying = SpySettings(settings.data_dir)  # espionnage des Errants : planète, minimums, nombre de ressources
         self.spy = SpyCampaign(self, self.spying)  # campagne manuelle : un drone par Errant visible, rapports gardés ou supprimés
         # Ordonnanceur des fonctionnalités (réglages enregistrés ; l'interrupteur général repasse toujours à OFF au démarrage)
@@ -178,7 +180,7 @@ class BotSession:
             self,
             FeatureStore(settings.data_dir, FEATURES, settings.feature_min_minutes),
             FEATURES,
-            blocker=self.supervisor.game_blocker,
+            blocker=self._feature_blocker,
             gap=(settings.feature_gap_min, settings.feature_gap_max),
             tick=settings.scheduler_tick,
         )
@@ -203,6 +205,31 @@ class BotSession:
                   "ships": self.shipper, "components": self.producer, "explorations": self.explorer, "excavations": self.excavator, "hackings": self.hacker}
         if feature_id in passes:
             passes[feature_id]._unconfirmed = 0
+
+    def planning_pause(self) -> str | None:
+        """Bot sur ON hors d'une plage du planning : rien ne tourne et le bot se déconnecte (None : il peut agir).
+        Sur OFF, en contrôle manuel ou pendant une campagne d'espionnage (manuelle), le planning ne s'applique pas."""
+        if not self.scheduler.on or self._manual or self.spy.running:
+            return None
+        return planning.pause_reason(self.planning.get())
+
+    def _feature_blocker(self) -> str | None:
+        return self.planning_pause() or self.supervisor.game_blocker()
+
+    async def pause_session(self, reason: str) -> None:
+        """Hors planning : le passage en cours se termine, puis la session de jeu est effacée (déconnexion).
+        Les identifiants restent en mémoire : la reconnexion se fait seule au début de la plage suivante."""
+        async with self.work:
+            self._session_store.clear()
+            async with self._lock:
+                if self._page is not None:
+                    try:
+                        await self._reset_context()
+                    except Exception as exc:  # noqa: BLE001
+                        self.log(f"Erreur pendant la déconnexion ({type(exc).__name__}).", "error")
+                self._dirty = False
+                self._set(State.IDLE, f"Déconnecté : {reason}.")
+        self.log(f"Planning : {reason} ; déconnexion du jeu.", event=True)
 
     async def claim_bonus(self) -> str | None:
         """Récupère le bonus d'activité s'il est disponible (appelé au début de chaque action du bot)."""

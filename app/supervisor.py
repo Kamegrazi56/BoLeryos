@@ -54,6 +54,7 @@ class ConnectionSupervisor:
         self._unknown_since: float | None = None
         self._universe_attempts = 0
         self._in_game = False
+        self._paused = False  # déconnecté par le planning (bot sur ON hors plage)
         self._last_notes: dict[str, str] = {}
 
     # ------------------------------------------------------------------ état
@@ -189,6 +190,16 @@ class ConnectionSupervisor:
         b = self.bot
         if b._manual:
             return "contrôle manuel activé"
+        pause = b.planning_pause()
+        if pause:  # bot sur ON hors planning : déconnexion une seule fois, puis plus rien jusqu'à la plage suivante
+            if not self._paused:
+                self._paused = True
+                self._in_game = False
+                await b.pause_session(pause)
+            return pause
+        if self._paused:
+            self._paused = False
+            b.log("Planning : début de plage, reconnexion au jeu.", event=True)
         if b._lock.locked():
             return "une autre opération est en cours"
         if b._page is None or b._page.is_closed():

@@ -105,7 +105,7 @@ def test_the_removed_features_have_no_settings_and_no_routes(ui):
     page, _, _ = ui
     page.goto(page.base + "/reglages")
     tabs = [t.strip().lower() for t in page.locator("[role=tab]").all_inner_texts()]
-    assert tabs == ["compte et univers", "fonctionnalités", "constructions", "recherches", "population", "assemblages", "composants", "exploration", "fouilles", "piratage", "espionnage"]
+    assert tabs == ["compte et univers", "fonctionnalités", "constructions", "recherches", "population", "assemblages", "composants", "exploration", "fouilles", "piratage", "espionnage", "planning"]
     for tab in tabs:  # aucune section supprimée ne réapparaît, quel que soit l'onglet
         page.click(f"[role=tab]:has-text('{tab}')", strict=False)
         text = page.inner_text("main").lower()
@@ -351,11 +351,11 @@ def test_population_panel_sets_mode_quantity_and_planet_for_each_population(ui):
     assert errors == []
 
 
-def test_settings_page_has_eleven_tabs_and_only_one_panel_shows_at_a_time(ui):
+def test_settings_page_has_twelve_tabs_and_only_one_panel_shows_at_a_time(ui):
     page, errors, _ = ui
     page.goto(page.base + "/reglages")
-    ids = ["account", "features", "constructions", "researches", "populations", "ships", "components", "explorations", "excavations", "hackings", "spying"]
-    assert page.locator("[role=tab]").count() == 11
+    ids = ["account", "features", "constructions", "researches", "populations", "ships", "components", "explorations", "excavations", "hackings", "spying", "planning"]
+    assert page.locator("[role=tab]").count() == 12
     for tab in ids:
         page.click(f"#tab-{tab}")
         assert page.get_attribute(f"#tab-{tab}", "aria-selected") == "true"
@@ -380,6 +380,8 @@ def test_settings_page_has_eleven_tabs_and_only_one_panel_shows_at_a_time(ui):
     page.press("#tab-hackings", "ArrowRight")
     assert page.locator("#panel-spying").is_visible()
     page.press("#tab-spying", "ArrowRight")
+    assert page.locator("#panel-planning").is_visible()
+    page.press("#tab-planning", "ArrowRight")
     assert page.locator("#panel-account").is_visible()
     assert errors == []
 
@@ -410,6 +412,26 @@ def test_excavation_panel_saves_a_line_with_its_team_and_the_delay(ui):
     assert app.state.bot.excavations.get() == {"lines": [{"planet": planets[0], "units": {"Scientifique": 3000, "Mineur": 2000},
                                                           "duration": 12, "slots": 2, "mira": True}], "delay_min": 5, "delay_max": 15}
     assert "Équipe : 5000 / 5000" in page.text_content("#exc-lines")
+    assert errors == []
+
+
+def test_planning_panel_saves_slots_and_the_random_offset(ui):
+    page, errors, app = ui
+    page.goto(page.base + "/reglages#planning")
+    page.wait_for_selector("#plan-days button[aria-label='Ajouter une plage le lundi']")
+    page.check("#plan-enabled")
+    page.click("#plan-days button[aria-label='Ajouter une plage le lundi']")
+    page.fill("#plan-days input[aria-label='Lundi, plage 1, début']", "07:30")
+    page.fill("#plan-days input[aria-label='Lundi, plage 1, fin']", "11:45")
+    page.click("#plan-days button[aria-label='Ajouter une plage le mardi']")
+    page.fill("#plan-offset-min", "2")
+    page.fill("#plan-offset-max", "9")
+    page.click("#plan-save")
+    page.wait_for_function("document.getElementById('plan-msg').textContent === 'Enregistré.'")
+    saved = app.state.bot.planning.get()
+    assert saved["enabled"] is True and saved["offset_min"] == 2 and saved["offset_max"] == 9
+    assert saved["days"]["mon"] == [{"start": "07:30", "end": "11:45"}] and saved["days"]["tue"] == [{"start": "08:00", "end": "12:00"}]
+    assert page.text_content("#plan-status").startswith(("Dans une plage", "Hors plage"))
     assert errors == []
 
 

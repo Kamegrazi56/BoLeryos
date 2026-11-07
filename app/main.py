@@ -33,6 +33,10 @@ from .excavations import MAX_TEAM as EXCAVATION_MAX_TEAM
 from .excavations import UNITS as EXCAVATION_UNITS
 from .excavations import ExcavationError
 from .hackings import HackingError
+from .planning import DAY_LABELS as PLANNING_DAY_LABELS
+from .planning import PlanningError
+from .planning import describe as planning_describe
+from .planning import state as planning_state
 from .spying import RESOURCES as SPY_RESOURCES
 from .spying import SpyingError
 
@@ -148,6 +152,18 @@ class HackingRequest(BaseModel):
     planet: str = Field(default="", max_length=200)
     delay_min: int | None = Field(default=None, ge=0, le=100_000)
     delay_max: int | None = Field(default=None, ge=0, le=100_000)
+
+
+class PlanningSlot(BaseModel):
+    start: str = Field(default="", max_length=5)
+    end: str = Field(default="", max_length=5)
+
+
+class PlanningRequest(BaseModel):
+    enabled: bool = False
+    days: dict[str, list[PlanningSlot]] = Field(default_factory=dict, max_length=7)
+    offset_min: int = Field(default=0, ge=0, le=10_000)
+    offset_max: int = Field(default=0, ge=0, le=10_000)
 
 
 class SpyingRequest(BaseModel):
@@ -627,6 +643,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if bot.hackings.get()["planet"]:
             await bot.hacker.scan("manuel")
         return JSONResponse(_hackings_payload(), headers=NO_STORE)
+
+    # --- Planning : plages horaires actives par jour (heure française) -----------
+    def _planning_payload() -> dict:
+        settings = bot.planning.get()
+        st = planning_state(settings)
+        if not settings["enabled"]:
+            message = "Planning désactivé : le bot agit à toute heure quand il est sur ON."
+        elif st["active"]:
+            message = f"Dans une plage active jusqu'à {planning_describe(st['until'])}."
+        else:
+            message = f"Hors plage : reprise {planning_describe(st['next'])}." if st["next"] else "Hors plage : aucune plage prévue."
+        return {"settings": settings, "active": st["active"], "message": message, "days": PLANNING_DAY_LABELS,
+                "persistent": bot.planning.persistent}
+
+    @app.get("/api/planning")
+    async def api_planning():
+        return JSONResponse(_planning_payload(), headers=NO_STORE)
+
+    @app.put("/api/planning")
+    async def api_planning_put(body: PlanningRequest, request: Request):
+        _check_origin(request)
+        try:
+            bot.planning.replace(body.model_dump())
+        except PlanningError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        bot.log("Planning enregistré.", event=True)
+        return JSONResponse(_planning_payload(), headers=NO_STORE)
 
     # --- Espionnage des Errants : réglages et campagne manuelle (le bot passe sur OFF) -----------
     def _spying_payload() -> dict:
