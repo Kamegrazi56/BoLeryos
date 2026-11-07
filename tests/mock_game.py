@@ -132,6 +132,8 @@ def initial_state():
                             ["M69 34 68", "Kairo-Vigie-378 7", 11600, 1600], ["M69 41 02", "Lyra-Voile-12 1", 11700, 1700]]},
         # Piratage : Naël Soryn (occupé ou non), piratage en cours (cible, fin), clic sans effet
         "hack": {"busy": False, "active": None, "no_effect": False},
+        # Bonus d'activité : bouton présent seulement quand un gain est disponible (vrai jeu, 07/11)
+        "bonus": False,
         # Fouilles : plafond personnel, Fouilles en cours (origine, site, durée, fin), Mira Venn, autres missions actives
         "exc": {"max": 6, "active": [], "mira_busy": False, "other_missions": 0, "no_effect": False},
         # Capteurs interstellaires : un déploiement du joueur, comme dans l'export (aucune attaque au départ)
@@ -412,6 +414,8 @@ function render() {
     + '<button><span class="sr-only">Vue d’ensemble</span></button></nav>'
     + `<div id="overlay" ${overlayOpen ? '' : 'hidden'}><button id="close-ov">Fermer</button><button>Arrêter la rotation</button>${planets}</div>`
     + sensors()
+    + (state.bonus ? '<button type="button" data-guidance-target="activity-bonus" id="bonus"><span data-testid="navigation-bonus-pulse" aria-hidden="true"></span>Bonus</button>' : '')
+    + (ui.bonusMsg ? `<div class="bonus-toast">${ui.bonusMsg}</div>` : '')
     + (state.popup ? '<div role="dialog"><button>Confirmer</button></div>' : '');
   document.getElementById('open-planets').onclick = () => { overlayOpen = true; render(); };
   document.getElementById('close-ov').onclick = () => { overlayOpen = false; render(); };
@@ -476,6 +480,13 @@ function render() {
   const rc = document.getElementById('recall'); if (rc) rc.onclick = () => post('/api/_forbidden', {what: 'Préparer le retour de la flotte'});
   document.querySelectorAll('.edur').forEach((b) => b.onclick = () => { ui.form.hours = +b.dataset.h; render(); });
   document.querySelectorAll('.hero').forEach((r) => r.onchange = () => { ui.form.mira = r.value === 'mira' && r.checked; render(); });
+  const bn = document.getElementById('bonus');
+  if (bn) bn.onclick = async () => {
+    const r = await (await post('/api/bonus', {})).json();
+    ui.bonusMsg = r.message;
+    setTimeout(() => { ui.bonusMsg = null; render(); }, 4000);
+    await load();
+  };
   const hg = document.getElementById('hlaunch');
   if (hg) hg.onclick = async () => {
     const r = await (await post('/api/hack', {target: ui.form.target})).json();
@@ -762,6 +773,21 @@ def create_mock_game() -> FastAPI:
         exc["mira_busy"] = exc["mira_busy"] or bool(body["mira"])
         g["actions"].append({"kind": "excavation", "planet": planet["name"], "target": body["target"], "units": units,
                              "hours": hours, "mira": bool(body["mira"])})
+        return {"ok": True}
+
+    @app.post("/api/bonus")
+    async def bonus(request: Request):
+        """Clic sur « Bonus » : gain crédité, bouton retiré (prochain gain plus tard)."""
+        g = app.state.game
+        if not g["bonus"]:
+            raise HTTPException(409, "aucun bonus disponible")
+        g["bonus"] = False
+        g["actions"].append({"kind": "bonus", "planet": g["planets"][g["active"]]["name"]})
+        return {"message": "Bonus récupéré (12 min) : +11 077 267 Fer, +7 989 190 Cristal, +2 823 034 Éther, +8 Astrium, +0 Échos."}
+
+    @app.post("/api/_bonus")
+    async def set_bonus(request: Request):
+        app.state.game["bonus"] = bool((await request.json())["available"])
         return {"ok": True}
 
     @app.post("/api/hack")

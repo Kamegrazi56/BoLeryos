@@ -97,6 +97,9 @@ class GameHandle:
     def set_exp(self, **values) -> None:
         httpx.post(self.url + "/api/_exp", json=values, timeout=5).raise_for_status()
 
+    def set_bonus(self, available: bool) -> None:
+        httpx.post(self.url + "/api/_bonus", json={"available": available}, timeout=5).raise_for_status()
+
     def set_hack(self, **values) -> None:
         httpx.post(self.url + "/api/_hack", json=values, timeout=5).raise_for_status()
 

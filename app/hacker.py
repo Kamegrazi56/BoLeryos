@@ -16,7 +16,7 @@ import time
 
 from . import builder, human
 from .builder import UNCONFIRMED_LIMIT
-from .excavator import MISSIONS_JS, READY_SECONDS, wait_enabled, wait_missions_loaded
+from .excavator import MISSIONS_JS, READY_SECONDS, stable_read, wait_enabled, wait_missions_loaded
 from .explorer import CLEAR_MARK_JS, MARK_TARGET_JS, TARGET_ATTRIBUTE, ExplorationPass
 from .hackings import TARGETS_KEPT
 from .planets import GameUiError, Interrupted
@@ -123,7 +123,12 @@ class HackingPass(ExplorationPass):
             if self.store.daily_due():
                 await self._daily_scan(s, "quotidien")
             await self._open_hacking()
-            wait = self._sync(s, await self.page.evaluate(MISSIONS_JS, "Piratage"))
+            async def read():
+                return await self.page.evaluate(MISSIONS_JS, "Piratage"), await self.page.evaluate(NAEL_JS)
+
+            # Cohérent : une carte Piratage si et seulement si Naël est indisponible.
+            (missions, _nael), _ok = await stable_read(read, lambda v: bool(v[0]) == (v[1] == "busy"))
+            wait = self._sync(s, missions)
             if wait:
                 return wait
             if not await self._nael_available():

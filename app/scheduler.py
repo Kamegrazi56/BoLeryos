@@ -142,6 +142,9 @@ class Scheduler:
         rt = self._runtime[feature.id]
         rt.running = True
         try:
+            claim = getattr(self.bot, "claim_bonus", None)
+            if claim is not None:  # bonus d'activité récupéré au début de chaque action, quelle que soit la planète
+                await claim()
             result, ok = await feature.run(self.bot), True
         except asyncio.CancelledError:
             raise

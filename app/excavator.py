@@ -98,6 +98,24 @@ MISSIONS_READY_JS = (
 )
 
 READY_SECONDS = 4.0  # attente d'un bouton ou d'un état qui se met à jour après le chargement des données
+STABLE_SECONDS = 6.0  # attente de deux lectures identiques et cohérentes de « Missions en cours »
+STABLE_POLL_SECONDS = 0.75
+
+
+async def stable_read(read, consistent, seconds: float = STABLE_SECONDS):
+    """Relit jusqu'à deux lectures identiques et cohérentes (vu sur le vrai jeu : « Aucune mission disponible » s'affiche
+    un instant avant les vraies missions). Renvoie (lecture, cohérente)."""
+    end = time.monotonic() + seconds
+    last = None
+    while True:
+        value = await read()
+        ok = consistent(value)
+        if ok and value == last:
+            return value, True
+        if time.monotonic() >= end:
+            return value, ok
+        last = value
+        await asyncio.sleep(STABLE_POLL_SECONDS)
 
 
 async def wait_missions_loaded(page, seconds: float = PAGE_WAIT_SECONDS) -> None:
@@ -309,8 +327,10 @@ class ExcavationPass(ExplorationPass):
             if self.store.daily_due():
                 await self._daily_scan(s, "quotidien")
             await self._open_excavations()
-            missions = await self.page.evaluate(MISSIONS_JS, "Fouille")
-            complete = len(missions) == (await self._counters())["excavations"][0]
+            async def read():
+                return await self.page.evaluate(MISSIONS_JS, "Fouille"), (await self._counters())["excavations"][0]
+
+            (missions, _count), complete = await stable_read(read, lambda v: len(v[0]) == v[1])
             if not complete:
                 self.bot.log(f"Fouilles : {len(missions)} Fouille(s) lue(s) dans « Missions en cours » pour un compteur différent ; aucune place n'est libérée ce passage.", "warn", event=True)
             tracked = sync_tracked(self.store.tracked(), missions, s, time.time(), complete)

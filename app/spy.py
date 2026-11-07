@@ -200,6 +200,7 @@ class SpyCampaign(ConstructionPass):
     async def _run(self, settings: dict) -> None:
         try:
             async with self.bot.work:  # jamais en même temps qu'un passage de fonctionnalité
+                await self.bot.claim_bonus()
                 self.bot.log(f"Espionnage : campagne lancée autour de {settings['planet']} (bot sur OFF).", event=True)
                 await self._campaign(settings)
                 self._status["message"] = "terminé"

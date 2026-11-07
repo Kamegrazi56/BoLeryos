@@ -43,6 +43,7 @@ from .shipyard import ComponentPass, ShipPass
 from .explorations import ExplorationStore
 from .explorer import ExplorationPass
 from .features import FEATURES, FeatureStore
+from . import bonus
 from .excavations import ExcavationStore
 from .excavator import ExcavationPass
 from .hacker import HackingPass
@@ -202,6 +203,10 @@ class BotSession:
                   "ships": self.shipper, "components": self.producer, "explorations": self.explorer, "excavations": self.excavator, "hackings": self.hacker}
         if feature_id in passes:
             passes[feature_id]._unconfirmed = 0
+
+    async def claim_bonus(self) -> str | None:
+        """Récupère le bonus d'activité s'il est disponible (appelé au début de chaque action du bot)."""
+        return await bonus.claim(self._page, self._settings, self.log)
 
     def log(self, message: str, level: str = "info", event: bool = False, kind: str = "info") -> None:
         """`event` : fait marquant, affiché dans « Derniers événements » et le journal lisible.

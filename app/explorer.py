@@ -240,6 +240,7 @@ class ExplorationPass(ConstructionPass):
         self.scanning = True
         try:
             async with self.bot.work:  # jamais en même temps qu'un passage de fonctionnalité
+                await self.bot.claim_bonus()
                 await self._daily_scan(self.store.get(), source)
         except (Interrupted, GameUiError) as exc:
             self.store.set_daily_error(f"Relevé impossible : {exc}")
