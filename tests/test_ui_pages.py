@@ -105,7 +105,7 @@ def test_the_removed_features_have_no_settings_and_no_routes(ui):
     page, _, _ = ui
     page.goto(page.base + "/reglages")
     tabs = [t.strip().lower() for t in page.locator("[role=tab]").all_inner_texts()]
-    assert tabs == ["compte et univers", "fonctionnalités", "constructions", "recherches", "population", "assemblages", "composants"]
+    assert tabs == ["compte et univers", "fonctionnalités", "constructions", "recherches", "population", "assemblages", "composants", "exploration"]
     for tab in tabs:  # aucune section supprimée ne réapparaît, quel que soit l'onglet
         page.click(f"[role=tab]:has-text('{tab}')", strict=False)
         text = page.inner_text("main").lower()
@@ -351,11 +351,11 @@ def test_population_panel_sets_mode_quantity_and_planet_for_each_population(ui):
     assert errors == []
 
 
-def test_settings_page_has_seven_tabs_and_only_one_panel_shows_at_a_time(ui):
+def test_settings_page_has_eight_tabs_and_only_one_panel_shows_at_a_time(ui):
     page, errors, _ = ui
     page.goto(page.base + "/reglages")
-    ids = ["account", "features", "constructions", "researches", "populations", "ships", "components"]
-    assert page.locator("[role=tab]").count() == 7
+    ids = ["account", "features", "constructions", "researches", "populations", "ships", "components", "explorations"]
+    assert page.locator("[role=tab]").count() == 8
     for tab in ids:
         page.click(f"#tab-{tab}")
         assert page.get_attribute(f"#tab-{tab}", "aria-selected") == "true"
@@ -372,7 +372,28 @@ def test_settings_page_has_seven_tabs_and_only_one_panel_shows_at_a_time(ui):
     page.press("#tab-ships", "ArrowRight")
     assert page.locator("#panel-components").is_visible()
     page.press("#tab-components", "ArrowRight")
+    assert page.locator("#panel-explorations").is_visible()
+    page.press("#tab-explorations", "ArrowRight")
     assert page.locator("#panel-account").is_visible()
+    assert errors == []
+
+
+def test_exploration_panel_saves_a_manual_composition_with_copies_duration_and_rhythm(ui):
+    page, errors, _ = ui
+    page.goto(page.base + "/reglages#explorations")
+    page.select_option("#exp-composition", "manual")
+    page.fill("#exp-units input[aria-label='Quantité Rempart de Fer']", "1500")
+    page.fill("#exp-copies", "3")
+    page.select_option("#exp-duration", "4")
+    page.select_option("#exp-rhythm", "max")
+    page.click("#exp-save")
+    page.wait_for_function("document.getElementById('exp-msg').textContent === 'Enregistré.'")
+    saved = page.evaluate("fetch('/api/explorations').then((r) => r.json()).then((d) => d.settings)")
+    assert (saved["composition"], saved["units"], saved["copies"], saved["duration"], saved["rhythm"]) == ("manual", {"Rempart de Fer": 1500}, 3, 4, "max")
+    page.select_option("#exp-composition", "model")
+    page.click("#exp-save")  # aucun modèle choisi : refusé avec un message en français
+    page.wait_for_function("document.getElementById('exp-msg').classList.contains('error')")
+    assert "modèle" in page.text_content("#exp-msg")
     assert errors == []
 
 

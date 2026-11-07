@@ -49,6 +49,10 @@ async def _run_components(bot) -> str:
     return await bot.producer.run_pass()
 
 
+async def _run_explorations(bot) -> str:
+    return await bot.explorer.run_pass()
+
+
 async def _run_test(bot) -> str:
     return "passage de test : rien n'a été fait dans le jeu"
 
@@ -61,6 +65,7 @@ FEATURES: tuple[Feature, ...] = (
     Feature("populations", "Recrutement de population", "Recrute les populations de la liste (onglet Population) : quantité fixe ou MAX à chaque passage, ou effectif à atteindre, population par population et planète par planète. Clique sur « Recruter » et dépense les ressources de la planète.", _run_populations),
     Feature("ships", "Assemblages de vaisseaux", "Construit les vaisseaux de la liste (onglet Assemblages) : quantité fixe ou MAX à chaque passage ou une seule fois, ou effectif à atteindre, sur toutes les planètes, une seule ou plusieurs. Construit avec des ressources (mode Construction), clique sur « Lancer » et dépense les ressources de la planète.", _run_ships),
     Feature("components", "Production de composants", "Produit les composants de la liste (onglet Composants) : quantité fixe ou MAX à chaque passage ou une seule fois, ou effectif à atteindre, sur toutes les planètes, une seule ou plusieurs. Clique sur « Produire » et dépense les ressources de la planète.", _run_components),
+    Feature("explorations", "Explorations", "Envoie des explorations (onglet Exploration) vers la brèche la plus proche de chaque planète choisie : Piliers ou Flotte, modèle du jeu ou quantités, copies et durée au choix. Relève brèches et modèles une fois par jour, respecte les quotas quotidien et d'explorations actives, et saute une planète à qui il manque quelque chose.", _run_explorations),
     Feature("test", "Test (ne fait rien)", "Écrit une ligne dans le journal à chaque passage. À retirer quand les vraies fonctionnalités arrivent.", _run_test),
 )
 

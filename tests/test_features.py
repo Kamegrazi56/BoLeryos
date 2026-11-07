@@ -288,7 +288,7 @@ def api(settings, tmp_path):
 def test_features_api_lists_the_test_feature_with_no_timer_and_bot_off(api):
     data = api.get("/api/features").json()
     assert data["bot_on"] is False
-    assert [f["id"] for f in data["features"]] == ["constructions", "researches", "populations", "ships", "components", "test"]
+    assert [f["id"] for f in data["features"]] == ["constructions", "researches", "populations", "ships", "components", "explorations", "test"]
     assert all(f["enabled"] is False and f["min_minutes"] is None for f in data["features"])
 
 
@@ -316,7 +316,8 @@ def test_the_settings_are_kept_after_a_restart_but_the_bot_is_off(settings, tmp_
     with TestClient(create_app(cfg)) as c:
         data = c.get("/api/features").json()
         assert data["bot_on"] is False
-        assert data["features"][5]["enabled"] is True and data["features"][5]["min_minutes"] == 0.5
+        test = next(f for f in data["features"] if f["id"] == "test")
+        assert test["enabled"] is True and test["min_minutes"] == 0.5
 
 
 def test_bot_switch_and_a_pass_waits_until_the_bot_is_in_a_game(api):

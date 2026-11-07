@@ -40,6 +40,8 @@ from .recruiter import PopulationPass
 from .researcher import ResearchPass
 from .researches import ResearchSettings
 from .shipyard import ComponentPass, ShipPass
+from .explorations import ExplorationStore
+from .explorer import ExplorationPass
 from .features import FEATURES, FeatureStore
 from .scheduler import Scheduler
 from .supervisor import ConnectionSupervisor
@@ -156,6 +158,8 @@ class BotSession:
         self.shipper = ShipPass(self, self.ships)  # construction de vaisseaux avec des ressources (mode Construction, bouton « Lancer »)
         self.components = LineSettings(settings.data_dir, components.SPEC)  # Composants : composant + mode + quantité + planètes
         self.producer = ComponentPass(self, self.components)  # production de composants (bouton « Produire »)
+        self.explorations = ExplorationStore(settings.data_dir)  # réglages d'exploration + relevé du jour (brèches, modèles)
+        self.explorer = ExplorationPass(self, self.explorations)  # explorations vers la brèche la plus proche de chaque planète
         # Ordonnanceur des fonctionnalités (réglages enregistrés ; l'interrupteur général repasse toujours à OFF au démarrage)
         self.scheduler = Scheduler(
             self,
@@ -183,7 +187,7 @@ class BotSession:
     def reset_failures(self, feature_id: str) -> None:
         """Remet à zéro les lancements non confirmés d'une fonctionnalité (appelé quand l'utilisateur la réactive)."""
         passes = {"constructions": self.builder, "researches": self.researcher, "populations": self.recruiter,
-                  "ships": self.shipper, "components": self.producer}
+                  "ships": self.shipper, "components": self.producer, "explorations": self.explorer}
         if feature_id in passes:
             passes[feature_id]._unconfirmed = 0
 

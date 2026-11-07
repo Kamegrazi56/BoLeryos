@@ -32,6 +32,7 @@
         <button role="tab" id="tab-populations" data-tab="populations" aria-controls="panel-populations">Population</button>
         <button role="tab" id="tab-ships" data-tab="ships" aria-controls="panel-ships">Assemblages</button>
         <button role="tab" id="tab-components" data-tab="components" aria-controls="panel-components">Composants</button>
+        <button role="tab" id="tab-explorations" data-tab="explorations" aria-controls="panel-explorations">Exploration</button>
       </div>
       <span id="save-msg" class="save-state" role="status" aria-live="polite"></span>
     </div>
@@ -152,6 +153,35 @@
       </div>
       <p id="cmp-msg" class="msg" role="status" aria-live="polite"></p>
     </section>
+    <section class="tabpanel card" id="panel-explorations" role="tabpanel" aria-labelledby="tab-explorations" hidden>
+      <h2 id="exp-title">Exploration : vers la brèche la plus proche</h2>
+      <p class="hint">Une fois par jour, le bot relève pour chaque planète choisie la <strong>brèche la plus proche</strong> (positions réelles lues sur la carte de la Galaxie, formule des adresses en secours) et les <strong>modèles</strong> Piliers et Flotte du jeu. À chaque passage, il lance les explorations réglées ci-dessous, planète par planète, tant que le <strong>quota quotidien</strong> et les <strong>places d'explorations actives</strong> le permettent ; une planète à qui il manque des unités, de l'énergie ou de la Trame est sautée. Quand la fonctionnalité « Explorations » est activée (onglet Fonctionnalités) et le bot sur ON, il clique sur « Lancer l'exploration » : <strong>les unités partent réellement</strong> et peuvent être perdues.</p>
+      <div class="row">
+        <button id="exp-scan" type="button">Refaire le relevé du jour</button>
+        <span id="exp-scan-msg" class="hint" role="status" aria-live="polite"></span>
+      </div>
+      <p id="exp-daily" class="status-line" role="status" aria-live="polite">Aucun relevé pour l'instant.</p>
+      <ul id="exp-breaches" class="hint"></ul>
+      <div class="row">
+        <label>Moyen <select id="exp-method" aria-label="Moyen de lancement"></select></label>
+        <label>Composition <select id="exp-composition" aria-label="Composition">
+          <option value="model">Un modèle du jeu</option><option value="manual">Une quantité par unité</option>
+        </select></label>
+        <label id="exp-model-label">Modèle <select id="exp-model" aria-label="Modèle du jeu"></select></label>
+      </div>
+      <div id="exp-units" class="row"></div>
+      <div class="row">
+        <label>Copies <input id="exp-copies" type="number" min="1" max="10" step="1" value="1" aria-label="Copies"></label>
+        <label>Durée <select id="exp-duration" aria-label="Durée nominale"></select></label>
+        <label>Rythme <select id="exp-rhythm" aria-label="Rythme">
+          <option value="fixed">Un nombre fixe par planète et par passage</option><option value="max">Autant que possible</option>
+        </select></label>
+        <label id="exp-per-pass-label">par planète et par passage <input id="exp-per-pass" type="number" min="1" max="50" step="1" value="1" aria-label="Lancements par planète et par passage"></label>
+      </div>
+      <fieldset class="row"><legend>Planètes</legend><span id="exp-planets"></span></fieldset>
+      <div class="row"><button id="exp-save" type="button">Enregistrer</button></div>
+      <p id="exp-msg" class="msg" role="status" aria-live="polite"></p>
+    </section>
   </main>
   <script src="/static/shell.js"></script>
   <script src="/static/reglages.js"></script>
@@ -160,5 +190,6 @@
   <script src="/static/recherches.js"></script>
   <script src="/static/population.js"></script>
   <script src="/static/chantier.js"></script>
+  <script src="/static/exploration.js"></script>
 </body>
 </html>

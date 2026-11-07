@@ -81,6 +81,17 @@ def _movement(kind, origin, destination, arrival="06:56:16", countdown="01:20:00
             "origin": dict(zip(("planet", "coords", "player"), origin)), "destination": dict(zip(("planet", "coords", "player"), destination))}
 
 
+def _exp_units(index: int) -> dict:
+    """Unités disponibles pour l'exploration sur chaque planète (Strate, index 2, n'a presque rien)."""
+    rich = index < 2
+    return {
+        "PILLARS": {"Soldat": 2507458 if rich else 10, "Rempart de Fer": 968163 if rich else 100, "Spectre du Rift": 0,
+                    "Surchargeur Plasmique": 0, "Faucheur Cinétique": 1380303 if rich else 0, "Grand Transporteur": 43025 if rich else 0,
+                    "Petit Transporteur": 0},
+        "FLEET": {"Testo Civil Transpo Destroy Def": 43 if rich else 0, ">Lentus": 2},
+    }
+
+
 def initial_state():
     stocks = [
         {"Fer": 58.0e6, "Cristal": 22.36e6, "Éther": 19.8e6},
@@ -101,9 +112,14 @@ def initial_state():
         "login_attempts": 0,
         "actions": [],
         "research_busy": False,
-        "exp": {"daily": 3, "daily_max": 46, "active": 2, "active_max": 10, "avail": {
-            "piliers": [["Soldat", 2507458], ["Rempart de Fer", 3182], ["Grand Transporteur", 9000]],
-            "flotte": [["Testo Civil Transpo Destroy Def", 43], ["Sonde Spatiale", 3987]]}},
+        # Exploration (relevé du vrai jeu, 2026-11-07) : compteurs communs au compte, modèles par moyen, unités par planète
+        "exp": {"daily": 3, "daily_max": 46, "active": 2, "active_max": 10, "no_effect": False, "models": {
+            "PILLARS": [{"name": "Expe", "units": {"Rempart de Fer": 1500, "Grand Transporteur": 200}},
+                        {"name": "300k-5k", "units": {"Soldat": 300000, "Grand Transporteur": 5000}}],
+            "FLEET": [{"name": "Planète minière", "units": {"Testo Civil Transpo Destroy Def": 5}}]}},
+        # Carte continue : positions réelles (unités de carte) des planètes et des brèches ; Strate n'a aucune brèche proche
+        "map": {"api": True, "positions": {"Z25 95 16": [0, 0], "M69 38 06": [11570, 1544], "R59 75 43": [-60000, 40000]},
+                "breaches": [["Z26 10 20", 520, 90], ["Z25 60 80", -300, 250], ["M79 50 37", 11629, 2112], ["M69 99 99", 12900, 1600]]},
         # Capteurs interstellaires : un déploiement du joueur, comme dans l'export (aucune attaque au départ)
         "movements": [_movement("Déploiement", ("6-79-Egide", "M69 38 06", "KameGrazi"), ("8-50-Concorde", "Z25 95 16", "KameGrazi"))],
         # Liste de la Galaxie autour de la planète active (structure de l'export du 2026-11-03)
@@ -118,8 +134,9 @@ def initial_state():
         ],
         "ship_mode": "assemblages",  # mode de production affiché sur les cartes de vaisseaux (« Construction » à choisir)
         "planets": [
-            {"name": n, "coords": c, "energy": e, "stocks": copy.deepcopy(s), "busy": False, "buildings": _buildings(), "prod": _prod_items()}
-            for (n, c, e), s in zip(planets, stocks)
+            {"name": n, "coords": c, "energy": e, "stocks": copy.deepcopy(s), "busy": False, "buildings": _buildings(), "prod": _prod_items(),
+             "units": _exp_units(i)}
+            for i, ((n, c, e), s) in enumerate(zip(planets, stocks))
         ],
         # Laboratoire : onglets Civil / Militaire ; coûts réglés pour que seule la planète Egide (index 1) ou Concorde (index 0) puisse payer
         "tech": [
@@ -180,7 +197,9 @@ function card(p, it, kind, busy) {
     + `<div class="body">${costs}${dur}<button class="act" data-name="${it.name}" data-kind="${kind}" ${ok ? '' : 'disabled'}>${label}</button></div></div>`;
 }
 const kfmt = (v) => v >= 1e9 ? (v / 1e9).toFixed(3).replace('.', ',') + ' G' : v >= 1e6 ? (v / 1e6).toFixed(3).replace('.', ',') + ' M' : v >= 1000 ? (v / 1000).toFixed(3).replace('.', ',') + ' K' : String(Math.round(v));
-const ui = {tab: 'Assaut', ship: 'Assemblages', way: 'Piliers', mission: 'ATTAQUE', techTab: 'Civil'};
+const ui = {tab: 'Assaut', ship: 'Assemblages', way: 'Piliers', mission: 'ATTAQUE', techTab: 'Civil', zoom: 1, windowRows: [], modelsOpen: false,
+            form: {target: '', units: {}, copies: '1', duration: '1'}};
+(() => { const q = new URLSearchParams(location.search); if (q.get('mission')) ui.mission = q.get('mission'); if (q.get('method')) ui.way = q.get('method') === 'FLEET' ? 'Flotte' : 'Piliers'; })();
 const CK = {Fer: 'F', Cristal: 'C', 'Éther': 'E'};
 const costLeaves = (c) => Object.entries(c).map(([k, v]) => `<span>${CK[k]}: ${kfmt(v)}</span>`).join('');
 function prodCard(it, verb) {
@@ -234,22 +253,43 @@ function galaxyMain() {
     const who = r.tag ? `${r.player} [${r.tag}]` : r.player;
     return `<div class="continuous-inspector__list-row"><button type="button"></button><button type="button">${who}</button><button type="button">${r.planet} · ${r.coords}</button>${actions}</div>`;
   }).join('');
-  return '<h2>Galaxie</h2><input aria-label="Recherche de destination"><section class="continuous-inspector__list">' + rows + '</section>';
+  const breaches = ui.windowRows.map((a) => `<div class="continuous-inspector__list-row"><button type="button">Brèches${a}</button><button type="button" aria-label="Flotte"></button><button type="button" aria-label="Piliers"></button></div>`).join('');
+  const zoom = '<div><button type="button" class="zoom" data-z="-1" aria-label="Zoomer">+</button><button type="button" class="zoom" data-z="1" aria-label="Dézoomer">-</button>'
+    + '<button type="button" class="zoom" data-z="0" aria-label="Recentrer la carte">o</button></div>';
+  return '<h2>Galaxie</h2><input aria-label="Recherche de destination">' + zoom + '<section class="continuous-inspector__list">' + rows + breaches + '</section>';
+}
+// Opérations › Exploration : cible, modèles, unités, copies, durée, lancement (structure du vrai jeu).
+const METHOD = () => (ui.way === 'Flotte' ? 'FLEET' : 'PILLARS');
+const fmtTarget = (v) => { const c = v.replace(/\\s+/g, '').toUpperCase(); return /^[A-Z]\\d{6}$/.test(c) ? `${c.slice(0, 3)} ${c.slice(3, 5)} ${c.slice(5)}` : v; };
+function expForm(p) {
+  const ex = state.exp, units = p.units[METHOD()], f = ui.form;
+  const free = ex.active_max - ex.active;
+  const copies = Math.max(1, +f.copies || 1);
+  const total = Object.values(f.units).reduce((s, q) => s + (+q || 0), 0);
+  const valid = /^[A-Z]\\d{2} \\d{2} \\d{2}$/.test(f.target);
+  const ok = valid && total > 0 && copies <= free && Object.entries(f.units).every(([n, q]) => (+q || 0) * copies <= (units[n] || 0));
+  const rows = Object.entries(units).map(([n, c]) => `<div><span>${n}</span><span>Disponibles : ${int(c)}</span><input type="number" placeholder="0" class="unit" data-u="${n}" aria-label="Quantité ${n}" value="${f.units[n] || ''}"><button type="button" aria-label="Sélectionner le maximum"></button></div>`).join('');
+  const opts = (n, sel, suffix) => Array.from({length: n}, (_, i) => `<option value="${i + 1}" ${String(i + 1) === String(sel) ? 'selected' : ''}>${i + 1}${suffix}</option>`).join('');
+  // Fenêtre imbriquée comme sur le vrai jeu : en-tête, « Nouveau modèle (unités actuelles) », nom, Enregistrer, puis les lignes
+  const dialog = ui.modelsOpen ? `<div role="dialog" aria-label="Modèles de ${ui.way}"><div class="dialog-body"><div><span>Modèles de ${ui.way}</span><button type="button" id="mclose" aria-label="Fermer">x</button></div>`
+    + `<div><span>Nouveau modèle (unités actuelles)</span><span>${ex.models[METHOD()].length} / 6</span><input placeholder="Nom du modèle…"><button type="button" title="Enregistrer la sélection actuelle">s</button></div>`
+    + '<div><span>Modèles enregistrés</span>'
+    + ex.models[METHOD()].map((m, i) => `<div><div><span>${m.name}</span><span>${Object.values(m.units).reduce((s, q) => s + q, 0)} Unités</span></div>`
+      + `<button type="button" class="apply" data-i="${i}" title="Appliquer le modèle">></button><button type="button" class="del" data-i="${i}" title="Supprimer">x</button></div>`).join('') + '</div></div></div>' : '';
+  return `<div><span>Explorations quotidiennes</span><span>${ex.daily}/${ex.daily_max}</span></div><div><span>Explorations actives</span><span>${ex.active}/${ex.active_max}</span></div>`
+    + `<div class="cible"><label>Cible</label><button type="button">Favoris</button><input type="text" id="target" placeholder="G46 50 50" value="${f.target}">${valid ? `<span class="font-mono">${f.target}</span>` : ''}</div>`
+    + `<div><h3>Force d’exploration (${ui.way})</h3><button type="button" id="models-btn">Modèles</button>${rows}</div>`
+    + `<select aria-label="Copies" id="copies">${opts(Math.max(1, free), f.copies, '')}</select><select aria-label="Durée nominale" id="duration">${opts(6, f.duration, ' h')}</select>`
+    + `<button type="button">Mobilisation générale</button><button type="button" id="launch" ${ok ? '' : 'disabled'}>${ok ? 'Lancer l’exploration' : 'Aucune unité sélectionnée.'}</button>`
+    + `<button type="button" id="recall" aria-label="Préparer le retour de la flotte">r</button>` + dialog;
 }
 function opsMain() {
   const ex = state.exp;
   const ways = ['Piliers', 'Flotte'].map((w) => `<button type="button" class="way" data-way="${w}">${w.toUpperCase()}</button>`).join('');
   const missions = ['ATTAQUE', 'TRANSPORT', 'EXPLORATION', 'FOUILLE'].map((m) => `<button type="button" class="mission" data-m="${m}">${m}</button>`).join('');
   let body = '';
-  if (ui.mission === 'ATTAQUE') {
-    const label = ui.way === 'Piliers' ? 'Stock' : 'Disponibles';
-    body = '<div><span>2. Composition de mission</span>' + ex.avail[ui.way.toLowerCase()].map(([n, c]) => `<div><span>${n}</span><span>${label} : ${int(c)}</span><input type="number" aria-label="Quantité ${n}"></div>`).join('') + '</div><button type="button">LANCEMENT BLOQUÉ</button>';
-  }
-  if (ui.mission === 'EXPLORATION') {
-    const units = ex.avail[ui.way.toLowerCase()].map(([n, c]) => `<div><span>${n}</span><span>Disponibles : ${int(c)}</span><input type="number" aria-label="Quantité ${n}"></div>`).join('');
-    body = `<div><span>Explorations quotidiennes</span><span>${ex.daily}/${ex.daily_max}</span></div><div><span>Explorations actives</span><span>${ex.active}/${ex.active_max}</span></div>`
-      + `<div><span>Composition</span>${units}</div><button type="button">AUCUNE UNITÉ SÉLECTIONNÉE.</button>`;
-  }
+  if (ui.mission === 'ATTAQUE') body = '<div><span>2. Composition de mission</span></div><button type="button">LANCEMENT BLOQUÉ</button>';
+  if (ui.mission === 'EXPLORATION') body = expForm(state.planets[state.active]);
   return '<h2>Opérations</h2><div><span>Moyen de lancement</span>' + ways + '</div><div><span>Mission</span>' + missions + '</div>' + body;
 }
 function sensors() {
@@ -302,6 +342,36 @@ function render() {
     if (state.close_on_select) overlayOpen = false;
     await load();
   });
+  const post = (url, body) => fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  document.querySelectorAll('.zoom').forEach((b) => b.onclick = async () => {
+    ui.zoom = Math.max(0, Math.min(3, ui.zoom + (+b.dataset.z)));
+    const r = await (await post('/map/continuous/window', {zoom: ui.zoom})).json();
+    ui.windowRows = r.rows || [];
+    render();
+  });
+  const tgt = document.getElementById('target');
+  if (tgt) tgt.oninput = () => { ui.form.target = fmtTarget(tgt.value); render(); };
+  document.querySelectorAll('.unit').forEach((i) => i.oninput = () => { ui.form.units[i.dataset.u] = i.value; render(); });
+  const cp = document.getElementById('copies'); if (cp) cp.onchange = () => { ui.form.copies = cp.value; render(); };
+  const du = document.getElementById('duration'); if (du) du.onchange = () => { ui.form.duration = du.value; render(); };
+  const mb = document.getElementById('models-btn'); if (mb) mb.onclick = () => { ui.modelsOpen = true; render(); };
+  const mc = document.getElementById('mclose'); if (mc) mc.onclick = () => { ui.modelsOpen = false; render(); };
+  document.querySelectorAll('.apply').forEach((b) => b.onclick = () => {
+    const m = state.exp.models[METHOD()][+b.dataset.i];
+    ui.form.units = Object.fromEntries(Object.entries(m.units).map(([k, v]) => [k, String(v)]));
+    ui.modelsOpen = false;
+    render();
+  });
+  document.querySelectorAll('.del').forEach((b) => b.onclick = () => post('/api/_forbidden', {what: 'Supprimer un modèle'}));
+  const rc = document.getElementById('recall'); if (rc) rc.onclick = () => post('/api/_forbidden', {what: 'Préparer le retour de la flotte'});
+  const go = document.getElementById('launch');
+  if (go) go.onclick = async () => {
+    const f = ui.form;
+    const r = await post('/api/explore', {method: METHOD(), target: f.target, copies: +f.copies, duration: +f.duration,
+                                          units: Object.fromEntries(Object.entries(f.units).map(([k, v]) => [k, +v || 0]))});
+    if (r.ok) ui.form = {target: '', units: {}, copies: '1', duration: '1'};
+    await load();
+  };
   document.querySelectorAll('.way').forEach((b) => b.onclick = () => { ui.way = b.dataset.way; render(); });
   document.querySelectorAll('.mission').forEach((b) => b.onclick = () => { ui.mission = b.dataset.m; render(); });
   document.querySelectorAll('.tab').forEach((b) => b.onclick = () => { ui.tab = b.dataset.tab; render(); });
@@ -458,12 +528,64 @@ def create_mock_game() -> FastAPI:
     @app.post("/api/_exp")
     async def set_exp(request: Request):
         body = await request.json()
-        exp = app.state.game["exp"]
-        for key in ("daily", "daily_max", "active", "active_max"):
+        g = app.state.game
+        exp = g["exp"]
+        for key in ("daily", "daily_max", "active", "active_max", "no_effect", "models"):
             if key in body:
                 exp[key] = body[key]
-        for way, rows in (body.get("avail") or {}).items():
-            exp["avail"][way] = rows
+        if "map_api" in body:
+            g["map"]["api"] = body["map_api"]
+        for index, by_method in (body.get("units") or {}).items():
+            for method, units in by_method.items():
+                g["planets"][int(index)]["units"][method].update(units)
+        return {"ok": True}
+
+    ZOOM_RADII = (300, 1000, 4000, 20000)  # demi-largeur de la fenêtre visible (unités de carte) selon le cran de zoom
+
+    @app.post("/map/continuous/window")
+    async def map_window(request: Request):
+        """Fenêtre visible de la carte, comme le vrai serveur : DETAIL (objets et positions) de près, SUMMARY de loin."""
+        g, body = app.state.game, await request.json()
+        zoom = max(0, min(3, int(body.get("zoom", 1))))
+        positions, breaches = g["map"]["positions"], g["map"]["breaches"]
+        cx, cy = positions.get(g["planets"][g["active"]]["coords"], [0, 0])
+        radius = ZOOM_RADII[zoom]
+
+        def inside(x, y, r=radius):
+            return abs(x - cx) <= r and abs(y - cy) <= r
+
+        objects = [{"kind": "PLANET", "address": c, "positionMilli": [x * 1000, y * 1000]} for c, (x, y) in positions.items() if inside(x, y)]
+        objects += [{"kind": "BREACH", "address": a, "positionMilli": [x * 1000, y * 1000]} for a, x, y in breaches if inside(x, y)]
+        detail = zoom <= 2 and g["map"]["api"]
+        # Sans le détail (secours), la liste « Ensemble » montre quand même les brèches proches
+        rows = [a for a, x, y in breaches if inside(x, y, radius if g["map"]["api"] else ZOOM_RADII[2])]
+        bounds = [[(cx - radius) * 1000, (cy - radius) * 1000], [(cx + radius) * 1000, (cy + radius) * 1000]]
+        return {"success": True, "rows": rows,
+                "projection": {"mode": "DETAIL" if detail else "SUMMARY", "boundsMilli": bounds, "objects": objects if detail else []}}
+
+    @app.post("/api/explore")
+    async def explore(request: Request):
+        g, body = app.state.game, await request.json()
+        exp, planet = g["exp"], g["planets"][g["active"]]
+        copies = int(body["copies"])
+        units = {k: int(v) for k, v in body["units"].items() if int(v) > 0}
+        avail = planet["units"][body["method"]]
+        if (not units or exp["daily"] + copies > exp["daily_max"] or exp["active"] + copies > exp["active_max"]
+                or any(q * copies > avail.get(n, 0) for n, q in units.items())):
+            raise HTTPException(409, "exploration refusée")
+        if exp["no_effect"]:
+            return {"ok": True}  # clic sans effet visible : le compteur ne bouge pas
+        exp["daily"] += copies
+        exp["active"] += copies
+        for n, q in units.items():
+            avail[n] -= q * copies
+        g["actions"].append({"kind": "exploration", "planet": planet["name"], "method": body["method"], "target": body["target"],
+                             "units": units, "copies": copies, "duration": int(body["duration"])})
+        return {"ok": True}
+
+    @app.post("/api/_forbidden")
+    async def forbidden(request: Request):
+        app.state.game["actions"].append({"kind": "forbidden", "what": (await request.json())["what"]})
         return {"ok": True}
 
     @app.post("/api/_prod")

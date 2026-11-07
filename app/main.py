@@ -27,6 +27,7 @@ from .researches import RESEARCHES, ResearchError
 from .features import FeaturesError
 from .preferences import MAX_UNIVERSE_LENGTH, PreferencesError
 from .quantities import LineError
+from .explorations import METHODS, PILLAR_UNITS, ExplorationError
 
 STATIC_DIR = Path(__file__).parent / "static"
 NO_STORE = {"Cache-Control": "no-store"}
@@ -108,6 +109,18 @@ class QuantityLine(BaseModel):
 
 class QuantityRequest(BaseModel):
     queue: list[QuantityLine] = Field(default_factory=list, max_length=500)
+
+
+class ExplorationRequest(BaseModel):
+    method: str = Field(default="PILLARS", max_length=10)
+    composition: str = Field(default="model", max_length=10)
+    model: str = Field(default="", max_length=200)
+    units: dict[str, int] = Field(default_factory=dict, max_length=60)
+    copies: int = Field(default=1, ge=0, le=100)
+    duration: int = Field(default=1, ge=0, le=100)
+    planets: list[str] = Field(default_factory=list, max_length=200)
+    rhythm: str = Field(default="fixed", max_length=10)
+    per_pass: int = Field(default=1, ge=0, le=1000)
 
 
 class OrderRequest(BaseModel):
@@ -488,6 +501,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except LineError as exc:
             raise HTTPException(422, detail=exc.errors) from exc
         return JSONResponse({"settings": saved}, headers=NO_STORE)
+
+    # --- Exploration : réglages, relevé du jour (brèches les plus proches, modèles du jeu) -----------
+    def _explorations_payload() -> dict:
+        return {
+            "settings": bot.explorations.get(),
+            "daily": bot.explorations.daily(),
+            "planets": _known_planets(),
+            "units": {"PILLARS": list(PILLAR_UNITS), "FLEET": bot.supervisor.known_models()},
+            "models": bot.explorations.known_models(),
+            "methods": METHODS,
+            "scanning": bot.explorer.scanning,
+            "persistent": bot.explorations.persistent,
+        }
+
+    @app.get("/api/explorations")
+    async def api_explorations():
+        return JSONResponse(_explorations_payload(), headers=NO_STORE)
+
+    @app.put("/api/explorations")
+    async def api_explorations_put(body: ExplorationRequest, request: Request):
+        _check_origin(request)
+        try:
+            bot.explorations.replace(body.model_dump(), _known_planets())
+        except ExplorationError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        return JSONResponse(_explorations_payload(), headers=NO_STORE)
+
+    @app.post("/api/explorations/scan")
+    async def api_explorations_scan(request: Request):
+        """Refait tout de suite le relevé du jour : brèche la plus proche de chaque planète visée et modèles du jeu."""
+        _check_origin(request)
+        await bot.explorer.scan("manuel")
+        return JSONResponse(_explorations_payload(), headers=NO_STORE)
 
     @app.get("/api/status")
     async def api_status(limit: int = 50):
