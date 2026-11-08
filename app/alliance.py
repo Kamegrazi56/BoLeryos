@@ -85,11 +85,13 @@ const visible = (el) => el.getClientRects().length > 0;
 """
 
 # Jetons disponibles : « Jetons d'alliance » puis « N /6 ».
+# Le titre peut contenir une icône (svg) : vrai jeu, 08/11. On prend l'élément le plus profond qui porte ce texte.
 TOKENS_JS = (
     "() => {"
     + _PRELUDE_JS
     + """
-  const label = [...document.querySelectorAll('main *')].find((e) => !e.children.length && visible(e) && /^Jetons d.alliance$/i.test(text(e)));
+  const isLabel = (e) => /^Jetons d.alliance$/i.test(text(e));
+  const label = [...document.querySelectorAll('main *')].find((e) => isLabel(e) && visible(e) && ![...e.children].some(isLabel));
   let box = label;
   while (box && !/\\d+\\s*\\/\\s*\\d+/.test(text(box).replace(/^Jetons d.alliance/i, ''))) box = box.parentElement;
   if (!box) return null;

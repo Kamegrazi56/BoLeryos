@@ -424,7 +424,8 @@ function allianceMain() {
           + `<button type="button" class="tok" data-c="1" ${open ? '' : 'disabled'}>+1 jeton</button><button type="button" class="tok" data-c="max" ${open ? '' : 'disabled'}>Max. (+${a.tokens})</button>`
           : '<p>Technologie au niveau maximal</p>') + '</article>';
     }).join('');
-    body = `<div><span>Jetons d’alliance</span><span>${a.tokens}</span><span>/${a.max}</span><span>Prochain jeton dans : 1h 40m</span></div>${cards}`;
+    // Titre avec icône, comme sur le vrai jeu (08/11)
+    body = `<div><h2><svg width="24" height="24"><circle cx="12" cy="12" r="10"></circle></svg>Jetons d’alliance</h2><span>${a.tokens}</span><span>/${a.max}</span><span>Prochain jeton dans : 1h 40m</span></div>${cards}`;
   }
   return '<h2>Alliance</h2><div role="tablist" aria-label="Sections de l’alliance">' + tabs + '</div>' + body
     + (ui.allyMsg ? `<div class="toast">${ui.allyMsg}</div>` : '');
