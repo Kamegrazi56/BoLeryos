@@ -32,6 +32,7 @@ from .excavations import DURATIONS as EXCAVATION_DURATIONS
 from .excavations import MAX_TEAM as EXCAVATION_MAX_TEAM
 from .excavations import UNITS as EXCAVATION_UNITS
 from .excavations import ExcavationError
+from .alliance import AllianceError
 from .hackings import HackingError
 from .planning import DAY_LABELS as PLANNING_DAY_LABELS
 from .planning import PlanningError
@@ -164,6 +165,10 @@ class PlanningRequest(BaseModel):
     days: dict[str, list[PlanningSlot]] = Field(default_factory=dict, max_length=7)
     offset_min: int = Field(default=0, ge=0, le=10_000)
     offset_max: int = Field(default=0, ge=0, le=10_000)
+
+
+class AllianceRequest(BaseModel):
+    amount: str | int = "all"
 
 
 class SpyingRequest(BaseModel):
@@ -425,7 +430,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/bot/stop")
     async def api_bot_stop(request: Request):
         _check_origin(request)
-        bot.scheduler.stop()
+        bot.stop_with_missions()  # OFF, puis récompenses des missions du jour (1 fois par jour)
         return JSONResponse(bot.scheduler.summary(), headers=NO_STORE)
 
     # --- Constructions : liste d'objectifs (bâtiment + niveau cible) et choix des planètes ----------
@@ -670,6 +675,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(422, detail=exc.errors) from exc
         bot.log("Planning enregistré.", event=True)
         return JSONResponse(_planning_payload(), headers=NO_STORE)
+
+    # --- Alliance : nombre de jetons donnés à chaque passage à la technologie prioritaire -----------
+    @app.get("/api/alliance")
+    async def api_alliance():
+        return JSONResponse({"settings": bot.alliance.get(), "persistent": bot.alliance.persistent}, headers=NO_STORE)
+
+    @app.put("/api/alliance")
+    async def api_alliance_put(body: AllianceRequest, request: Request):
+        _check_origin(request)
+        try:
+            saved = bot.alliance.replace(body.model_dump())
+        except AllianceError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        return JSONResponse({"settings": saved, "persistent": bot.alliance.persistent}, headers=NO_STORE)
 
     # --- Espionnage des Errants : réglages et campagne manuelle (le bot passe sur OFF) -----------
     def _spying_payload() -> dict:

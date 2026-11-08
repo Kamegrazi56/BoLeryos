@@ -37,6 +37,7 @@
         <button role="tab" id="tab-hackings" data-tab="hackings" aria-controls="panel-hackings">Piratage</button>
         <button role="tab" id="tab-spying" data-tab="spying" aria-controls="panel-spying">Espionnage</button>
         <button role="tab" id="tab-planning" data-tab="planning" aria-controls="panel-planning">Planning</button>
+        <button role="tab" id="tab-alliance" data-tab="alliance" aria-controls="panel-alliance">Alliance</button>
       </div>
       <span id="save-msg" class="save-state" role="status" aria-live="polite"></span>
     </div>
@@ -251,6 +252,17 @@
       <div class="row"><button id="plan-save" type="button">Enregistrer</button></div>
       <p id="plan-msg" class="msg" role="status" aria-live="polite"></p>
     </section>
+    <section class="tabpanel card" id="panel-alliance" role="tabpanel" aria-labelledby="tab-alliance" hidden>
+      <h2 id="ally-title">Alliance : dons de jetons technologiques</h2>
+      <p class="hint">À chaque passage de la fonctionnalité « Dons de jetons d'alliance » (onglet Fonctionnalités, avec son intervalle), le bot ouvre Alliance › Techs et donne vos jetons à la technologie marquée <strong>« priorité de dons de l'alliance »</strong> — et à aucune autre. Il ne change jamais la priorité. Un jeton revient environ toutes les 2 h, 6 au plus : un intervalle trop long en fait perdre. Un don est définitif.</p>
+      <div class="row">
+        <label>Jetons à donner à chaque passage <select id="ally-amount" aria-label="Jetons à donner à chaque passage">
+          <option value="all">Tous</option><option value="1">1</option><option value="2">2</option>
+        </select></label>
+        <button id="ally-save" type="button">Enregistrer</button>
+      </div>
+      <p id="ally-msg" class="msg" role="status" aria-live="polite"></p>
+    </section>
   </main>
   <script src="/static/shell.js"></script>
   <script src="/static/reglages.js"></script>
@@ -264,5 +276,6 @@
   <script src="/static/hacking.js"></script>
   <script src="/static/spying.js"></script>
   <script src="/static/planning.js"></script>
+  <script src="/static/alliance.js"></script>
 </body>
 </html>

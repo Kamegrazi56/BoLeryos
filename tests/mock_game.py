@@ -134,6 +134,17 @@ def initial_state():
         "hack": {"busy": False, "active": None, "no_effect": False},
         # Bonus d'activité : bouton présent seulement quand un gain est disponible (vrai jeu, 07/11)
         "bonus": False,
+        # Missions (onglet Missions) : objectif atteint = bouton « Récupérer » ; une quête récupérable que le bot ne touche pas
+        "missions": [{"name": "Connexion quotidienne", "progress": 1, "goal": 1, "claimed": False, "reward": "+5 Astrium, +5 XP"},
+                     {"name": "Réaliser 2 Fouilles", "progress": 2, "goal": 2, "claimed": False, "reward": "+5 Astrium, +5 XP"},
+                     {"name": "Réaliser 3 attaques", "progress": 0, "goal": 3, "claimed": False, "reward": "+5 Astrium, +5 XP"},
+                     {"name": "Cumuler 5 jours de connexion", "progress": 5, "goal": 5, "claimed": True, "reward": "+15 XP"}],
+        "quests": [{"name": "Quête d'essai", "progress": 1, "goal": 1, "claimed": False, "reward": "+1 XP"}],
+        # Alliance › Techs : jetons (6 au plus) et technologies ; une seule est la priorité de dons (vrai jeu, 08/11)
+        "alliance": {"tokens": 5, "max": 6, "priority": "Forge du Bastion", "no_effect": False,
+                     "techs": [{"name": "Forge du Bastion", "progress": 47, "need": 300},
+                               {"name": "Canalisation Éthérique", "progress": 0, "need": 180},
+                               {"name": "Veines Profondes", "progress": 0, "need": 0}]},
         # Fouilles : plafond personnel, Fouilles en cours (origine, site, durée, fin), Mira Venn, autres missions actives
         "exc": {"max": 6, "active": [], "mira_busy": False, "other_missions": 0, "no_effect": False},
         # Capteurs interstellaires : un déploiement du joueur, comme dans l'export (aucune attaque au départ)
@@ -220,7 +231,7 @@ function card(p, it, kind, busy) {
 }
 const kfmt = (v) => v >= 1e9 ? (v / 1e9).toFixed(3).replace('.', ',') + ' G' : v >= 1e6 ? (v / 1e6).toFixed(3).replace('.', ',') + ' M' : v >= 1000 ? (v / 1000).toFixed(3).replace('.', ',') + ' K' : String(Math.round(v));
 const ui = {tab: 'Assaut', ship: 'Assemblages', way: 'Piliers', mission: 'ATTAQUE', techTab: 'Civil', zoom: 1, windowRows: [], modelsOpen: false,
-            zoomLevel: 4.64, listShown: 25, toasts: [], report: null, freeRows: [],
+            zoomLevel: 4.64, listShown: 25, toasts: [], report: null, freeRows: [], allyTab: 'vue', allyMsg: null, missionTab: 'missions', missionMsg: null,
             form: {target: '', units: {}, copies: '1', duration: '1', hours: 6, mira: false}};
 (() => { const q = new URLSearchParams(location.search); if (q.get('mission')) ui.mission = q.get('mission'); if (q.get('method')) ui.way = q.get('method') === 'FLEET' ? 'Flotte' : 'Piliers'; })();
 const CK = {Fer: 'F', Cristal: 'C', 'Éther': 'E'};
@@ -369,6 +380,38 @@ function hackForm() {
     + `<section><h3>Missions en cours</h3>${(hackCards() + excCards()) || '<p>Aucune mission disponible</p>'}</section>`
     + (ui.toasts.length ? `<div class="toasts">${ui.toasts.map((t) => `<div>${t.text}</div>`).join('')}</div>` : '');
 }
+// Alliance : onglets (Vue, Territoires, Techs) ; Techs = jetons + technologies (vrai jeu, 08/11).
+function allianceMain() {
+  const tabs = [['vue', 'Vue'], ['territoires', 'Territoires'], ['techs', '⚡ Techs']].map(([k, n]) =>
+    `<button type="button" role="tab" class="allytab" data-k="${k}" aria-selected="${ui.allyTab === k}">${n}</button>`).join('');
+  let body = '<p>Manifeste</p>';
+  if (ui.allyTab === 'techs') {
+    const a = state.alliance;
+    const cards = a.techs.map((t) => {
+      const prio = t.name === a.priority, open = prio && t.need > 0 && a.tokens > 0;
+      const star = prio ? `Retirer ${t.name} de la priorité de dons de l’alliance` : `Marquer ${t.name} comme priorité de dons de l’alliance`;
+      return `<article><button type="button" class="star" aria-label="${star}">*</button><h3>${t.name}</h3>`
+        + (t.need > 0 ? `<div><span>Progression</span><span>${t.progress} / ${t.need}</span></div>`
+          + `<button type="button" class="tok" data-c="1" ${open ? '' : 'disabled'}>+1 jeton</button><button type="button" class="tok" data-c="max" ${open ? '' : 'disabled'}>Max. (+${a.tokens})</button>`
+          : '<p>Technologie au niveau maximal</p>') + '</article>';
+    }).join('');
+    body = `<div><span>Jetons d’alliance</span><span>${a.tokens}</span><span>/${a.max}</span><span>Prochain jeton dans : 1h 40m</span></div>${cards}`;
+  }
+  return '<h2>Alliance</h2><div role="tablist" aria-label="Sections de l’alliance">' + tabs + '</div>' + body
+    + (ui.allyMsg ? `<div class="toast">${ui.allyMsg}</div>` : '');
+}
+// Missions : onglets Missions / Quêtes / Événements ; « Récupérer » quand l'objectif est atteint (vrai jeu, 08/11).
+function missionsMain() {
+  const tabs = [['missions', 'Missions'], ['quests', 'Quêtes'], ['events', 'Événements']].map(([k, n]) =>
+    `<button type="button" role="tab" class="mtab" data-k="${k}" aria-selected="${ui.missionTab === k}">${n}</button>`).join('');
+  const list = ui.missionTab === 'missions' ? state.missions : ui.missionTab === 'quests' ? state.quests : [];
+  const rows = list.map((m, i) => `<div class="mrow"><span>${m.name}</span>`
+    + (m.claimed ? '<span>Récupéré</span>'
+      : m.progress >= m.goal ? `<button type="button" class="claim" data-list="${ui.missionTab}" data-i="${i}" aria-label="Récupérer ${m.reward}">Récupérer</button>`
+      : `<span>${m.progress} / ${m.goal}</span>`) + '</div>').join('');
+  return '<h2>Missions</h2><div role="tablist">' + tabs + '<button type="button">Actualiser</button></div>'
+    + `<section><h3>Quotidiennes</h3>${rows}</section>` + (ui.missionMsg ? `<div role="status">${ui.missionMsg}</div>` : '');
+}
 function opsMain() {
   const ex = state.exp;
   const ways = ['Piliers', 'Flotte'].map((w) => `<button type="button" class="way" data-way="${w}">${w.toUpperCase()}</button>`).join('');
@@ -391,7 +434,7 @@ function render() {
   if (!state) return;
   const p = state.planets[state.active], s = sec();
   const title = {buildings: 'Industrie', facilities: 'Infrastructures', tech: 'Laboratoire'}[s] || 'Vue';
-  const isProd = ['staff', 'shipyard', 'specialized', 'defense', 'operations', 'galaxy'].includes(s);
+  const isProd = ['staff', 'shipyard', 'specialized', 'defense', 'operations', 'galaxy', 'alliance', 'missions'].includes(s);
   let cards = '';
   if (isProd) cards = '';
   else if (s === 'tech') cards = state.tech.filter((t) => t.tab === ui.techTab).map((t) => techCard(p, t, state.research_busy)).join('');
@@ -407,7 +450,7 @@ function render() {
     + `<div class="res"><div aria-label="FER : ${big(p.stocks.Fer)}"><span>${big(p.stocks.Fer)}</span><span>FER</span></div><div aria-label="CRISTAL : ${big(p.stocks.Cristal)}"><span>${big(p.stocks.Cristal)}</span><span>CRISTAL</span></div>`
     + `<div aria-label="ÉTHER : ${big(p.stocks['Éther'])}"><span>${big(p.stocks['Éther'])}</span><span>ÉTHER</span></div><div><span>${int(p.energy)}</span><span>ÉNERGIE</span></div>`
     + '<div><span>4 808</span><span>ASTRIUM</span></div><div><span>492</span><span>ÉCHOS</span></div></div>'
-    + (isProd ? `<main>${s === 'operations' ? opsMain() : s === 'galaxy' ? galaxyMain() : prodMain(p, s)}</main>` : `<main><h2>${title}</h2>${(s === 'buildings' || s === 'facilities') ? '<div>' + [['buildings', 'Industrie'], ['facilities', 'Infrastructures']].map(([k, n]) => `<button type="button" role="tab" class="tabnav" aria-selected="${k === s}" data-s="${k}">${n}</button>`).join('') + '</div>' : ''}${s === 'tech' ? '<div>' + ['Civil', 'Militaire'].map((n) => `<button type="button" role="tab" class="techtab" aria-selected="${n === ui.techTab}" data-t="${n}">${n}</button>`).join('') + '</div>' : ''}<div class="grid">${cards}</div></main>`)
+    + (isProd ? `<main>${s === 'operations' ? opsMain() : s === 'galaxy' ? galaxyMain() : s === 'alliance' ? allianceMain() : s === 'missions' ? missionsMain() : prodMain(p, s)}</main>` : `<main><h2>${title}</h2>${(s === 'buildings' || s === 'facilities') ? '<div>' + [['buildings', 'Industrie'], ['facilities', 'Infrastructures']].map(([k, n]) => `<button type="button" role="tab" class="tabnav" aria-selected="${k === s}" data-s="${k}">${n}</button>`).join('') + '</div>' : ''}${s === 'tech' ? '<div>' + ['Civil', 'Militaire'].map((n) => `<button type="button" role="tab" class="techtab" aria-selected="${n === ui.techTab}" data-t="${n}">${n}</button>`).join('') + '</div>' : ''}<div class="grid">${cards}</div></main>`)
     + '<nav><button class="nav" data-s="facilities"><span class="sr-only">Installations</span></button><button class="nav" data-s="tech"><span class="sr-only">Laboratoire</span></button>'
     + '<button class="nav" data-s="staff"><span class="sr-only">Population</span></button><button class="nav" data-s="shipyard"><span class="sr-only">Chantier spatial</span></button>'
     + '<button class="nav" data-s="specialized"><span class="sr-only">Appareils spécialisés</span></button><button class="nav" data-s="defense"><span class="sr-only">Défenses</span></button><button class="nav" data-s="operations"><span class="sr-only">Opérations</span></button><button class="nav" data-s="galaxy"><span class="sr-only">Galaxie</span></button>'
@@ -480,6 +523,20 @@ function render() {
   const rc = document.getElementById('recall'); if (rc) rc.onclick = () => post('/api/_forbidden', {what: 'Préparer le retour de la flotte'});
   document.querySelectorAll('.edur').forEach((b) => b.onclick = () => { ui.form.hours = +b.dataset.h; render(); });
   document.querySelectorAll('.hero').forEach((r) => r.onchange = () => { ui.form.mira = r.value === 'mira' && r.checked; render(); });
+  document.querySelectorAll('.mtab').forEach((b) => b.onclick = () => { ui.missionTab = b.dataset.k; render(); });
+  document.querySelectorAll('.claim').forEach((b) => b.onclick = async () => {
+    const r = await (await post('/api/claim', {list: b.dataset.list, index: +b.dataset.i})).json();
+    ui.missionMsg = r.message;
+    setTimeout(() => { ui.missionMsg = null; render(); }, 3000);
+    await load();
+  });
+  document.querySelectorAll('.allytab').forEach((b) => b.onclick = () => { ui.allyTab = b.dataset.k; render(); });
+  document.querySelectorAll('.star').forEach((b) => b.onclick = () => post('/api/_forbidden', {what: 'Changer la priorité de dons'}));
+  document.querySelectorAll('.tok').forEach((b) => b.onclick = async () => {
+    const r = await (await post('/api/token', {count: b.dataset.c})).json();
+    if (r.message) { ui.allyMsg = r.message; setTimeout(() => { ui.allyMsg = null; render(); }, 3000); }
+    await load();
+  });
   const bn = document.getElementById('bonus');
   if (bn) bn.onclick = async () => {
     const r = await (await post('/api/bonus', {})).json();
@@ -773,6 +830,41 @@ def create_mock_game() -> FastAPI:
         exc["mira_busy"] = exc["mira_busy"] or bool(body["mira"])
         g["actions"].append({"kind": "excavation", "planet": planet["name"], "target": body["target"], "units": units,
                              "hours": hours, "mira": bool(body["mira"])})
+        return {"ok": True}
+
+    @app.post("/api/claim")
+    async def claim(request: Request):
+        """« Récupérer » d'une mission (ou d'une quête) dont l'objectif est atteint."""
+        g, body = app.state.game, await request.json()
+        item = g[body["list"]][int(body["index"])]
+        if item["claimed"] or item["progress"] < item["goal"]:
+            raise HTTPException(409, "rien à récupérer")
+        item["claimed"] = True
+        g["actions"].append({"kind": "claim", "list": body["list"], "name": item["name"]})
+        return {"message": "5 Astrium et 5 XP réclamés."}
+
+    @app.post("/api/token")
+    async def token(request: Request):
+        """« +1 jeton » ou « Max. » sur la technologie prioritaire."""
+        g, body = app.state.game, await request.json()
+        a = g["alliance"]
+        tech = next(t for t in a["techs"] if t["name"] == a["priority"])
+        count = a["tokens"] if body["count"] == "max" else 1
+        if count <= 0 or tech["need"] <= 0:
+            raise HTTPException(409, "aucun jeton à donner")
+        if a["no_effect"]:
+            return {"message": None}
+        a["tokens"] -= count
+        tech["progress"] += count
+        g["actions"].append({"kind": "token", "tech": tech["name"], "count": count})
+        return {"message": f"Don effectué : {count} jeton(s)."}
+
+    @app.post("/api/_alliance")
+    async def set_alliance(request: Request):
+        body, a = await request.json(), app.state.game["alliance"]
+        for key in ("tokens", "priority", "no_effect"):
+            if key in body:
+                a[key] = body[key]
         return {"ok": True}
 
     @app.post("/api/bonus")

@@ -44,6 +44,8 @@ from .explorations import ExplorationStore
 from .explorer import ExplorationPass
 from .features import FEATURES, FeatureStore
 from . import bonus, planning
+from .alliance import AllianceSettings, TokenPass
+from .missions import MissionClaimer, MissionsState
 from .planning import PlanningStore
 from .excavations import ExcavationStore
 from .excavator import ExcavationPass
@@ -172,6 +174,11 @@ class BotSession:
         self.excavator = ExcavationPass(self, self.excavations)  # Fouilles vers le site libre le plus proche
         self.hackings = HackingStore(settings.data_dir)  # Piratage : planète de départ, délai, Errants les plus proches, suivi
         self.hacker = HackingPass(self, self.hackings)  # Naël Soryn pirate en boucle l'Errant le plus proche
+        self.alliance = AllianceSettings(settings.data_dir)  # jetons d'alliance à donner à chaque passage (tous, 1 ou 2)
+        self.token_giver = TokenPass(self, self.alliance)  # dons de jetons à la technologie prioritaire de l'alliance
+        self.mission_state = MissionsState(settings.data_dir)  # date de la dernière récupération des missions
+        self.missions = MissionClaimer(self, self.mission_state)  # « Récupérer » de l'onglet Missions, 1 fois par jour
+        self._missions_task: asyncio.Task | None = None
         self.planning = PlanningStore(settings.data_dir)  # plages horaires actives par jour (heure française)
         self.spying = SpySettings(settings.data_dir)  # espionnage des Errants : planète, minimums, nombre de ressources
         self.spy = SpyCampaign(self, self.spying)  # campagne manuelle : un drone par Errant visible, rapports gardés ou supprimés
@@ -216,10 +223,32 @@ class BotSession:
     def _feature_blocker(self) -> str | None:
         return self.planning_pause() or self.supervisor.game_blocker()
 
+    async def claim_missions(self, reason: str) -> str | None:
+        """(A) Le joueur met le bot sur OFF : récompenses des missions (1 fois par jour), après le passage en cours."""
+        if self.mission_state.done_today() or self.supervisor.game_blocker():
+            return None
+        async with self.work:
+            return await self.missions.claim_daily(reason)
+
+    def stop_with_missions(self) -> None:
+        """Bouton OFF : plus aucun passage, puis récupération des missions du jour en tâche de fond."""
+        was_on = self.scheduler.on
+        self.scheduler.stop()
+        if was_on and (self._missions_task is None or self._missions_task.done()):
+            self._missions_task = asyncio.create_task(self.claim_missions("l'arrêt du bot (OFF)"))
+
+    def _last_slot_of_day(self) -> bool:
+        """Le planning ne prévoit plus de plage aujourd'hui (date française)."""
+        nxt = planning.state(self.planning.get())["next"]
+        return nxt is None or nxt.date() > datetime.now(planning.TIMEZONE).date()
+
     async def pause_session(self, reason: str) -> None:
         """Hors planning : le passage en cours se termine, puis la session de jeu est effacée (déconnexion).
-        Les identifiants restent en mémoire : la reconnexion se fait seule au début de la plage suivante."""
+        Les identifiants restent en mémoire : la reconnexion se fait seule au début de la plage suivante.
+        (B) Fin de la dernière plage de la journée : les récompenses des missions sont récupérées juste avant."""
         async with self.work:
+            if self._last_slot_of_day() and not self.supervisor.game_blocker():
+                await self.missions.claim_daily("la fin de la dernière plage du planning")
             self._session_store.clear()
             async with self._lock:
                 if self._page is not None:
