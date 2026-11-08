@@ -211,7 +211,9 @@ button{min-width:36px;min-height:28px;margin:2px}.card{border:1px solid #888;mar
 <body><div id="cookies"><button type="button" id="refuse">TOUT REFUSER</button></div><div id="root"></div>
 <script>
 let state = null, overlayOpen = false, navOpen = false;
-const sec = () => location.pathname.split('/').pop();
+// Onglet lent : pendant un instant après un clic d'onglet, la page affiche encore l'ancien onglet (même si elle se redessine).
+let staleSec = null, staleUntil = 0;
+const sec = () => (Date.now() < staleUntil ? staleSec : location.pathname.split('/').pop());
 const big = (v) => v >= 1e9 ? (v/1e9).toFixed(3).replace('.', ',') + ' G' : v >= 1e6 ? (v/1e6).toFixed(3).replace('.', ',') + ' M' : String(Math.round(v));
 const md = (v) => v >= 1e9 ? (v/1e9).toFixed(1).replace('.', ',') + ' Md' : (v/1e6).toFixed(1).replace('.', ',') + ' M';
 const cost = (v) => v >= 1e9 ? (v/1e9).toFixed(3) + 'G' : v >= 1e6 ? (v/1e6).toFixed(3) + 'M' : v >= 1e3 ? (v/1e3).toFixed(1) + 'k' : String(v);
@@ -227,7 +229,8 @@ function techCard(p, it, busy) {
 }
 function card(p, it, kind, busy) {
   const ok = afford(p, it, busy);
-  const label = kind === 'tech' ? (ok ? 'Rechercher' : 'Ressources insuffisantes') : 'Améliorer';
+  // hide_upgrade : planète sans aucun bouton « Améliorer » (vrai jeu, ex. construction en cours)
+  const label = kind === 'tech' ? (ok ? 'Rechercher' : 'Ressources insuffisantes') : (p.hide_upgrade ? 'En construction' : 'Améliorer');
   const costs = Object.entries(it.costs).map(([k, v]) => `<div><span>${k}</span><span>${cost(v)}</span></div>`).join('');
   const dur = kind === 'tech' ? '<div><span>Temps de recherche</span></div>' : `<div><span>Durée</span><span>${it.duration}</span></div>`;
   return `<div class="card"><div class="top"><div class="badge"><span>${it.level}</span></div><div class="abs"><h3>${it.name}</h3></div></div>`
@@ -365,7 +368,7 @@ function excForm(p) {
 // Opérations › Piratage : cible, carte de Naël Soryn, durée fixe, « Missions en cours » (vrai jeu, 07/11).
 function hackCards() {
   const h = state.hack.active;
-  if (!h) return '';
+  if (!h || state.hack.late_state) return '';
   const now = Date.now() / 1000, left = Math.max(0, Math.round(h.end - now)), end = new Date(h.end * 1000);
   return `<div class="mcard"><div><span>Piratage</span><span># 102-02971</span><span>0 U</span></div>`
     + `<div><span>Arrivée : ${two(end.getHours())}:${two(end.getMinutes())}:${two(end.getSeconds())}</span><span>${two(Math.floor(left / 3600))}:${two(Math.floor(left % 3600 / 60))}:${two(left % 60)}</span></div>`
@@ -373,7 +376,8 @@ function hackCards() {
     + `<div><span>Destination</span><span>${h.name}</span><span>${h.target}</span></div></div>`;
 }
 function hackForm() {
-  const f = ui.form, busy = state.hack.busy || !!state.hack.active;
+  // late_state : le jeu met un moment à afficher Naël « Indisponible » et la carte (seul le message confirme le lancement)
+  const f = ui.form, busy = state.hack.busy || (!!state.hack.active && !state.hack.late_state);
   const valid = /^[A-Z]\\d{2} \\d{2} \\d{2}$/.test(f.target);
   // Un formulaire d'une autre mission reste caché dans la page, comme sur le vrai jeu.
   return '<div hidden><label>Cible</label><input type="text" placeholder="G46 50 50"><span>Naël Soryn</span><span>Disponible</span></div>'
@@ -490,7 +494,12 @@ function render() {
   document.getElementById('close-ov').onclick = () => { overlayOpen = false; render(); };
   document.querySelectorAll('.nav').forEach((b) => b.onclick = () => { history.pushState({}, '', '/game/asterion/' + b.dataset.s); render(); });
   document.querySelectorAll('.techtab').forEach((b) => b.onclick = () => { ui.techTab = b.dataset.t; render(); });
-  document.querySelectorAll('.tabnav').forEach((b) => b.onclick = () => { history.pushState({}, '', '/game/asterion/' + b.dataset.s); render(); });
+  // Onglets lents (vrai jeu) : l'adresse change tout de suite, le contenu du nouvel onglet arrive un instant après.
+  document.querySelectorAll('.tabnav').forEach((b) => b.onclick = () => {
+    if (state.slow_tabs) { staleSec = sec(); staleUntil = Date.now() + 600; }
+    history.pushState({}, '', '/game/asterion/' + b.dataset.s);
+    if (state.slow_tabs) setTimeout(render, 650); else render();
+  });
   document.getElementById('planet-btn').onclick = () => { navOpen = !navOpen; render(); };
   document.querySelectorAll('.npl').forEach((b) => b.onclick = async () => {
     await fetch('/api/select', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({index: +b.dataset.i})});
@@ -582,6 +591,11 @@ function render() {
   const hg = document.getElementById('hlaunch');
   if (hg) hg.onclick = async () => {
     const r = await (await post('/api/hack', {target: ui.form.target})).json();
+    if (r.ok && state.hack.no_effect === false) {
+      const t = {text: 'Vortex généré. Mission de Piratage en cours.'};
+      ui.toasts.push(t);
+      setTimeout(() => { ui.toasts = ui.toasts.filter((x) => x !== t); render(); }, 3000);
+    }
     if (r.refused) {
       const t = {text: r.refused};
       ui.toasts.push(t);
@@ -965,7 +979,7 @@ def create_mock_game() -> FastAPI:
     async def set_hack(request: Request):
         """Crochet de test : Naël occupé, piratage en cours (« end_in » secondes) ou terminé (active: null), clic sans effet."""
         body, h = await request.json(), app.state.game["hack"]
-        for key in ("busy", "no_effect"):
+        for key in ("busy", "no_effect", "late_state"):
             if key in body:
                 h[key] = body[key]
         if "active" in body:
@@ -1003,9 +1017,11 @@ def create_mock_game() -> FastAPI:
         app.state.game = initial_state()
         patch = await request.json() if (await request.body()) else {}
         g = app.state.game
-        for key in ("close_on_select", "no_debit", "popup_after_click", "require_auth", "slow_build"):
+        for key in ("close_on_select", "no_debit", "popup_after_click", "require_auth", "slow_build", "slow_tabs"):
             if key in patch:
                 g[key] = patch[key]
+        for index in patch.get("hide_upgrade") or []:
+            g["planets"][int(index)]["hide_upgrade"] = True
         for index, energy in (patch.get("energy") or {}).items():
             g["planets"][int(index)]["energy"] = energy
         for index, stocks in (patch.get("stocks") or {}).items():

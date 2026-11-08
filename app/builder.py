@@ -29,6 +29,7 @@ UNCONFIRMED_LIMIT = 2  # lancements non confirmés de suite avant désactivation
 PLANET_SWITCH_SECONDS = 6.0
 SETTLE_SECONDS = 10.0  # attente maximale que la page affiche les chiffres de la NOUVELLE planète
 SETTLE_POLL_SECONDS = 0.4
+UPGRADE_WAIT_SECONDS = 5.0  # attente de la carte du bâtiment visé avant de cliquer sur « Améliorer »
 PLANET_BUTTON_LABEL = "Sélectionner la planète active"
 PAGE_PATHS = {"Industrie": "buildings", "Infrastructures": "facilities"}
 
@@ -55,6 +56,27 @@ READ_CARDS_JS = """
     out.push({ name, level: level === undefined ? null : Number(level), costs, duration, disabled: b.disabled });
   }
   return out;
+}
+"""
+
+# Titres (h3) de toutes les cartes affichées, avec ou sans bouton « Améliorer » : sert à reconnaître l'onglet affiché.
+CARD_TITLES_JS = "() => [...document.querySelectorAll('h3')].map((e) => (e.textContent || '').replace(/\\s+/g, ' ').trim())"
+
+# Marque le bouton « Améliorer » de la carte dont le titre h3 correspond (même repérage que READ_CARDS_JS).
+UPGRADE_MARK = "data-bot-upgrade"
+MARK_UPGRADE_JS = """
+([wanted, attribute]) => {
+  const text = (el) => (el.textContent || '').replace(/\\s+/g, ' ').trim();
+  const norm = (s) => s.replace(/[’‘]/g, "'").toLowerCase().replace(/\\s+/g, ' ').trim();
+  document.querySelectorAll('[' + attribute + ']').forEach((e) => e.removeAttribute(attribute));
+  for (const b of document.querySelectorAll('button')) {
+    if (text(b).toLowerCase() !== 'améliorer' || !b.getClientRects().length) continue;
+    let card = b;
+    while (card.parentElement && card.querySelectorAll('h3').length !== 1) card = card.parentElement;
+    const h3 = card.querySelector('h3');
+    if (h3 && norm(text(h3)) === wanted) { b.setAttribute(attribute, '1'); return true; }
+  }
+  return false;
 }
 """
 
@@ -157,8 +179,13 @@ class ConstructionPass:
         else:
             root = page.url.split("/game/")[0] + "/game/" + page.url.split("/game/")[1].split("/")[0]
             await page.goto(f"{root}/{wanted}", wait_until="domcontentloaded", timeout=30_000)
+        # Vu sur le vrai jeu : après un clic d'onglet, les cartes de l'ANCIEN onglet restent un instant affichées. On attend
+        # donc qu'un bâtiment de l'onglet voulu soit à l'écran (Industrie et Infrastructures n'ont aucun bâtiment en commun).
+        # On lit le titre de TOUTES les cartes : sur une planète sans aucun bouton « Améliorer » (construction en cours…),
+        # l'onglet doit être reconnu quand même (vrai jeu, 08/11).
+        expected = {norm(b.label) for b in BUILDINGS if b.page == tab}
         for _ in range(40):
-            if await self._eval(READ_CARDS_JS):
+            if any(norm(title) in expected for title in await self._eval(CARD_TITLES_JS)):
                 return
             await asyncio.sleep(0.25)
         raise GameUiError(f"la page « {tab} » ne s'affiche pas")
@@ -234,12 +261,20 @@ class ConstructionPass:
 
     # ------------------------------------------------------------------ lancement
     async def _upgrade(self, label: str) -> None:
-        heading = self.page.get_by_role("heading", name=re.compile(rf"^{re.escape(label)}$", re.I)).first
-        button = heading.locator('xpath=ancestor::*[.//button[normalize-space(.)="Améliorer"]][1]//button[normalize-space(.)="Améliorer"]').first
-        if not await button.count():
-            raise GameUiError(f"bouton « Améliorer » de {label} introuvable")
-        await self._guard()
-        await human.click(self.page, button, self.settings)
+        """Clique sur « Améliorer » de la carte du bâtiment, repérée de la même façon que la lecture des cartes
+        (bouton « Améliorer » → carte au titre h3 unique) : ce qui a été lu est bien ce qui est cliqué."""
+        page = self.page
+        end = time.monotonic() + UPGRADE_WAIT_SECONDS  # la carte peut s'afficher un instant après le changement d'onglet
+        while not await page.evaluate(MARK_UPGRADE_JS, [norm(label), UPGRADE_MARK]):
+            if time.monotonic() >= end:
+                shown = ", ".join(sorted(c["name"] for c in await self._eval(READ_CARDS_JS))) or "aucune"
+                raise GameUiError(f"bouton « Améliorer » de {label} introuvable (cartes affichées : {shown})")
+            await asyncio.sleep(0.25)
+        try:
+            await self._guard()
+            await human.click(page, page.locator(f"[{UPGRADE_MARK}]").first, self.settings)
+        finally:
+            await page.evaluate("(a) => document.querySelectorAll('[' + a + ']').forEach((e) => e.removeAttribute(a))", UPGRADE_MARK)
 
     async def _debited(self, before: dict, card: Card) -> bool:
         """Le plus gros coût de la carte doit avoir baissé dans l'en-tête (la production seule ne l'explique pas)."""

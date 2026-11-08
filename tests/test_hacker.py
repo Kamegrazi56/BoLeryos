@@ -58,6 +58,15 @@ def test_the_next_hack_waits_for_the_delay_chosen_by_the_player(game_client, gam
     assert 20 * 60 <= state["ready"] - state["end"] <= 40 * 60 and len(_hacks(game)) == 2
 
 
+def test_the_game_message_confirms_a_hack_shown_late(game_client, game):
+    # Vrai jeu (08/11) : Naël encore « Disponible » juste après le clic ; le message « Mission de Piratage en cours » suffit.
+    _scan(game_client)
+    _set(game_client)
+    game.set_hack(late_state=True)
+    assert _run(game_client) == "piratage lancé vers Kairo-Vigie-378 7 (M69 34 68)"
+    assert _bot(game_client).hacker._unconfirmed == 0
+
+
 def test_nothing_is_launched_while_nael_is_busy(game_client, game):
     _scan(game_client)
     _set(game_client)

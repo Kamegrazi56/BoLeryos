@@ -62,6 +62,33 @@ def test_priority_order_decides_which_building_goes_first(game_client, game):
     assert _launched(game) == [("6-79-Egide", "Caserne", 19)]
 
 
+def test_a_building_of_the_other_tab_is_found_even_when_the_tab_is_slow_to_show(game_client, game):
+    # Vrai jeu (08/11) : Terraformeur (Infrastructures) + Centrale (Industrie) → « bouton Améliorer de Terraformeur introuvable »,
+    # car les cartes de l'ancien onglet restent un instant affichées après le clic d'onglet.
+    game.reset(slow_tabs=True)
+    _scan(game_client)
+    _set(game_client, [CASERNE, MINE], scope="one", planet="6-79-Egide")
+    summary = _run(game_client)
+    assert _launched(game) == [("6-79-Egide", "Caserne", 19)], summary
+
+
+def test_a_planet_without_any_upgrade_button_is_skipped_and_the_pass_goes_on(game_client, game):
+    # Vrai jeu (08/11) : « la page Infrastructures ne s'affiche pas » sur une planète dont aucune carte n'a de bouton « Améliorer ».
+    game.reset(hide_upgrade=[0])  # Concorde, qui pourrait payer la Centrale
+    page = _bot(game_client)._page
+
+    async def open_facilities():  # on part d'Infrastructures : il faut cliquer sur l'onglet Industrie
+        await page.goto(game.url + "/game/asterion/facilities")
+
+    game_client.portal.call(open_facilities)
+    _scan(game_client)
+    _set(game_client, [CENTRALE])
+    summary = _run(game_client)
+    launched = _launched(game)
+    assert launched and all(planet != "8-50-Concorde" for planet, _, _ in launched), summary
+    assert "arrêté" not in summary
+
+
 def test_a_line_whose_target_level_is_reached_is_skipped(game_client, game):
     _scan(game_client)
     _set(game_client, [{"building": "mine-de-fer", "level": 40}, CASERNE], scope="one", planet="6-79-Egide")  # Mine déjà niveau 40

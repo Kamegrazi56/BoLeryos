@@ -14,7 +14,7 @@ import random
 import re
 import time
 
-from . import builder, human
+from . import human
 from .builder import UNCONFIRMED_LIMIT
 from .excavator import MISSIONS_JS, READY_SECONDS, stable_read, wait_enabled, wait_missions_loaded
 from .explorer import CLEAR_MARK_JS, MARK_TARGET_JS, TARGET_ATTRIBUTE, ExplorationPass
@@ -27,6 +27,11 @@ HACK_SECONDS = 30 * 60  # durée fixe d'un piratage (wiki et jeu)
 PAGE_WAIT_SECONDS = 10.0
 LAUNCH_NAME = re.compile(r"^Lancer le piratage", re.I)
 REFUSED_RE = re.compile(r"^Impossible", re.I)
+HACK_CONFIRM_SECONDS = 20.0  # vu sur le vrai jeu : un lancement réussi n'a pas été vu en 8 s
+
+# Message du jeu après un lancement réussi : « Vortex généré. Mission de Piratage en cours. »
+STARTED_JS = """() => [...document.querySelectorAll('body *')].some((e) => !e.children.length && e.getClientRects().length
+  && /Mission de Piratage en cours/i.test((e.textContent || '').trim()))"""
 
 # État de Naël sur la carte visible du formulaire : available, busy ou null (carte absente).
 NAEL_JS = """() => {
@@ -213,9 +218,10 @@ class HackingPass(ExplorationPass):
 
     async def _confirm_hack(self, label: str, before: int) -> str:
         """Naël « Indisponible » ou une carte Piratage = lancé ; un message « Impossible … » = cible refusée."""
-        end = time.monotonic() + builder.CONFIRM_SECONDS
+        end = time.monotonic() + HACK_CONFIRM_SECONDS
         while time.monotonic() < end:
-            if await self.page.evaluate(NAEL_JS) == "busy" or await self.page.evaluate(MISSIONS_JS, "Piratage"):
+            if (await self.page.evaluate(STARTED_JS) or await self.page.evaluate(NAEL_JS) == "busy"
+                    or await self.page.evaluate(MISSIONS_JS, "Piratage")):
                 self._unconfirmed = 0
                 self.bot.log(f"Piratage lancé : Naël Soryn vers {label}.", event=True, kind="launch")
                 return "launched"
