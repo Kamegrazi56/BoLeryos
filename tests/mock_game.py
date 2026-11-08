@@ -543,7 +543,11 @@ function render() {
     render();
   };
   const tgt = document.getElementById('target');
-  if (tgt) tgt.oninput = () => { ui.form.target = fmtTarget(tgt.value); render(); };
+  // wipe_target : le formulaire se redessine juste après la saisie et efface la cible (supposé sur le vrai jeu, 08/11)
+  if (tgt) tgt.oninput = () => {
+    if (state.wipe_target > 0) { state.wipe_target--; ui.form.target = ''; render(); return; }  // saisie perdue
+    ui.form.target = fmtTarget(tgt.value); render();
+  };
   document.querySelectorAll('.unit').forEach((i) => i.oninput = () => { ui.form.units[i.dataset.u] = i.value; render(); });
   const cp = document.getElementById('copies'); if (cp) cp.onchange = () => { ui.form.copies = cp.value; render(); };
   const du = document.getElementById('duration'); if (du) du.onchange = () => { ui.form.duration = du.value; render(); };
@@ -1018,7 +1022,7 @@ def create_mock_game() -> FastAPI:
         app.state.game = initial_state()
         patch = await request.json() if (await request.body()) else {}
         g = app.state.game
-        for key in ("close_on_select", "no_debit", "popup_after_click", "require_auth", "slow_build", "slow_tabs"):
+        for key in ("close_on_select", "no_debit", "popup_after_click", "require_auth", "slow_build", "slow_tabs", "wipe_target"):
             if key in patch:
                 g[key] = patch[key]
         for index in patch.get("hide_upgrade") or []:

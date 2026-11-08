@@ -31,6 +31,8 @@ RESPONSE_WAIT_SECONDS = 4.0
 ZOOM_STEPS = 6  # dézooms au plus pour trouver une brèche autour d'une planète
 PAGE_WAIT_SECONDS = 10.0
 TARGET_ATTRIBUTE = "data-bot-target"
+TARGET_ATTEMPTS = 2  # saisie de la cible, puis une nouvelle saisie si le jeu ne l'a pas affichée validée
+TARGET_RETRY_PAUSE_SECONDS = 1.5
 # Secours : unités de carte par pas d'adresse (X, Y), mesurées sur le vrai jeu (5,16 à 5,30 et 4,35 à 4,69 selon la région).
 FORMULA_SCALE = (5.2, 4.5)
 ADDRESS_RE = re.compile(r"^([A-Z])(\d)(\d) (\d{2}) (\d{2})$")
@@ -109,6 +111,9 @@ TARGET_SHOWN_JS = (
   return [...box.querySelectorAll('*')].filter((e) => e.children.length === 0 && e.tagName !== 'INPUT' && ADDRESS.test(text(e))).map(text);
 }"""
 )
+
+# Contenu du champ Cible visible (diagnostic quand la cible n'est pas validée).
+TARGET_VALUE_JS = "() => {" + _PRELUDE_JS + "\n  const input = targetInput();\n  return input ? input.value : null;\n}"
 
 MODELS_JS = (
     "() => {"
@@ -216,6 +221,7 @@ class ExplorationPass(ConstructionPass):
         super().__init__(bot)
         self.store = store
         self.scanning = False
+        self._target_debug = ""  # ce que montrait le champ Cible au dernier refus
 
     # ------------------------------------------------------------------ planètes
     def _targets(self, settings: dict) -> list[str]:
@@ -497,21 +503,29 @@ class ExplorationPass(ConstructionPass):
         return sentence
 
     async def _fill_target(self, address: str) -> bool:
+        """Tape la cible et attend que le jeu l'affiche validée. Une saisie perdue (formulaire redessiné juste après, supposé
+        sur le vrai jeu le 08/11 pour un forage) est retapée une fois. Échec : `_target_debug` dit ce que montrait le champ."""
         page = self.page
-        if not await page.evaluate(MARK_TARGET_JS, TARGET_ATTRIBUTE):
-            raise GameUiError("champ Cible introuvable")
-        try:
-            target = page.locator(f"[{TARGET_ATTRIBUTE}]").first
-            await self._guard()
-            await human.click(page, target, self.settings)
-            await target.fill(compact(address))
-        finally:
-            await page.evaluate(CLEAR_MARK_JS, TARGET_ATTRIBUTE)
-        end = time.monotonic() + PAGE_WAIT_SECONDS / 2
-        while time.monotonic() < end:
-            if address in await page.evaluate(TARGET_SHOWN_JS):
-                return True
-            await asyncio.sleep(0.25)
+        for attempt in range(TARGET_ATTEMPTS):
+            if attempt:
+                await asyncio.sleep(TARGET_RETRY_PAUSE_SECONDS)
+            if not await page.evaluate(MARK_TARGET_JS, TARGET_ATTRIBUTE):
+                raise GameUiError("champ Cible introuvable")
+            try:
+                target = page.locator(f"[{TARGET_ATTRIBUTE}]").first
+                await self._guard()
+                await human.click(page, target, self.settings)
+                await target.fill(compact(address))
+            finally:
+                await page.evaluate(CLEAR_MARK_JS, TARGET_ATTRIBUTE)
+            end = time.monotonic() + PAGE_WAIT_SECONDS / 2
+            while time.monotonic() < end:
+                if address in await page.evaluate(TARGET_SHOWN_JS):
+                    return True
+                await asyncio.sleep(0.25)
+        value = await page.evaluate(TARGET_VALUE_JS)
+        shown = await page.evaluate(TARGET_SHOWN_JS)
+        self._target_debug = f"champ Cible « {value if value is not None else 'introuvable'} », affiché dessous : {', '.join(shown) or 'rien'}"
         return False
 
     async def _apply_model(self, name: str) -> bool:

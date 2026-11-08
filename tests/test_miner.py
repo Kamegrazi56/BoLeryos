@@ -35,6 +35,25 @@ def test_each_place_goes_to_the_nearest_free_mining_planet_of_the_resource(game_
     assert "0 forage(s) lancé(s) ; 2 en cours" in _run(game_client) and len(_sent(game)) == 2
 
 
+def test_a_target_lost_just_after_typing_is_typed_again(game_client, game):
+    # Vrai jeu (08/11) : « cible M68 18 22 refusée par le jeu » alors que la même saisie à la main est acceptée.
+    game.reset(wipe_target=1)
+    _scan(game_client)
+    _set(game_client, slots=1)
+    summary = _run(game_client)
+    assert summary.startswith("1 forage(s) lancé(s)"), summary
+    assert _sent(game) == [("M68 18 22", 150000)]
+
+
+def test_a_target_never_shown_is_explained_in_the_log(game_client, game):
+    game.reset(wipe_target=5)
+    _scan(game_client)
+    _set(game_client, slots=1)
+    assert _run(game_client).startswith("0 forage(s) lancé(s)") and _sent(game) == []
+    logs = [e["msg"] for e in game_client.get("/api/status?limit=50").json()["logs"]]
+    assert any("cible M68 18 22 refusée par le jeu (champ Cible" in line for line in logs), logs
+
+
 def test_the_place_is_relaunched_on_the_same_mining_planet_after_the_return(game_client, game):
     _scan(game_client)
     _set(game_client, slots=1)

@@ -217,7 +217,7 @@ class MiningPass(ExplorationPass):
         await self._select_planet(planet)
         await self._settle(planet)
         if not await self._fill_target(site):
-            self.bot.log(f"Forages : cible {site} refusée par le jeu.", "warn", event=True)
+            self.bot.log(f"Forages : cible {site} refusée par le jeu ({self._target_debug}).", "warn", event=True)
             return False
         for label, value in (("Quantité Foreuse orbitale", "1"), ("Quantité Mineur", str(s["miners"]))):
             field = page.get_by_label(label, exact=True)
