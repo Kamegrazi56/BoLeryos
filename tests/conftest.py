@@ -97,6 +97,9 @@ class GameHandle:
     def set_exp(self, **values) -> None:
         httpx.post(self.url + "/api/_exp", json=values, timeout=5).raise_for_status()
 
+    def set_mine(self, **values) -> None:
+        httpx.post(self.url + "/api/_mine", json=values, timeout=5).raise_for_status()
+
     def set_alliance(self, **values) -> None:
         httpx.post(self.url + "/api/_alliance", json=values, timeout=5).raise_for_status()
 

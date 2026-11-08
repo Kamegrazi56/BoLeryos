@@ -37,6 +37,9 @@ def test_a_turning_the_bot_off_claims_the_missions(game_client, game):
     game_client.post("/api/bot/start")
     game_client.post("/api/bot/stop")
     assert _wait_claims(game, 2) == [("missions", "Connexion quotidienne"), ("missions", "Réaliser 2 Fouilles")]
+    end = time.monotonic() + 10  # le bilan est écrit à la fin de la boucle, juste après la dernière récompense
+    while time.monotonic() < end and not any("Missions (avant l'arrêt du bot (OFF))" in e["msg"] for e in _bot(game_client).logs(20)):
+        time.sleep(0.2)
     assert any("Missions (avant l'arrêt du bot (OFF))" in e["msg"] for e in _bot(game_client).logs(20))
 
 

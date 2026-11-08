@@ -130,6 +130,10 @@ def initial_state():
                 # son Drone est grisé (hors du ratio ×2), Bryn a ses piliers fermés, Kairo est la première piratable.
                 "errants": [["M97 50 19", "Torek-Veine-165 2", 11575, 1540], ["M69 37 24", "Bryn-Socle-176 3", 11560, 1552],
                             ["M69 34 68", "Kairo-Vigie-378 7", 11600, 1600], ["M69 41 02", "Lyra-Voile-12 1", 11700, 1700]]},
+        # Forages : planètes minières (adresse, ressource, position) et forages du joueur (origine, site, phase, fin)
+        "mining": {"mines": [["M68 18 22", "fer", 11500, 1600], ["M78 16 44", "fer", 11650, 1650], ["M70 00 01", "cristal", 11600, 1500],
+                             ["Z25 50 50", "ether", 100, 100]],
+                   "active": [], "no_effect": False},
         # Piratage : Naël Soryn (occupé ou non), piratage en cours (cible, fin), clic sans effet
         "hack": {"busy": False, "active": None, "no_effect": False},
         # Bonus d'activité : bouton présent seulement quand un gain est disponible (vrai jeu, 07/11)
@@ -232,7 +236,7 @@ function card(p, it, kind, busy) {
 const kfmt = (v) => v >= 1e9 ? (v / 1e9).toFixed(3).replace('.', ',') + ' G' : v >= 1e6 ? (v / 1e6).toFixed(3).replace('.', ',') + ' M' : v >= 1000 ? (v / 1000).toFixed(3).replace('.', ',') + ' K' : String(Math.round(v));
 const ui = {tab: 'Assaut', ship: 'Assemblages', way: 'Piliers', mission: 'ATTAQUE', techTab: 'Civil', zoom: 1, windowRows: [], modelsOpen: false,
             zoomLevel: 4.64, listShown: 25, toasts: [], report: null, freeRows: [], allyTab: 'vue', allyMsg: null, missionTab: 'missions', missionMsg: null,
-            form: {target: '', units: {}, copies: '1', duration: '1', hours: 6, mira: false}};
+            form: {target: '', units: {}, copies: '1', duration: '1', hours: 6, mira: false, foreuse: '1', mineur: ''}};
 (() => { const q = new URLSearchParams(location.search); if (q.get('mission')) ui.mission = q.get('mission'); if (q.get('method')) ui.way = q.get('method') === 'FLEET' ? 'Flotte' : 'Piliers'; })();
 const CK = {Fer: 'F', Cristal: 'C', 'Éther': 'E'};
 const costLeaves = (c) => Object.entries(c).map(([k, v]) => `<span>${CK[k]}: ${kfmt(v)}</span>`).join('');
@@ -380,6 +384,27 @@ function hackForm() {
     + `<section><h3>Missions en cours</h3>${(hackCards() + excCards()) || '<p>Aucune mission disponible</p>'}</section>`
     + (ui.toasts.length ? `<div class="toasts">${ui.toasts.map((t) => `<div>${t.text}</div>`).join('')}</div>` : '');
 }
+// Opérations › Flotte › Forage : cible, 1 Foreuse orbitale, Mineurs ; « Missions en cours » en 3 phases (vrai jeu, 08/11).
+function mineCards() {
+  const now = Date.now() / 1000;
+  const clockOf = (end) => { const left = Math.max(0, Math.round(end - now)), d = new Date(end * 1000);
+    return `<div><span>Arrivée : ${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}</span><span>${two(Math.floor(left / 3600))}:${two(Math.floor(left % 3600 / 60))}:${two(left % 60)}</span></div>`; };
+  return state.mining.active.map((m) => m.phase === 'retour'
+    ? `<div class="mcard"><div><span>Retour</span><span>1 U</span></div>${clockOf(m.end)}<div><span>Origine</span><span>Inconnue</span><span>${m.site}</span><span>KameGrazi</span></div><div><span>Destination</span><span>${m.origin}</span><span>${m.origin_coords}</span><span>KameGrazi</span></div></div>`
+    : `<div class="mcard"><div><span>Forage</span><span>1 U</span></div>${m.phase === 'extraction' ? '<div><span>Extraction en cours</span></div>' : clockOf(m.end)}`
+      + `<div><span>Origine</span><span>${m.origin}</span><span>${m.origin_coords}</span><span>KameGrazi</span></div><div><span>Destination</span><span>Planete miniere</span><span>${m.site}</span></div></div>`).join('');
+}
+function mineForm(p) {
+  const f = ui.form, valid = /^[A-Z]\\d{2} \\d{2} \\d{2}$/.test(f.target);
+  const ok = valid && (+f.foreuse || 0) === 1 && (+f.mineur || 0) >= 1;
+  return `<div class="cible"><label>Cible</label><input type="text" id="target" placeholder="G46 50 50" value="${f.target}">${valid ? `<span class="font-mono">${f.target}</span>` : ''}</div>`
+    + '<div><span>Type de mission spéciale</span><span>Forage</span></div>'
+    + `<div><span>Foreuse orbitale</span><span>Stock : 5</span><input type="number" id="foreuse" aria-label="Quantité Foreuse orbitale" value="${f.foreuse}"></div>`
+    + `<div><span>Mineur</span><span>Stock : 1 686 919</span><input type="number" id="mineur" aria-label="Quantité Mineur" value="${f.mineur}"></div>`
+    + `<button type="button" id="mlaunch" ${ok ? '' : 'disabled'}>Lancer la flotte</button>`
+    + `<section><h3>Missions en cours</h3>${mineCards() || '<p>Aucune mission disponible</p>'}</section>`
+    + (ui.toasts.length ? `<div class="toasts">${ui.toasts.map((t) => `<div>${t.text}</div>`).join('')}</div>` : '');
+}
 // Alliance : onglets (Vue, Territoires, Techs) ; Techs = jetons + technologies (vrai jeu, 08/11).
 function allianceMain() {
   const tabs = [['vue', 'Vue'], ['territoires', 'Territoires'], ['techs', '⚡ Techs']].map(([k, n]) =>
@@ -422,6 +447,7 @@ function opsMain() {
   if (ui.mission === 'EXPLORATION') body = expForm(state.planets[state.active]);
   if (ui.mission === 'EXCAVATION') body = excForm(state.planets[state.active]);
   if (ui.mission === 'HACKING') body = hackForm();
+  if (ui.mission === 'MINING') body = mineForm(state.planets[state.active]);
   return '<h2>Opérations</h2><div><span>Moyen de lancement</span>' + ways + '</div><div><span>Mission</span>' + missions + '</div>' + body;
 }
 function sensors() {
@@ -542,6 +568,15 @@ function render() {
     const r = await (await post('/api/bonus', {})).json();
     ui.bonusMsg = r.message;
     setTimeout(() => { ui.bonusMsg = null; render(); }, 4000);
+    await load();
+  };
+  const fo = document.getElementById('foreuse'); if (fo) fo.oninput = () => { ui.form.foreuse = fo.value; render(); };
+  const mi = document.getElementById('mineur'); if (mi) mi.oninput = () => { ui.form.mineur = mi.value; render(); };
+  const ml = document.getElementById('mlaunch');
+  if (ml) ml.onclick = async () => {
+    const r = await (await post('/api/mine', {target: ui.form.target, miners: +ui.form.mineur})).json();
+    if (r.message) { const t = {text: r.message}; ui.toasts.push(t); setTimeout(() => { ui.toasts = ui.toasts.filter((x) => x !== t); render(); }, 3000); }
+    if (r.message) ui.form = {...ui.form, target: '', mineur: ''};
     await load();
   };
   const hg = document.getElementById('hlaunch');
@@ -756,6 +791,8 @@ def create_mock_game() -> FastAPI:
         objects += [{"kind": "BREACH", "address": a, "positionMilli": [x * 1000, y * 1000]} for a, x, y in breaches if inside(x, y)]
         objects += [{"kind": "PVE_PLANET", "address": a, "name": n, "positionMilli": [x * 1000, y * 1000]}
                     for a, n, x, y in g["map"]["errants"] if inside(x, y)]
+        objects += [{"kind": "MINING", "address": a, "name": "Planete miniere", "miningResourceType": r, "capabilities": ["MINING", "ESPIONAGE"],
+                     "positionMilli": [x * 1000, y * 1000]} for a, r, x, y in g["mining"]["mines"] if inside(x, y)]
         free = g["map"]["free"]
         objects += [{"kind": "FREE_SLOT", "address": a, "positionMilli": [x * 1000, y * 1000], "capabilities": ["COLONIZE", "EXCAVATION"]}
                     for a, x, y in free if inside(x, y)]
@@ -830,6 +867,31 @@ def create_mock_game() -> FastAPI:
         exc["mira_busy"] = exc["mira_busy"] or bool(body["mira"])
         g["actions"].append({"kind": "excavation", "planet": planet["name"], "target": body["target"], "units": units,
                              "hours": hours, "mira": bool(body["mira"])})
+        return {"ok": True}
+
+    @app.post("/api/mine")
+    async def mine(request: Request):
+        """« Lancer la flotte » en mission Forage : refusé si la cible n'est pas une planète minière ou si elle est déjà forée."""
+        g, body = app.state.game, await request.json()
+        m, planet = g["mining"], g["planets"][g["active"]]
+        if body["target"] not in [a for a, _r, _x, _y in m["mines"]] or any(a["site"] == body["target"] for a in m["active"]):
+            raise HTTPException(409, "forage refusé")
+        if m["no_effect"]:
+            return {"message": None}
+        m["active"].append({"origin": planet["name"], "origin_coords": planet["coords"], "site": body["target"], "phase": "aller",
+                            "end": time.time() + 730})
+        g["actions"].append({"kind": "mining", "planet": planet["name"], "target": body["target"], "miners": int(body["miners"])})
+        return {"message": "Flotte en route : mission Forage."}
+
+    @app.post("/api/_mine")
+    async def set_mine(request: Request):
+        """Crochet de test : forages (phase aller|extraction|retour, « end_in » secondes), planètes minières, clic sans effet."""
+        body, m = await request.json(), app.state.game["mining"]
+        if "active" in body:
+            m["active"] = [{"origin_coords": "M69 38 06", **a, "end": time.time() + a.get("end_in", 600)} for a in body["active"]]
+        for key in ("mines", "no_effect"):
+            if key in body:
+                m[key] = body[key]
         return {"ok": True}
 
     @app.post("/api/claim")

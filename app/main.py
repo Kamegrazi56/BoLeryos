@@ -33,6 +33,9 @@ from .excavations import MAX_TEAM as EXCAVATION_MAX_TEAM
 from .excavations import UNITS as EXCAVATION_UNITS
 from .excavations import ExcavationError
 from .alliance import AllianceError
+from .minings import MAX_MINERS as MINING_MAX_MINERS
+from .minings import RESOURCES as MINING_RESOURCES
+from .minings import MiningError
 from .hackings import HackingError
 from .planning import DAY_LABELS as PLANNING_DAY_LABELS
 from .planning import PlanningError
@@ -165,6 +168,15 @@ class PlanningRequest(BaseModel):
     days: dict[str, list[PlanningSlot]] = Field(default_factory=dict, max_length=7)
     offset_min: int = Field(default=0, ge=0, le=10_000)
     offset_max: int = Field(default=0, ge=0, le=10_000)
+
+
+class MiningRequest(BaseModel):
+    planets: list[str] = Field(default_factory=list, max_length=200)
+    resources: list[str] = Field(default_factory=list, max_length=3)
+    miners: int = Field(default=200_000, ge=0, le=10_000_000)
+    slots: int = Field(default=1, ge=0, le=100)
+    delay_min: int | None = Field(default=None, ge=0, le=100_000)
+    delay_max: int | None = Field(default=None, ge=0, le=100_000)
 
 
 class AllianceRequest(BaseModel):
@@ -675,6 +687,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(422, detail=exc.errors) from exc
         bot.log("Planning enregistré.", event=True)
         return JSONResponse(_planning_payload(), headers=NO_STORE)
+
+    # --- Forages de planètes minières : réglages et forages suivis -----------
+    def _minings_payload() -> dict:
+        return {"settings": bot.minings.get(), "tracked": bot.minings.tracked(), "planets": _known_planets(),
+                "resources": MINING_RESOURCES, "max_miners": MINING_MAX_MINERS, "persistent": bot.minings.persistent}
+
+    @app.get("/api/minings")
+    async def api_minings():
+        return JSONResponse(_minings_payload(), headers=NO_STORE)
+
+    @app.put("/api/minings")
+    async def api_minings_put(body: MiningRequest, request: Request):
+        _check_origin(request)
+        try:
+            bot.minings.replace(body.model_dump(), _known_planets())
+        except MiningError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        return JSONResponse(_minings_payload(), headers=NO_STORE)
 
     # --- Alliance : nombre de jetons donnés à chaque passage à la technologie prioritaire -----------
     @app.get("/api/alliance")

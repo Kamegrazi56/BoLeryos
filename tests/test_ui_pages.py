@@ -105,7 +105,7 @@ def test_the_removed_features_have_no_settings_and_no_routes(ui):
     page, _, _ = ui
     page.goto(page.base + "/reglages")
     tabs = [t.strip().lower() for t in page.locator("[role=tab]").all_inner_texts()]
-    assert tabs == ["compte et univers", "fonctionnalités", "constructions", "recherches", "population", "assemblages", "composants", "exploration", "fouilles", "piratage", "espionnage", "planning", "alliance"]
+    assert tabs == ["compte et univers", "fonctionnalités", "constructions", "recherches", "population", "assemblages", "composants", "exploration", "fouilles", "piratage", "espionnage", "planning", "alliance", "forages"]
     for tab in tabs:  # aucune section supprimée ne réapparaît, quel que soit l'onglet
         page.click(f"[role=tab]:has-text('{tab}')", strict=False)
         text = page.inner_text("main").lower()
@@ -351,11 +351,11 @@ def test_population_panel_sets_mode_quantity_and_planet_for_each_population(ui):
     assert errors == []
 
 
-def test_settings_page_has_thirteen_tabs_and_only_one_panel_shows_at_a_time(ui):
+def test_settings_page_has_fourteen_tabs_and_only_one_panel_shows_at_a_time(ui):
     page, errors, _ = ui
     page.goto(page.base + "/reglages")
-    ids = ["account", "features", "constructions", "researches", "populations", "ships", "components", "explorations", "excavations", "hackings", "spying", "planning", "alliance"]
-    assert page.locator("[role=tab]").count() == 13
+    ids = ["account", "features", "constructions", "researches", "populations", "ships", "components", "explorations", "excavations", "hackings", "spying", "planning", "alliance", "minings"]
+    assert page.locator("[role=tab]").count() == 14
     for tab in ids:
         page.click(f"#tab-{tab}")
         assert page.get_attribute(f"#tab-{tab}", "aria-selected") == "true"
@@ -384,6 +384,8 @@ def test_settings_page_has_thirteen_tabs_and_only_one_panel_shows_at_a_time(ui):
     page.press("#tab-planning", "ArrowRight")
     assert page.locator("#panel-alliance").is_visible()
     page.press("#tab-alliance", "ArrowRight")
+    assert page.locator("#panel-minings").is_visible()
+    page.press("#tab-minings", "ArrowRight")
     assert page.locator("#panel-account").is_visible()
     assert errors == []
 

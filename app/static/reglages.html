@@ -38,6 +38,7 @@
         <button role="tab" id="tab-spying" data-tab="spying" aria-controls="panel-spying">Espionnage</button>
         <button role="tab" id="tab-planning" data-tab="planning" aria-controls="panel-planning">Planning</button>
         <button role="tab" id="tab-alliance" data-tab="alliance" aria-controls="panel-alliance">Alliance</button>
+        <button role="tab" id="tab-minings" data-tab="minings" aria-controls="panel-minings">Forages</button>
       </div>
       <span id="save-msg" class="save-state" role="status" aria-live="polite"></span>
     </div>
@@ -263,6 +264,24 @@
       </div>
       <p id="ally-msg" class="msg" role="status" aria-live="polite"></p>
     </section>
+    <section class="tabpanel card" id="panel-minings" role="tabpanel" aria-labelledby="tab-minings" hidden>
+      <h2 id="mine-title">Forages de planètes minières</h2>
+      <p class="hint">Le bot repère sur la carte les planètes minières de la ressource voulue, autour des planètes de départ, et envoie 1 Foreuse orbitale avec vos Mineurs vers la plus proche qui n'a pas déjà un forage. La flotte revient seule (soute pleine ou planète épuisée) ; la place est relancée au retour plus le délai choisi, sur la même planète minière si elle existe encore. Activez « Forages de planètes minières » dans l'onglet Fonctionnalités.</p>
+      <fieldset class="row"><legend>Planètes de départ</legend><span id="mine-planets"></span></fieldset>
+      <fieldset class="row"><legend>Ressources visées</legend><span id="mine-resources"></span></fieldset>
+      <div class="row">
+        <label>Mineurs par forage <input id="mine-miners" type="number" min="1" max="200000" step="1" aria-label="Mineurs par forage"></label>
+        <label>Places (forages en même temps) <input id="mine-slots" type="number" min="1" max="20" step="1" aria-label="Places de forage"></label>
+      </div>
+      <div class="row">
+        <label>Délai avant relance : de <input id="mine-delay-min" type="number" min="0" step="1" aria-label="Délai minimum avant relance du forage (minutes)"></label>
+        <label>à <input id="mine-delay-max" type="number" min="0" step="1" aria-label="Délai maximum avant relance du forage (minutes)"> minutes</label>
+      </div>
+      <div class="row"><button id="mine-save" type="button">Enregistrer</button></div>
+      <p id="mine-msg" class="msg" role="status" aria-live="polite"></p>
+      <h3>Forages suivis</h3>
+      <ul id="mine-tracked" class="hint"></ul>
+    </section>
   </main>
   <script src="/static/shell.js"></script>
   <script src="/static/reglages.js"></script>
@@ -277,5 +296,6 @@
   <script src="/static/spying.js"></script>
   <script src="/static/planning.js"></script>
   <script src="/static/alliance.js"></script>
+  <script src="/static/mining.js"></script>
 </body>
 </html>

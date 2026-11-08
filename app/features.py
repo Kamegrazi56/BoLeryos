@@ -66,6 +66,10 @@ async def _run_hackings(bot) -> str:
     return await bot.hacker.run_pass()
 
 
+async def _run_minings(bot) -> str:
+    return await bot.miner.run_pass()
+
+
 async def _run_alliance_tokens(bot) -> str:
     return await bot.token_giver.run_pass()
 
@@ -88,6 +92,8 @@ FEATURES: tuple[Feature, ...] = (
             self_timed=True, next_due=lambda bot: bot.excavator.next_due()),
     Feature("hackings", "Piratage (expérience de Naël)", "Fait pirater en boucle par Naël Soryn l'Errant le plus proche de la planète choisie (onglet Piratage), pour son expérience : relance dès que le piratage précédent est fini et que le délai choisi est passé, et passe à l'Errant suivant si le jeu refuse la cible. Relève les Errants une fois par jour.", _run_hackings,
             self_timed=True, next_due=lambda bot: bot.hacker.next_due()),
+    Feature("minings", "Forages de planètes minières", "Envoie des forages (onglet Forages) depuis les planètes choisies vers la planète minière la plus proche de la ressource voulue (Fer, Cristal, Éther), sans jamais deux forages sur la même : 1 Foreuse orbitale et le nombre de Mineurs réglé, autant de forages que de places. La flotte revient seule (soute pleine ou planète épuisée) ; la place est relancée au retour plus le délai choisi, sur la même planète minière si elle existe encore.", _run_minings,
+            self_timed=True, next_due=lambda bot: bot.miner.next_due()),
     Feature("alliance_tokens", "Dons de jetons d'alliance", "Donne vos jetons d'alliance (onglet Alliance : tous, 1 ou 2 à chaque passage) à la technologie marquée « priorité de dons de l'alliance ». Ne donne rien si aucune technologie n'est prioritaire ; ne change jamais la priorité. Un jeton revient environ toutes les 2 h (6 au plus).", _run_alliance_tokens,
             timer_label="Donner des jetons toutes les"),
     Feature("test", "Test (ne fait rien)", "Écrit une ligne dans le journal à chaque passage. À retirer quand les vraies fonctionnalités arrivent.", _run_test),

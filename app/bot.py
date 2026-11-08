@@ -45,6 +45,8 @@ from .explorer import ExplorationPass
 from .features import FEATURES, FeatureStore
 from . import bonus, planning
 from .alliance import AllianceSettings, TokenPass
+from .miner import MiningPass
+from .minings import MiningStore
 from .missions import MissionClaimer, MissionsState
 from .planning import PlanningStore
 from .excavations import ExcavationStore
@@ -174,6 +176,8 @@ class BotSession:
         self.excavator = ExcavationPass(self, self.excavations)  # Fouilles vers le site libre le plus proche
         self.hackings = HackingStore(settings.data_dir)  # Piratage : planète de départ, délai, Errants les plus proches, suivi
         self.hacker = HackingPass(self, self.hackings)  # Naël Soryn pirate en boucle l'Errant le plus proche
+        self.minings = MiningStore(settings.data_dir)  # forages : planètes, ressources, Mineurs, places, délai, suivi
+        self.miner = MiningPass(self, self.minings)  # forages de planètes minières
         self.alliance = AllianceSettings(settings.data_dir)  # jetons d'alliance à donner à chaque passage (tous, 1 ou 2)
         self.token_giver = TokenPass(self, self.alliance)  # dons de jetons à la technologie prioritaire de l'alliance
         self.mission_state = MissionsState(settings.data_dir)  # date de la dernière récupération des missions
@@ -209,7 +213,7 @@ class BotSession:
     def reset_failures(self, feature_id: str) -> None:
         """Remet à zéro les lancements non confirmés d'une fonctionnalité (appelé quand l'utilisateur la réactive)."""
         passes = {"constructions": self.builder, "researches": self.researcher, "populations": self.recruiter,
-                  "ships": self.shipper, "components": self.producer, "explorations": self.explorer, "excavations": self.excavator, "hackings": self.hacker}
+                  "ships": self.shipper, "components": self.producer, "explorations": self.explorer, "excavations": self.excavator, "hackings": self.hacker, "minings": self.miner}
         if feature_id in passes:
             passes[feature_id]._unconfirmed = 0
 
