@@ -149,6 +149,23 @@ def test_a_once_line_builds_one_time_per_planet_then_leaves_the_list(game_client
     assert [ln["item"] for ln in _queue(game_client, "ships")] == ["Plasmatique"]  # « une seule fois » faite partout : retirée
 
 
+def test_the_feature_turns_itself_off_when_its_last_line_is_done(game_client, game):
+    _scan(game_client)
+    assert game_client.put("/api/features/ships", json={"enabled": True, "min_minutes": 1, "max_minutes": 2}).status_code == 200
+    _set(game_client, "ships", [_line("Anode", "fixed", 2, repeat=False)])
+    assert "fonctionnalité désactivée" in _ships(game_client)
+    assert _queue(game_client, "ships") == []
+    assert _bot(game_client).scheduler.store.get("ships")["enabled"] is False
+
+
+def test_the_feature_stays_on_while_other_lines_remain(game_client, game):
+    _scan(game_client)
+    assert game_client.put("/api/features/ships", json={"enabled": True, "min_minutes": 1, "max_minutes": 2}).status_code == 200
+    _set(game_client, "ships", [_line("Anode", "fixed", 2, repeat=False), _line("Plasmatique", "fixed", 1, [EGIDE], repeat=True)])
+    _ships(game_client)
+    assert _bot(game_client).scheduler.store.get("ships")["enabled"] is True
+
+
 def test_a_loop_line_builds_again_at_the_next_pass(game_client, game):
     _scan(game_client)
     _set(game_client, "ships", [_line("Anode", "fixed", 1, [CONCORDE])])

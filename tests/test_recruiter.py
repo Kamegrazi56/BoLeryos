@@ -102,6 +102,15 @@ def test_a_target_recruits_only_what_is_missing_then_stops(game_client, game):
     assert len(_recruited(game)) == 1
 
 
+def test_the_recruitment_turns_itself_off_when_its_last_line_is_done(game_client, game):
+    _scan(game_client)
+    assert game_client.put("/api/features/populations", json={"enabled": True, "min_minutes": 1, "max_minutes": 2}).status_code == 200
+    _set(game_client, [_line("mineur", "max", planet=CONCORDE) | {"repeat": False}])
+    assert "fonctionnalité désactivée" in _run(game_client)
+    assert game_client.get("/api/populations").json()["settings"]["queue"] == []
+    assert _bot(game_client).scheduler.store.get("populations")["enabled"] is False
+
+
 def test_a_target_limited_by_the_stocks_stays_in_the_list(game_client, game):
     _scan(game_client)
     _set(game_client, [_line("rempart-de-fer", "target", 10_000_000, CONCORDE)])

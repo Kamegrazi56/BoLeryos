@@ -257,9 +257,14 @@ class PopulationPass(ConstructionPass):
         except GameUiError as exc:
             self.bot.log(f"Population : {exc}.", "warn", event=True)
             return self._report(report, f"arrêté ({exc})")
-        for line in self.bot.populations.drop_done(planets):  # faites partout : la ligne disparaît de la liste
+        dropped = self.bot.populations.drop_done(planets)
+        for line in dropped:  # faites partout : la ligne disparaît de la liste
             what = self._pops[line["population"]].label
             self.bot.log(f"Population : ligne « {what} » terminée sur {line['planet'] or 'toutes les planètes'}, retirée de la liste.", event=True, kind="launch")
+        if dropped and not self.bot.populations.get()["queue"]:  # plus rien à faire : la fonctionnalité s'arrête d'elle-même
+            self.bot.scheduler.update("populations", {"enabled": False})
+            self.bot.log("Recrutement de population désactivé : toutes les lignes sont terminées.", event=True, kind="launch")
+            return self._report(report, "liste terminée, fonctionnalité désactivée")
         return self._report(report, "")
 
     @staticmethod

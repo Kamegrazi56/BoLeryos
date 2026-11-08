@@ -130,9 +130,14 @@ class QuantityPass(ConstructionPass):
         except GameUiError as exc:
             self.bot.log(f"{self.title} : {exc}.", "warn", event=True)
             return self._report(report, f"arrêté ({exc})")
-        for line in self.store.drop_done(planets):  # faites partout : la ligne disparaît de la liste
+        dropped = self.store.drop_done(planets)
+        for line in dropped:  # faites partout : la ligne disparaît de la liste
             where = ", ".join(line["planets"]) or "toutes les planètes"
             self.bot.log(f"{self.title} : ligne « {self.label(line)} » terminée sur {where}, retirée de la liste.", event=True, kind="launch")
+        if dropped and not self.store.get()["queue"]:  # plus rien à faire : la fonctionnalité s'arrête d'elle-même
+            self.bot.scheduler.update(self.feature_id, {"enabled": False})
+            self.bot.log(f"{self.title} : toutes les lignes sont terminées, fonctionnalité désactivée.", event=True, kind="launch")
+            return self._report(report, "liste terminée, fonctionnalité désactivée")
         return self._report(report, "")
 
     @staticmethod
