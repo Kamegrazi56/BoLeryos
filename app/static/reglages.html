@@ -22,29 +22,38 @@
     <span id="badge" class="badge idle">Non connecté</span>
   </header>
 
-  <main class="settings-page">
-    <div class="tabs-row">
-      <div class="tabs" role="tablist" aria-label="Sections des réglages">
+  <main class="settings-layout">
+    <!-- Menu latéral : une entrée par page, regroupées par famille ; la pastille dit si la fonctionnalité est active. -->
+    <aside class="side">
+      <div class="tabs side-nav" role="tablist" aria-label="Sections des réglages" aria-orientation="vertical">
+        <p class="side-group" aria-hidden="true">Bot</p>
         <button role="tab" id="tab-account" data-tab="account" aria-controls="panel-account">Compte et univers</button>
         <button role="tab" id="tab-features" data-tab="features" aria-controls="panel-features">Fonctionnalités</button>
-        <button role="tab" id="tab-constructions" data-tab="constructions" aria-controls="panel-constructions">Constructions</button>
-        <button role="tab" id="tab-researches" data-tab="researches" aria-controls="panel-researches">Recherches</button>
-        <button role="tab" id="tab-populations" data-tab="populations" aria-controls="panel-populations">Population</button>
-        <button role="tab" id="tab-ships" data-tab="ships" aria-controls="panel-ships">Assemblages</button>
-        <button role="tab" id="tab-components" data-tab="components" aria-controls="panel-components">Composants</button>
-        <button role="tab" id="tab-explorations" data-tab="explorations" aria-controls="panel-explorations">Exploration</button>
-        <button role="tab" id="tab-excavations" data-tab="excavations" aria-controls="panel-excavations">Fouilles</button>
-        <button role="tab" id="tab-hackings" data-tab="hackings" aria-controls="panel-hackings">Piratage</button>
-        <button role="tab" id="tab-spying" data-tab="spying" aria-controls="panel-spying">Espionnage</button>
         <button role="tab" id="tab-planning" data-tab="planning" aria-controls="panel-planning">Planning</button>
-        <button role="tab" id="tab-alliance" data-tab="alliance" aria-controls="panel-alliance">Alliance</button>
-        <button role="tab" id="tab-minings" data-tab="minings" aria-controls="panel-minings">Forages</button>
+        <p class="side-group" aria-hidden="true">Économie</p>
+        <button role="tab" id="tab-constructions" data-tab="constructions" aria-controls="panel-constructions">Constructions<span class="dot" data-dot="constructions" aria-hidden="true"></span></button>
+        <button role="tab" id="tab-researches" data-tab="researches" aria-controls="panel-researches">Recherches<span class="dot" data-dot="researches" aria-hidden="true"></span></button>
+        <button role="tab" id="tab-populations" data-tab="populations" aria-controls="panel-populations">Population<span class="dot" data-dot="populations" aria-hidden="true"></span></button>
+        <button role="tab" id="tab-ships" data-tab="ships" aria-controls="panel-ships">Assemblages<span class="dot" data-dot="ships" aria-hidden="true"></span></button>
+        <button role="tab" id="tab-components" data-tab="components" aria-controls="panel-components">Composants<span class="dot" data-dot="components" aria-hidden="true"></span></button>
+        <p class="side-group" aria-hidden="true">Opérations</p>
+        <button role="tab" id="tab-explorations" data-tab="explorations" aria-controls="panel-explorations">Exploration<span class="dot" data-dot="explorations" aria-hidden="true"></span></button>
+        <button role="tab" id="tab-excavations" data-tab="excavations" aria-controls="panel-excavations">Fouilles<span class="dot" data-dot="excavations" aria-hidden="true"></span></button>
+        <button role="tab" id="tab-hackings" data-tab="hackings" aria-controls="panel-hackings">Piratage<span class="dot" data-dot="hackings" aria-hidden="true"></span></button>
+        <button role="tab" id="tab-minings" data-tab="minings" aria-controls="panel-minings">Forages<span class="dot" data-dot="minings" aria-hidden="true"></span></button>
+        <button role="tab" id="tab-spying" data-tab="spying" aria-controls="panel-spying">Espionnage</button>
+        <p class="side-group" aria-hidden="true">Alliance</p>
+        <button role="tab" id="tab-alliance" data-tab="alliance" aria-controls="panel-alliance">Jetons d'alliance<span class="dot" data-dot="alliance" aria-hidden="true"></span></button>
       </div>
       <span id="save-msg" class="save-state" role="status" aria-live="polite"></span>
-    </div>
+    </aside>
 
+    <div class="panels">
     <section class="tabpanel card" id="panel-account" role="tabpanel" aria-labelledby="tab-account">
-            <p id="acct-status" class="status-line">Chargement…</p>
+      <header class="panel-head">
+        <div><p class="eyebrow">Bot</p><h2>Compte et univers</h2><p class="lede">Le compte du jeu que le bot utilise, et l'univers où il entre.</p></div>
+      </header>
+      <p id="acct-status" class="status-line">Chargement…</p>
       <p id="conn-status" class="status-line" role="status" aria-live="polite"></p>
       <div class="fields">
         <label>Identifiant (adresse e-mail du compte) <input id="acct-id" type="text" autocomplete="off" spellcheck="false"></label>
@@ -57,19 +66,22 @@
         <label>Connexion : délai maximum entre deux clics (secondes)
           <input id="login-delay-max" type="number" min="0" max="60" step="0.1"></label>
       </div>
-      <div class="row">
+      <div class="row actions">
         <button id="acct-save" type="button">Enregistrer et se connecter</button>
         <button id="acct-login" type="button" class="secondary">Relancer la connexion</button>
         <button id="acct-forget" type="button" class="secondary">Oublier le compte</button>
         <span id="acct-msg" class="hint" role="status"></span>
       </div>
-      <p class="hint">Dès que les identifiants sont enregistrés, le bot <strong>se connecte tout seul</strong>, entre dans l'univers indiqué et <strong>reste connecté</strong> (il se reconnecte si la session expire). Si le site refuse les identifiants, le bot n'insiste pas ; si un contrôle anti-bot l'arrête, il vous demande de vous connecter à la main (page Écran, contrôle manuel) puis reprend seul.</p>
-      <p class="hint">Les champs sont <strong>enregistrés par le bot</strong> et réaffichés à chaque visite : l'identifiant tel quel, le mot de passe <strong>chiffré</strong> sur le disque du bot (dossier /data). Le mot de passe n'est jamais réaffiché (le champ reste vide et indique qu'il est enregistré : laissez-le vide pour le garder). Rien n'apparaît dans le journal ni dans les réglages exportés. « Oublier le compte » efface tout ; « Se déconnecter » (page Écran) arrête seulement la reconnexion automatique. Après un redémarrage, le bot ne se connecte pas seul : cliquez sur « Relancer la connexion ». Utilisez de préférence un compte de test.</p>
-      <p id="acct-warn" class="hint" role="note" hidden><strong>Attention :</strong> l'interface du bot n'est pas protégée par un mot de passe (UI_USER / UI_PASSWORD). Quiconque peut l'ouvrir voit l'identifiant enregistré et peut utiliser le compte.</p>
+      <p id="acct-warn" class="hint warn-note" role="note" hidden><strong>Attention :</strong> l'interface du bot n'est pas protégée par un mot de passe (UI_USER / UI_PASSWORD). Quiconque peut l'ouvrir voit l'identifiant enregistré et peut utiliser le compte.</p>
+      <details class="help-box">
+        <summary>Comment ça marche ?</summary>
+        <p>Dès que les identifiants sont enregistrés, le bot <strong>se connecte tout seul</strong>, entre dans l'univers indiqué et <strong>reste connecté</strong> (il se reconnecte si la session expire). Si le site refuse les identifiants, le bot n'insiste pas ; si un contrôle anti-bot l'arrête, il vous demande de vous connecter à la main (page Écran, contrôle manuel) puis reprend seul.</p>
+        <p>Les champs sont <strong>enregistrés par le bot</strong> et réaffichés à chaque visite : l'identifiant tel quel, le mot de passe <strong>chiffré</strong> sur le disque du bot (dossier /data). Le mot de passe n'est jamais réaffiché (le champ reste vide et indique qu'il est enregistré : laissez-le vide pour le garder). Rien n'apparaît dans le journal ni dans les réglages exportés. « Oublier le compte » efface tout ; « Se déconnecter » (page Écran) arrête seulement la reconnexion automatique. Après un redémarrage, le bot ne se connecte pas seul : cliquez sur « Relancer la connexion ». Utilisez de préférence un compte de test.</p>
+      </details>
 
-      <h2 id="scan-title">Scan des planètes <span data-help-text="Le bot ouvre la liste des planètes du jeu et la lit : nom, coordonnées et stocks de Fer, de Cristal et d'Éther. Il le fait tout seul une fois par connexion, dès qu'il est dans la partie ; le bouton relance un scan à la demande (le bot doit être connecté et dans l'univers)."></span></h2>
+      <h3 id="scan-title">Scan des planètes <span data-help-text="Le bot ouvre la liste des planètes du jeu et la lit : nom, coordonnées et stocks de Fer, de Cristal et d'Éther. Il le fait tout seul une fois par connexion, dès qu'il est dans la partie ; le bouton relance un scan à la demande (le bot doit être connecté et dans l'univers)."></span></h3>
       <div class="row">
-        <button id="scan-run" type="button">Scanner les planètes</button>
+        <button id="scan-run" type="button" class="secondary">Scanner les planètes</button>
         <span id="scan-msg" class="hint" role="status" aria-live="polite"></span>
       </div>
       <p id="scan-status" class="status-line" role="status" aria-live="polite">Aucun scan pour l'instant.</p>
@@ -77,97 +89,151 @@
     </section>
 
     <section class="tabpanel card" id="panel-features" role="tabpanel" aria-labelledby="tab-features" hidden>
-      <h2 id="feat-title">Fonctionnalités</h2>
-      <p class="hint">Chaque fonctionnalité a son interrupteur et son minuteur : après chaque passage, le bot attend une durée tirée au hasard entre le minimum et le maximum, puis recommence. La liste est l'ordre de priorité (le haut passe avant) ; un seul passage à la fois. Le bot doit être sur <strong>ON</strong> (bouton en haut) pour que les fonctionnalités activées tournent.</p>
+      <header class="panel-head">
+        <div><p class="eyebrow">Bot</p><h2 id="feat-title">Fonctionnalités</h2><p class="lede">Toutes les fonctionnalités d'un coup d'œil : interrupteur, rythme, état et ordre de priorité.</p></div>
+        <span id="feat-msg" class="save-state" role="status" aria-live="polite"></span>
+      </header>
       <p id="bot-line" class="status-line" role="status" aria-live="polite"></p>
-      <span id="feat-msg" class="save-state" role="status" aria-live="polite"></span>
+      <details class="help-box">
+        <summary>Comment ça marche ?</summary>
+        <p>Chaque fonctionnalité a son interrupteur et son minuteur : après chaque passage, le bot attend une durée tirée au hasard entre le minimum et le maximum, puis recommence. La liste est l'ordre de priorité (le haut passe avant) ; un seul passage à la fois. Le bot doit être sur <strong>ON</strong> (bouton en haut) pour que les fonctionnalités activées tournent. Le nom de chaque fonctionnalité mène à ses réglages.</p>
+      </details>
       <ol id="features" class="features"></ol>
     </section>
+
     <section class="tabpanel card" id="panel-constructions" role="tabpanel" aria-labelledby="tab-constructions" hidden>
-      <h2 id="cons-title">Constructions : liste d'objectifs</h2>
-      <p class="hint">Chaque ligne dit « monter ce bâtiment jusqu'au niveau N ». L'ordre de la liste est la priorité : le bot lancera la première ligne réalisable. Une seule ligne par bâtiment. Quand la fonctionnalité « Constructions de bâtiments » est activée (onglet Fonctionnalités) et le bot sur ON, il clique sur « Améliorer » et <strong>dépense les ressources du jeu</strong> : au plus une construction par planète et par passage.</p>
+      <header class="panel-head">
+        <div><p class="eyebrow">Économie</p><h2 id="cons-title">Constructions</h2><p class="lede">Monter des bâtiments jusqu'au niveau voulu, dans l'ordre de la liste.</p></div>
+        <div class="fhead-slot" data-feature-head="constructions"></div>
+      </header>
+      <details class="help-box">
+        <summary>Comment ça marche ?</summary>
+        <p>Chaque ligne dit « monter ce bâtiment jusqu'au niveau N ». L'ordre de la liste est la priorité : le bot lancera la première ligne réalisable. Une seule ligne par bâtiment. Quand la fonctionnalité est activée et le bot sur ON, il clique sur « Améliorer » et <strong>dépense les ressources du jeu</strong> : au plus une construction par planète et par passage.</p>
+      </details>
       <fieldset class="scope">
         <legend>Planètes</legend>
         <label class="switch"><input type="radio" name="cons-scope" value="all"> Toutes les planètes</label>
         <label class="switch"><input type="radio" name="cons-scope" value="one"> Une seule :</label>
         <select id="cons-planet" aria-label="Planète choisie"></select>
       </fieldset>
+      <h3>Liste d'objectifs</h3>
       <ol id="cons-queue" class="cons-queue"></ol>
-      <div class="row">
+      <div class="row add-row">
         <label>Ajouter <select id="cons-add-building" aria-label="Bâtiment à ajouter"></select></label>
         <label>jusqu'au niveau <input id="cons-add-level" type="number" min="1" max="500" step="1" value="1"></label>
-        <button id="cons-add" type="button">Ajouter à la liste</button>
+        <button id="cons-add" type="button" class="secondary">+ Ajouter à la liste</button>
       </div>
       <p id="cons-msg" class="msg" role="status" aria-live="polite"></p>
     </section>
+
     <section class="tabpanel card" id="panel-researches" role="tabpanel" aria-labelledby="tab-researches" hidden>
-      <h2 id="res-title">Recherches : liste d'objectifs</h2>
-      <p class="hint">Chaque ligne dit « monter cette recherche jusqu'au niveau N ». L'ordre de la liste est la priorité : le bot lancera la première ligne réalisable. Une seule ligne par recherche. Dans le jeu, une recherche est payée par <strong>une seule planète</strong> et une seule recherche tourne à la fois : choisissez la planète chargée des recherches. Quand la fonctionnalité « Recherches du Laboratoire » est activée (onglet Fonctionnalités) et le bot sur ON, il clique sur « Rechercher » et <strong>dépense les ressources de cette planète</strong>.</p>
+      <header class="panel-head">
+        <div><p class="eyebrow">Économie</p><h2 id="res-title">Recherches</h2><p class="lede">Monter des recherches jusqu'au niveau voulu, une à la fois.</p></div>
+        <div class="fhead-slot" data-feature-head="researches"></div>
+      </header>
+      <details class="help-box">
+        <summary>Comment ça marche ?</summary>
+        <p>Chaque ligne dit « monter cette recherche jusqu'au niveau N » (le niveau à atteindre, pas le niveau actuel). L'ordre de la liste est la priorité : le bot lancera la première ligne réalisable. Une seule ligne par recherche. Dans le jeu, une recherche est payée par <strong>une seule planète</strong> et une seule recherche tourne à la fois : choisissez la planète chargée des recherches. Quand la fonctionnalité est activée et le bot sur ON, il clique sur « Rechercher » et <strong>dépense les ressources de cette planète</strong>.</p>
+      </details>
       <div class="scope">
         <label>Planète chargée des recherches <select id="res-planet" aria-label="Planète chargée des recherches"></select></label>
       </div>
+      <h3>Liste d'objectifs</h3>
       <ol id="res-queue" class="cons-queue"></ol>
-      <div class="row">
+      <div class="row add-row">
         <label>Ajouter <select id="res-add-research" aria-label="Recherche à ajouter"></select></label>
         <label>jusqu'au niveau <input id="res-add-level" type="number" min="1" max="500" step="1" value="1"></label>
-        <button id="res-add" type="button">Ajouter à la liste</button>
+        <button id="res-add" type="button" class="secondary">+ Ajouter à la liste</button>
       </div>
       <p id="res-msg" class="msg" role="status" aria-live="polite"></p>
     </section>
+
     <section class="tabpanel card" id="panel-populations" role="tabpanel" aria-labelledby="tab-populations" hidden>
-      <h2 id="pop-title">Population : recrutement</h2>
-      <p class="hint">Chaque ligne règle <strong>une population</strong>, indépendamment des autres : <strong>quantité fixe</strong> (recrutée à chaque passage), <strong>MAX</strong> (le maximum payable, à chaque passage) ou <strong>effectif à atteindre</strong> (le bot recrute ce qui manque, planète par planète, puis ne fait plus rien une fois la cible atteinte). Choisissez une planète ou « toutes » (chacune est alors traitée séparément). L'ordre de la liste est la priorité quand plusieurs populations se partagent les mêmes ressources. Quand la fonctionnalité « Recrutement de population » est activée (onglet Fonctionnalités) et le bot sur ON, il clique sur « Recruter » et <strong>dépense les ressources de la planète</strong> : attention au MAX, qui vide les stocks.</p>
+      <header class="panel-head">
+        <div><p class="eyebrow">Économie</p><h2 id="pop-title">Population</h2><p class="lede">Recruter des populations : quantité fixe, maximum ou effectif à atteindre.</p></div>
+        <div class="fhead-slot" data-feature-head="populations"></div>
+      </header>
+      <details class="help-box">
+        <summary>Comment ça marche ?</summary>
+        <p>Chaque ligne règle <strong>une population</strong>, indépendamment des autres : <strong>quantité fixe</strong> (recrutée à chaque passage), <strong>MAX</strong> (le maximum payable, à chaque passage) ou <strong>effectif à atteindre</strong> (le bot recrute ce qui manque, planète par planète, puis ne fait plus rien une fois la cible atteinte). Choisissez une planète ou « toutes » (chacune est alors traitée séparément). L'ordre de la liste est la priorité quand plusieurs populations se partagent les mêmes ressources. Quand la fonctionnalité est activée et le bot sur ON, il clique sur « Recruter » et <strong>dépense les ressources de la planète</strong> : attention au MAX, qui vide les stocks. Quand la dernière ligne est terminée et que la liste est vide, la fonctionnalité <strong>se désactive d'elle-même</strong>.</p>
+      </details>
+      <h3>Lignes de recrutement</h3>
       <ol id="pop-queue" class="cons-queue"></ol>
-      <div class="row">
+      <div class="row add-row">
         <label>Ajouter <select id="pop-add-population" aria-label="Population à ajouter"></select></label>
         <label>mode <select id="pop-add-mode" aria-label="Mode de recrutement"></select></label>
         <label id="pop-add-amount-label">quantité <input id="pop-add-amount" type="number" min="1" step="1" value="1"></label>
         <label>planète <select id="pop-add-planet" aria-label="Planète du recrutement"></select></label>
-        <button id="pop-add" type="button">Ajouter à la liste</button>
+        <button id="pop-add" type="button" class="secondary">+ Ajouter à la liste</button>
       </div>
       <p id="pop-msg" class="msg" role="status" aria-live="polite"></p>
     </section>
+
     <section class="tabpanel card" id="panel-ships" role="tabpanel" aria-labelledby="tab-ships" hidden>
-      <h2 id="shp-title">Assemblages : construction de vaisseaux</h2>
-      <p class="hint">Chaque ligne règle <strong>un modèle de vaisseau</strong> (créé dans le jeu, onglet Modèle) : <strong>quantité fixe</strong> ou <strong>MAX</strong>, <strong>à chaque passage</strong> ou <strong>une seule fois</strong> (une fois par planète, puis la ligne disparaît), ou <strong>effectif à atteindre</strong> (le bot construit ce qui manque, planète par planète, puis la ligne disparaît). Planètes : toutes, une seule ou plusieurs. Le bot construit <strong>uniquement avec des ressources</strong> (mode « Construction » de la carte, jamais « Assemblages »). L'ordre de la liste est la priorité. Quand la fonctionnalité « Assemblages de vaisseaux » est activée (onglet Fonctionnalités) et le bot sur ON, il clique sur « Lancer » et <strong>dépense les ressources de la planète</strong> : attention au MAX, qui vide les stocks.</p>
+      <header class="panel-head">
+        <div><p class="eyebrow">Économie</p><h2 id="shp-title">Assemblages</h2><p class="lede">Construire des vaisseaux à partir des modèles du jeu.</p></div>
+        <div class="fhead-slot" data-feature-head="ships"></div>
+      </header>
+      <details class="help-box">
+        <summary>Comment ça marche ?</summary>
+        <p>Chaque ligne règle <strong>un modèle de vaisseau</strong> (créé dans le jeu, onglet Modèle) : <strong>quantité fixe</strong> ou <strong>MAX</strong>, <strong>à chaque passage</strong> ou <strong>une seule fois</strong> (une fois par planète, puis la ligne disparaît), ou <strong>effectif à atteindre</strong> (le bot construit ce qui manque, planète par planète, puis la ligne disparaît). Planètes : toutes, une seule ou plusieurs. Le bot construit <strong>uniquement avec des ressources</strong> (mode « Construction » de la carte, jamais « Assemblages »). L'ordre de la liste est la priorité. Quand la fonctionnalité est activée et le bot sur ON, il clique sur « Lancer » et <strong>dépense les ressources de la planète</strong> : attention au MAX, qui vide les stocks. Quand la dernière ligne est terminée et que la liste est vide, la fonctionnalité <strong>se désactive d'elle-même</strong>.</p>
+      </details>
       <div class="row">
-        <button id="shp-scan" type="button">Scanner les modèles</button>
+        <button id="shp-scan" type="button" class="secondary">Scanner les modèles</button>
         <span id="shp-scan-msg" class="hint" role="status" aria-live="polite"></span>
       </div>
       <p id="shp-scan-status" class="status-line" role="status" aria-live="polite">Aucun scan pour l'instant.</p>
-      <ul id="shp-scan-list" class="hint"></ul>
+      <ul id="shp-scan-list" class="hint chips"></ul>
+      <h3>Lignes de construction</h3>
       <ol id="shp-queue" class="cons-queue"></ol>
-      <div class="row">
+      <div class="row add-row">
         <label>Ajouter <select id="shp-add-item" aria-label="Modèle à ajouter"></select></label>
         <label>mode <select id="shp-add-mode" aria-label="Mode de construction"></select></label>
         <label id="shp-add-amount-label">quantité <input id="shp-add-amount" type="number" min="1" step="1" value="1"></label>
         <span id="shp-add-planets" class="picker-slot"></span>
-        <button id="shp-add" type="button">Ajouter à la liste</button>
+        <button id="shp-add" type="button" class="secondary">+ Ajouter à la liste</button>
       </div>
       <p id="shp-msg" class="msg" role="status" aria-live="polite"></p>
     </section>
+
     <section class="tabpanel card" id="panel-components" role="tabpanel" aria-labelledby="tab-components" hidden>
-      <h2 id="cmp-title">Composants : production</h2>
-      <p class="hint">Chaque ligne règle <strong>un composant</strong> (37 au total, en 6 catégories) : <strong>quantité fixe</strong> ou <strong>MAX</strong>, <strong>à chaque passage</strong> ou <strong>une seule fois</strong> (une fois par planète, puis la ligne disparaît), ou <strong>effectif à atteindre</strong> (le bot produit ce qui manque, planète par planète, puis la ligne disparaît). Planètes : toutes, une seule ou plusieurs. L'ordre de la liste est la priorité. Quand la fonctionnalité « Production de composants » est activée (onglet Fonctionnalités) et le bot sur ON, il clique sur « Produire » et <strong>dépense les ressources de la planète</strong> : attention au MAX, qui vide les stocks.</p>
+      <header class="panel-head">
+        <div><p class="eyebrow">Économie</p><h2 id="cmp-title">Composants</h2><p class="lede">Produire des composants : quantité fixe, maximum ou effectif à atteindre.</p></div>
+        <div class="fhead-slot" data-feature-head="components"></div>
+      </header>
+      <details class="help-box">
+        <summary>Comment ça marche ?</summary>
+        <p>Chaque ligne règle <strong>un composant</strong> (37 au total, en 6 catégories) : <strong>quantité fixe</strong> ou <strong>MAX</strong>, <strong>à chaque passage</strong> ou <strong>une seule fois</strong> (une fois par planète, puis la ligne disparaît), ou <strong>effectif à atteindre</strong> (le bot produit ce qui manque, planète par planète, puis la ligne disparaît). Planètes : toutes, une seule ou plusieurs. L'ordre de la liste est la priorité. Quand la fonctionnalité est activée et le bot sur ON, il clique sur « Produire » et <strong>dépense les ressources de la planète</strong> : attention au MAX, qui vide les stocks. Quand la dernière ligne est terminée et que la liste est vide, la fonctionnalité <strong>se désactive d'elle-même</strong>.</p>
+      </details>
+      <h3>Lignes de production</h3>
       <ol id="cmp-queue" class="cons-queue"></ol>
-      <div class="row">
+      <div class="row add-row">
         <label>Ajouter <select id="cmp-add-item" aria-label="Composant à ajouter"></select></label>
         <label>mode <select id="cmp-add-mode" aria-label="Mode de production"></select></label>
         <label id="cmp-add-amount-label">quantité <input id="cmp-add-amount" type="number" min="1" step="1" value="1"></label>
         <span id="cmp-add-planets" class="picker-slot"></span>
-        <button id="cmp-add" type="button">Ajouter à la liste</button>
+        <button id="cmp-add" type="button" class="secondary">+ Ajouter à la liste</button>
       </div>
       <p id="cmp-msg" class="msg" role="status" aria-live="polite"></p>
     </section>
+
     <section class="tabpanel card" id="panel-explorations" role="tabpanel" aria-labelledby="tab-explorations" hidden>
-      <h2 id="exp-title">Exploration : vers la brèche la plus proche</h2>
-      <p class="hint">Une fois par jour, le bot relève pour chaque planète choisie la <strong>brèche la plus proche</strong> (positions réelles lues sur la carte de la Galaxie, formule des adresses en secours) et les <strong>modèles</strong> Piliers et Flotte du jeu. À chaque passage, il lance les explorations réglées ci-dessous, planète par planète, tant que le <strong>quota quotidien</strong> et les <strong>places d'explorations actives</strong> le permettent ; une planète à qui il manque des unités, de l'énergie ou de la Trame est sautée. Quand la fonctionnalité « Explorations » est activée (onglet Fonctionnalités) et le bot sur ON, il clique sur « Lancer l'exploration » : <strong>les unités partent réellement</strong> et peuvent être perdues.</p>
+      <header class="panel-head">
+        <div><p class="eyebrow">Opérations</p><h2 id="exp-title">Exploration</h2><p class="lede">Envoyer des explorations vers la brèche la plus proche de chaque planète.</p></div>
+        <div class="fhead-slot" data-feature-head="explorations"></div>
+      </header>
+      <details class="help-box">
+        <summary>Comment ça marche ?</summary>
+        <p>Une fois par jour, le bot relève pour chaque planète choisie la <strong>brèche la plus proche</strong> (positions réelles lues sur la carte de la Galaxie, formule des adresses en secours) et les <strong>modèles</strong> Piliers et Flotte du jeu. À chaque passage, il lance les explorations réglées ci-dessous, planète par planète, tant que le <strong>quota quotidien</strong> et les <strong>places d'explorations actives</strong> le permettent ; une planète à qui il manque des unités, de l'énergie ou de la Trame est sautée. Quand la fonctionnalité est activée et le bot sur ON, il clique sur « Lancer l'exploration » : <strong>les unités partent réellement</strong> et peuvent être perdues.</p>
+      </details>
+      <h3>Relevé du jour</h3>
       <div class="row">
-        <button id="exp-scan" type="button">Refaire le relevé du jour</button>
+        <button id="exp-scan" type="button" class="secondary">Refaire le relevé du jour</button>
         <span id="exp-scan-msg" class="hint" role="status" aria-live="polite"></span>
       </div>
       <p id="exp-daily" class="status-line" role="status" aria-live="polite">Aucun relevé pour l'instant.</p>
       <ul id="exp-breaches" class="hint"></ul>
+      <h3>Composition</h3>
       <div class="row">
         <label>Moyen <select id="exp-method" aria-label="Moyen de lancement"></select></label>
         <label>Composition <select id="exp-composition" aria-label="Composition">
@@ -175,7 +241,8 @@
         </select></label>
         <label id="exp-model-label">Modèle <select id="exp-model" aria-label="Modèle du jeu"></select></label>
       </div>
-      <div id="exp-units" class="row"></div>
+      <div id="exp-units" class="row unit-grid"></div>
+      <h3>Rythme</h3>
       <div class="row">
         <label>Copies <input id="exp-copies" type="number" min="1" max="10" step="1" value="1" aria-label="Copies"></label>
         <label>Durée <select id="exp-duration" aria-label="Durée nominale"></select></label>
@@ -184,91 +251,70 @@
         </select></label>
         <label id="exp-per-pass-label">par planète et par passage <input id="exp-per-pass" type="number" min="1" max="50" step="1" value="1" aria-label="Lancements par planète et par passage"></label>
       </div>
-      <fieldset class="row"><legend>Planètes</legend><span id="exp-planets"></span></fieldset>
-      <div class="row"><button id="exp-save" type="button">Enregistrer</button></div>
-      <p id="exp-msg" class="msg" role="status" aria-live="polite"></p>
+      <fieldset class="row chip-set"><legend>Planètes</legend><span id="exp-planets"></span></fieldset>
+      <div class="row actions"><button id="exp-save" type="button">Enregistrer</button><p id="exp-msg" class="msg" role="status" aria-live="polite"></p></div>
     </section>
+
     <section class="tabpanel card" id="panel-excavations" role="tabpanel" aria-labelledby="tab-excavations" hidden>
-      <h2 id="exc-title">Fouilles : vers le site libre le plus proche</h2>
-      <p class="hint">Chaque ligne réserve des <strong>places</strong> de Fouille depuis une planète, avec son équipe (de 1 à 5 000 unités) et sa durée. Une fois par jour, le bot relève les <strong>sites libres les plus proches</strong> de chaque planète de départ. À chaque passage, il lit les Fouilles en cours dans le jeu et relance une place quand sa Fouille est finie <strong>et</strong> que le délai tiré au hasard entre votre minimum et votre maximum est écoulé. Mira Venn part avec la ligne cochée quand elle est disponible, sinon la Fouille part sans héros. Quand la fonctionnalité « Fouilles » est activée et le bot sur ON, il clique sur « Lancer la fouille » : <strong>une Fouille ne peut pas être rappelée</strong>.</p>
+      <header class="panel-head">
+        <div><p class="eyebrow">Opérations</p><h2 id="exc-title">Fouilles</h2><p class="lede">Fouiller le site libre le plus proche, et relancer dès qu'une Fouille est finie.</p></div>
+        <div class="fhead-slot" data-feature-head="excavations"></div>
+      </header>
+      <details class="help-box">
+        <summary>Comment ça marche ?</summary>
+        <p>Chaque ligne réserve des <strong>places</strong> de Fouille depuis une planète, avec son équipe (de 1 à 5 000 unités) et sa durée. Une fois par jour, le bot relève les <strong>sites libres les plus proches</strong> de chaque planète de départ. À chaque passage, il lit les Fouilles en cours dans le jeu et relance une place quand sa Fouille est finie <strong>et</strong> que le délai tiré au hasard entre votre minimum et votre maximum est écoulé. Mira Venn part avec la ligne cochée quand elle est disponible, sinon la Fouille part sans héros. Le bot clique sur « Lancer la fouille » : <strong>une Fouille ne peut pas être rappelée</strong>.</p>
+      </details>
+      <h3>Relevé du jour</h3>
       <div class="row">
-        <button id="exc-scan" type="button">Refaire le relevé du jour</button>
+        <button id="exc-scan" type="button" class="secondary">Refaire le relevé du jour</button>
         <span id="exc-scan-msg" class="hint" role="status" aria-live="polite"></span>
       </div>
       <p id="exc-daily" class="status-line" role="status" aria-live="polite">Aucun relevé pour l'instant.</p>
       <ul id="exc-sites" class="hint"></ul>
-      <div id="exc-lines"></div>
-      <div class="row"><button id="exc-add" type="button">Ajouter une ligne</button></div>
+      <h3>Lignes de Fouille</h3>
+      <div id="exc-lines" class="line-cards"></div>
+      <div class="row"><button id="exc-add" type="button" class="secondary">+ Ajouter une ligne</button></div>
+      <h3>Relance</h3>
       <div class="row">
         <label>Délai avant relance : de <input id="exc-delay-min" type="number" min="0" step="1" aria-label="Délai minimum avant relance (minutes)"></label>
         <label>à <input id="exc-delay-max" type="number" min="0" step="1" aria-label="Délai maximum avant relance (minutes)"> minutes</label>
       </div>
-      <div class="row"><button id="exc-save" type="button">Enregistrer</button></div>
-      <p id="exc-msg" class="msg" role="status" aria-live="polite"></p>
+      <div class="row actions"><button id="exc-save" type="button">Enregistrer</button><p id="exc-msg" class="msg" role="status" aria-live="polite"></p></div>
       <h3>Fouilles suivies</h3>
-      <ul id="exc-tracked" class="hint"></ul>
+      <ul id="exc-tracked" class="tracked"></ul>
     </section>
+
     <section class="tabpanel card" id="panel-hackings" role="tabpanel" aria-labelledby="tab-hackings" hidden>
-      <h2 id="hack-title">Piratage : expérience de Naël Soryn</h2>
-      <p class="hint">Naël Soryn pirate en boucle <strong>l'Errant le plus proche</strong> de la planète de départ (dans le ratio ×2), pour gagner de l'expérience. Un piratage dure 30 minutes et ne s'annule pas ; l'Errant est prévenu. Le bot relance dès que le piratage précédent est fini <strong>et</strong> que le délai tiré au hasard entre votre minimum et votre maximum est écoulé. Si le jeu refuse l'Errant (piliers désactivés…), le suivant le plus proche est pris. Les Errants sont relevés une fois par jour. Activez la fonctionnalité « Piratage » dans l'onglet Fonctionnalités.</p>
+      <header class="panel-head">
+        <div><p class="eyebrow">Opérations</p><h2 id="hack-title">Piratage</h2><p class="lede">Naël Soryn pirate en boucle l'Errant le plus proche pour gagner de l'expérience.</p></div>
+        <div class="fhead-slot" data-feature-head="hackings"></div>
+      </header>
+      <details class="help-box">
+        <summary>Comment ça marche ?</summary>
+        <p>Naël Soryn pirate en boucle <strong>l'Errant le plus proche</strong> de la planète de départ (dans le ratio ×2), pour gagner de l'expérience. Un piratage dure 30 minutes et ne s'annule pas ; l'Errant est prévenu. Le bot relance dès que le piratage précédent est fini <strong>et</strong> que le délai tiré au hasard entre votre minimum et votre maximum est écoulé. Si le jeu refuse l'Errant (piliers désactivés…), le suivant le plus proche est pris. Les Errants sont relevés une fois par jour.</p>
+      </details>
       <div class="row">
         <label>Planète de départ <select id="hack-planet" aria-label="Planète de départ du piratage"></select></label>
         <label>Délai avant relance : de <input id="hack-delay-min" type="number" min="0" step="1" aria-label="Délai minimum avant relance du piratage (minutes)"></label>
         <label>à <input id="hack-delay-max" type="number" min="0" step="1" aria-label="Délai maximum avant relance du piratage (minutes)"> minutes</label>
       </div>
-      <div class="row"><button id="hack-save" type="button">Enregistrer</button><button id="hack-scan" type="button">Refaire le relevé des Errants</button></div>
-      <p id="hack-msg" class="msg" role="status" aria-live="polite"></p>
+      <div class="row actions"><button id="hack-save" type="button">Enregistrer</button><button id="hack-scan" type="button" class="secondary">Refaire le relevé des Errants</button><p id="hack-msg" class="msg" role="status" aria-live="polite"></p></div>
+      <h3>Errants les plus proches</h3>
       <p id="hack-status" class="status-line" role="status" aria-live="polite">Aucun relevé pour l'instant.</p>
-      <ul id="hack-targets" class="hint"></ul>
+      <ul id="hack-targets" class="tracked"></ul>
     </section>
-    <section class="tabpanel card" id="panel-spying" role="tabpanel" aria-labelledby="tab-spying" hidden>
-      <h2 id="spy-title">Espionnage des Errants par drone</h2>
-      <p class="hint">Le bouton « Lancer l'espionnage » met le bot sur <strong>OFF</strong> (les autres automatismes restent arrêtés jusqu'à ce que vous les relanciez), centre la Galaxie sur la planète choisie au zoom ×17,5, puis envoie <strong>un drone</strong> (Piliers) vers chaque planète d'Errant [AI] de la fenêtre visible. Un rapport est <strong>gardé</strong> si au moins le nombre choisi de ressources atteint son minimum ; sinon il est <strong>supprimé</strong> dans le jeu. Les Errants aux piliers désactivés sont notés dans la liste « Piliers fermés », vidée à chaque lancement.</p>
-      <div class="row">
-        <label>Planète <select id="spy-planet" aria-label="Planète autour de laquelle espionner"></select></label>
-        <label>Ressources à atteindre <select id="spy-required" aria-label="Nombre de ressources à atteindre">
-          <option value="1">au moins 1</option><option value="2">au moins 2</option><option value="3">les 3</option>
-        </select></label>
-      </div>
-      <div id="spy-minimums" class="row"></div>
-      <div class="row"><button id="spy-save" type="button">Enregistrer</button></div>
-      <p id="spy-msg" class="msg" role="status" aria-live="polite"></p>
-      <div class="row">
-        <button id="spy-start" type="button">Lancer l'espionnage</button>
-        <button id="spy-stop" type="button" hidden>Arrêter</button>
-      </div>
-      <p id="spy-status" class="status-line" role="status" aria-live="polite">Aucun espionnage lancé.</p>
-      <details><summary id="spy-closed-title">Piliers fermés (0)</summary><ul id="spy-closed" class="hint"></ul></details>
-    </section>
-    <section class="tabpanel card" id="panel-planning" role="tabpanel" aria-labelledby="tab-planning" hidden>
-      <h2 id="plan-title">Planning : heures d'activité du bot</h2>
-      <p class="hint">Le bouton ON/OFF reste le maître. Quand le bot est sur <strong>ON</strong> et que le planning est utilisé, il n'agit que <strong>pendant les plages ci-dessous</strong> (heure française) ; en dehors, il <strong>se déconnecte du jeu</strong> et ne fait rien, puis se reconnecte seul au début de la plage suivante. Un passage en cours se termine avant la déconnexion. Une plage peut passer minuit (ex. 22:00 → 02:00). Un jour sans plage est inactif. Chaque début et chaque fin de plage est décalé au hasard de X à Y minutes, avant ou après l'heure indiquée. L'espionnage manuel n'est pas concerné.</p>
-      <div class="row"><label><input id="plan-enabled" type="checkbox" aria-label="Utiliser le planning"> Utiliser le planning</label></div>
-      <p id="plan-status" class="status-line" role="status" aria-live="polite"></p>
-      <div id="plan-days"></div>
-      <div class="row">
-        <label>Décalage aléatoire : de <input id="plan-offset-min" type="number" min="0" max="120" step="1" aria-label="Décalage minimum (minutes)"></label>
-        <label>à <input id="plan-offset-max" type="number" min="0" max="120" step="1" aria-label="Décalage maximum (minutes)"> minutes, avant ou après</label>
-      </div>
-      <div class="row"><button id="plan-save" type="button">Enregistrer</button></div>
-      <p id="plan-msg" class="msg" role="status" aria-live="polite"></p>
-    </section>
-    <section class="tabpanel card" id="panel-alliance" role="tabpanel" aria-labelledby="tab-alliance" hidden>
-      <h2 id="ally-title">Alliance : dons de jetons technologiques</h2>
-      <p class="hint">À chaque passage de la fonctionnalité « Dons de jetons d'alliance » (onglet Fonctionnalités, avec son intervalle), le bot ouvre Alliance › Techs et donne vos jetons à la technologie marquée <strong>« priorité de dons de l'alliance »</strong> — et à aucune autre. Il ne change jamais la priorité. Un jeton revient environ toutes les 2 h, 6 au plus : un intervalle trop long en fait perdre. Un don est définitif.</p>
-      <div class="row">
-        <label>Jetons à donner à chaque passage <select id="ally-amount" aria-label="Jetons à donner à chaque passage">
-          <option value="all">Tous</option><option value="1">1</option><option value="2">2</option>
-        </select></label>
-        <button id="ally-save" type="button">Enregistrer</button>
-      </div>
-      <p id="ally-msg" class="msg" role="status" aria-live="polite"></p>
-    </section>
+
     <section class="tabpanel card" id="panel-minings" role="tabpanel" aria-labelledby="tab-minings" hidden>
-      <h2 id="mine-title">Forages de planètes minières</h2>
-      <p class="hint">Le bot repère sur la carte les planètes minières de la ressource voulue, autour des planètes de départ, et envoie 1 Foreuse orbitale avec vos Mineurs vers la plus proche qui n'a pas déjà un forage. La flotte revient seule (soute pleine ou planète épuisée) ; la place est relancée au retour plus le délai choisi, sur la même planète minière si elle existe encore. Activez « Forages de planètes minières » dans l'onglet Fonctionnalités.</p>
-      <fieldset class="row"><legend>Planètes de départ</legend><span id="mine-planets"></span></fieldset>
-      <fieldset class="row"><legend>Ressources visées</legend><span id="mine-resources"></span></fieldset>
+      <header class="panel-head">
+        <div><p class="eyebrow">Opérations</p><h2 id="mine-title">Forages</h2><p class="lede">Envoyer des forages vers les planètes minières de la ressource voulue.</p></div>
+        <div class="fhead-slot" data-feature-head="minings"></div>
+      </header>
+      <details class="help-box">
+        <summary>Comment ça marche ?</summary>
+        <p>Le bot repère sur la carte les planètes minières de la ressource voulue, autour des planètes de départ, et envoie 1 Foreuse orbitale avec vos Mineurs vers la plus proche qui n'a pas déjà un forage. La flotte revient seule (soute pleine ou planète épuisée) ; la place est relancée au retour plus le délai choisi, sur la même planète minière si elle existe encore.</p>
+      </details>
+      <fieldset class="row chip-set"><legend>Planètes de départ</legend><span id="mine-planets"></span></fieldset>
+      <fieldset class="row chip-set"><legend>Ressources visées</legend><span id="mine-resources"></span></fieldset>
       <div class="row">
         <label>Mineurs par forage <input id="mine-miners" type="number" min="1" max="200000" step="1" aria-label="Mineurs par forage"></label>
         <label>Places (forages en même temps) <input id="mine-slots" type="number" min="1" max="20" step="1" aria-label="Places de forage"></label>
@@ -277,11 +323,72 @@
         <label>Délai avant relance : de <input id="mine-delay-min" type="number" min="0" step="1" aria-label="Délai minimum avant relance du forage (minutes)"></label>
         <label>à <input id="mine-delay-max" type="number" min="0" step="1" aria-label="Délai maximum avant relance du forage (minutes)"> minutes</label>
       </div>
-      <div class="row"><button id="mine-save" type="button">Enregistrer</button></div>
-      <p id="mine-msg" class="msg" role="status" aria-live="polite"></p>
+      <div class="row actions"><button id="mine-save" type="button">Enregistrer</button><p id="mine-msg" class="msg" role="status" aria-live="polite"></p></div>
       <h3>Forages suivis</h3>
-      <ul id="mine-tracked" class="hint"></ul>
+      <ul id="mine-tracked" class="tracked"></ul>
     </section>
+
+    <section class="tabpanel card" id="panel-spying" role="tabpanel" aria-labelledby="tab-spying" hidden>
+      <header class="panel-head">
+        <div><p class="eyebrow">Opérations · manuel</p><h2 id="spy-title">Espionnage des Errants</h2><p class="lede">Envoyer un drone vers chaque Errant autour d'une planète, à la demande.</p></div>
+      </header>
+      <details class="help-box">
+        <summary>Comment ça marche ?</summary>
+        <p>Le bouton « Lancer l'espionnage » met le bot sur <strong>OFF</strong> (les autres automatismes restent arrêtés jusqu'à ce que vous les relanciez), centre la Galaxie sur la planète choisie au zoom ×17,5, puis envoie <strong>un drone</strong> (Piliers) vers chaque planète d'Errant [AI] de la fenêtre visible. Un rapport est <strong>gardé</strong> si au moins le nombre choisi de ressources atteint son minimum ; sinon il est <strong>supprimé</strong> dans le jeu. Les Errants aux piliers désactivés sont notés dans la liste « Piliers fermés », vidée à chaque lancement.</p>
+      </details>
+      <div class="row">
+        <label>Planète <select id="spy-planet" aria-label="Planète autour de laquelle espionner"></select></label>
+        <label>Ressources à atteindre <select id="spy-required" aria-label="Nombre de ressources à atteindre">
+          <option value="1">au moins 1</option><option value="2">au moins 2</option><option value="3">les 3</option>
+        </select></label>
+      </div>
+      <div id="spy-minimums" class="row"></div>
+      <div class="row actions"><button id="spy-save" type="button" class="secondary">Enregistrer</button><p id="spy-msg" class="msg" role="status" aria-live="polite"></p></div>
+      <div class="launch-box">
+        <div class="row">
+          <button id="spy-start" type="button">Lancer l'espionnage</button>
+          <button id="spy-stop" type="button" class="danger" hidden>Arrêter</button>
+        </div>
+        <p id="spy-status" class="status-line" role="status" aria-live="polite">Aucun espionnage lancé.</p>
+        <details><summary id="spy-closed-title">Piliers fermés (0)</summary><ul id="spy-closed" class="hint"></ul></details>
+      </div>
+    </section>
+
+    <section class="tabpanel card" id="panel-planning" role="tabpanel" aria-labelledby="tab-planning" hidden>
+      <header class="panel-head">
+        <div><p class="eyebrow">Bot</p><h2 id="plan-title">Planning</h2><p class="lede">Les heures pendant lesquelles le bot a le droit d'agir.</p></div>
+      </header>
+      <details class="help-box">
+        <summary>Comment ça marche ?</summary>
+        <p>Le bouton ON/OFF reste le maître. Quand le bot est sur <strong>ON</strong> et que le planning est utilisé, il n'agit que <strong>pendant les plages ci-dessous</strong> (heure française) ; en dehors, il <strong>se déconnecte du jeu</strong> et ne fait rien, puis se reconnecte seul au début de la plage suivante. Un passage en cours se termine avant la déconnexion. Une plage peut passer minuit (ex. 22:00 → 02:00). Un jour sans plage est inactif. Chaque début et chaque fin de plage est décalé au hasard de X à Y minutes, avant ou après l'heure indiquée. L'espionnage manuel n'est pas concerné.</p>
+      </details>
+      <div class="row"><label class="switch"><input id="plan-enabled" type="checkbox" aria-label="Utiliser le planning"> Utiliser le planning</label></div>
+      <p id="plan-status" class="status-line" role="status" aria-live="polite"></p>
+      <div id="plan-days" class="plan-days"></div>
+      <div class="row">
+        <label>Décalage aléatoire : de <input id="plan-offset-min" type="number" min="0" max="120" step="1" aria-label="Décalage minimum (minutes)"></label>
+        <label>à <input id="plan-offset-max" type="number" min="0" max="120" step="1" aria-label="Décalage maximum (minutes)"> minutes, avant ou après</label>
+      </div>
+      <div class="row actions"><button id="plan-save" type="button">Enregistrer</button><p id="plan-msg" class="msg" role="status" aria-live="polite"></p></div>
+    </section>
+
+    <section class="tabpanel card" id="panel-alliance" role="tabpanel" aria-labelledby="tab-alliance" hidden>
+      <header class="panel-head">
+        <div><p class="eyebrow">Alliance</p><h2 id="ally-title">Jetons d'alliance</h2><p class="lede">Donner les jetons technologiques à la technologie prioritaire de l'alliance.</p></div>
+        <div class="fhead-slot" data-feature-head="alliance_tokens"></div>
+      </header>
+      <details class="help-box">
+        <summary>Comment ça marche ?</summary>
+        <p>À chaque passage, le bot ouvre Alliance › Techs et donne vos jetons à la technologie marquée <strong>« priorité de dons de l'alliance »</strong> — et à aucune autre. Il ne change jamais la priorité. Un jeton revient environ toutes les 2 h, 6 au plus : un intervalle trop long en fait perdre. Un don est définitif.</p>
+      </details>
+      <div class="row">
+        <label>Jetons à donner à chaque passage <select id="ally-amount" aria-label="Jetons à donner à chaque passage">
+          <option value="all">Tous</option><option value="1">1</option><option value="2">2</option>
+        </select></label>
+      </div>
+      <div class="row actions"><button id="ally-save" type="button">Enregistrer</button><p id="ally-msg" class="msg" role="status" aria-live="polite"></p></div>
+    </section>
+    </div>
   </main>
   <script src="/static/shell.js"></script>
   <script src="/static/reglages.js"></script>

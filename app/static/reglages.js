@@ -138,7 +138,8 @@ setInterval(refreshAccount, 8000);
 setInterval(refreshScan, 5000);
 
 // ------------------------------------------------------------------------------------ onglets
-const TABS = ["account", "features", "constructions", "researches", "populations", "ships", "components", "explorations", "excavations", "hackings", "spying", "planning", "alliance", "minings"];
+// Ordre du menu latéral (familles Bot, Économie, Opérations, Alliance).
+const TABS = ["account", "features", "planning", "constructions", "researches", "populations", "ships", "components", "explorations", "excavations", "hackings", "minings", "spying", "alliance"];
 function setTab(id) {
   if (!TABS.includes(id)) id = "account";
   TABS.forEach((t) => {
@@ -153,8 +154,9 @@ TABS.forEach((t) => {
   $("tab-" + t).addEventListener("click", () => setTab(t));
   $("tab-" + t).addEventListener("keydown", (e) => {
     const i = TABS.indexOf(t);
-    const next = e.key === "ArrowRight" ? TABS[(i + 1) % TABS.length] : e.key === "ArrowLeft" ? TABS[(i + TABS.length - 1) % TABS.length] : null;
-    if (next) { setTab(next); $("tab-" + next).focus(); }
+    const forward = e.key === "ArrowDown" || e.key === "ArrowRight", backward = e.key === "ArrowUp" || e.key === "ArrowLeft";
+    const next = forward ? TABS[(i + 1) % TABS.length] : backward ? TABS[(i + TABS.length - 1) % TABS.length] : null;
+    if (next) { e.preventDefault(); setTab(next); $("tab-" + next).focus(); }
   });
 });
 window.addEventListener("hashchange", () => { if (TABS.includes(location.hash.slice(1))) setTab(location.hash.slice(1)); });

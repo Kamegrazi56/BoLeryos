@@ -105,9 +105,9 @@ def test_the_removed_features_have_no_settings_and_no_routes(ui):
     page, _, _ = ui
     page.goto(page.base + "/reglages")
     tabs = [t.strip().lower() for t in page.locator("[role=tab]").all_inner_texts()]
-    assert tabs == ["compte et univers", "fonctionnalités", "constructions", "recherches", "population", "assemblages", "composants", "exploration", "fouilles", "piratage", "espionnage", "planning", "alliance", "forages"]
+    assert tabs == ["compte et univers", "fonctionnalités", "planning", "constructions", "recherches", "population", "assemblages", "composants", "exploration", "fouilles", "piratage", "forages", "espionnage", "jetons d'alliance"]
     for tab in tabs:  # aucune section supprimée ne réapparaît, quel que soit l'onglet
-        page.click(f"[role=tab]:has-text('{tab}')", strict=False)
+        page.click(f'[role=tab]:has-text("{tab}")', strict=False)
         text = page.inner_text("main").lower()
         for word in ("expéditions", "attaques", "horaires", "alertes"):
             assert word not in text
@@ -241,6 +241,8 @@ def test_account_has_a_planet_scan_section_with_a_button_and_the_scanned_list(ui
 def test_features_page_sets_the_timer_enables_reorders_and_the_switch_starts_the_bot(ui):
     page, errors, app = ui
     page.goto(page.base + "/reglages#features")
+    page.evaluate("localStorage.setItem('boleryos.showTest', '1')")  # « Test » est masquée par défaut
+    page.reload()
     page.wait_for_selector("[data-feature=test]")
     card = page.locator("[data-feature=test]")
     assert "Désactivée" in card.inner_text()
@@ -354,7 +356,8 @@ def test_population_panel_sets_mode_quantity_and_planet_for_each_population(ui):
 def test_settings_page_has_fourteen_tabs_and_only_one_panel_shows_at_a_time(ui):
     page, errors, _ = ui
     page.goto(page.base + "/reglages")
-    ids = ["account", "features", "constructions", "researches", "populations", "ships", "components", "explorations", "excavations", "hackings", "spying", "planning", "alliance", "minings"]
+    # ordre du menu latéral : Bot, Économie, Opérations, Alliance
+    ids = ["account", "features", "planning", "constructions", "researches", "populations", "ships", "components", "explorations", "excavations", "hackings", "minings", "spying", "alliance"]
     assert page.locator("[role=tab]").count() == 14
     for tab in ids:
         page.click(f"#tab-{tab}")
@@ -363,30 +366,28 @@ def test_settings_page_has_fourteen_tabs_and_only_one_panel_shows_at_a_time(ui):
         assert page.url.endswith(f"#{tab}")
     page.goto(page.base + "/reglages#constructions")
     assert page.locator("#panel-constructions").is_visible()  # un lien direct ouvre le bon onglet
-    page.press("#tab-constructions", "ArrowRight")
-    assert page.locator("#panel-researches").is_visible()
-    page.press("#tab-researches", "ArrowRight")
-    assert page.locator("#panel-populations").is_visible()
-    page.press("#tab-populations", "ArrowRight")
-    assert page.locator("#panel-ships").is_visible()
-    page.press("#tab-ships", "ArrowRight")
-    assert page.locator("#panel-components").is_visible()
-    page.press("#tab-components", "ArrowRight")
-    assert page.locator("#panel-explorations").is_visible()
-    page.press("#tab-explorations", "ArrowRight")
-    assert page.locator("#panel-excavations").is_visible()
-    page.press("#tab-excavations", "ArrowRight")
-    assert page.locator("#panel-hackings").is_visible()
-    page.press("#tab-hackings", "ArrowRight")
-    assert page.locator("#panel-spying").is_visible()
-    page.press("#tab-spying", "ArrowRight")
-    assert page.locator("#panel-planning").is_visible()
-    page.press("#tab-planning", "ArrowRight")
+    for current, following in zip(ids[3:], ids[4:] + ids[:1]):  # flèche du bas : entrée suivante, puis retour au début
+        page.press(f"#tab-{current}", "ArrowDown")
+        assert page.locator(f"#panel-{following}").is_visible(), following
+    page.press("#tab-account", "ArrowUp")
     assert page.locator("#panel-alliance").is_visible()
-    page.press("#tab-alliance", "ArrowRight")
-    assert page.locator("#panel-minings").is_visible()
-    page.press("#tab-minings", "ArrowRight")
-    assert page.locator("#panel-account").is_visible()
+    assert errors == []
+
+
+def test_each_feature_page_has_its_switch_and_the_menu_shows_its_state(ui):
+    page, errors, app = ui
+    page.goto(page.base + "/reglages#alliance")
+    head = page.locator("[data-feature-head=alliance_tokens]")
+    head.get_by_label("Minuteur minimum (minutes) de Dons de jetons d'alliance (page)").fill("120")
+    head.get_by_label("Minuteur maximum (minutes) de Dons de jetons d'alliance (page)").fill("240")
+    page.wait_for_function("document.querySelector('#feat-msg').textContent.includes('Enregistré')", timeout=5000)
+    head.get_by_label("Activer Dons de jetons d'alliance (page)").check()
+    page.wait_for_selector("[data-dot=alliance].on", timeout=5000)  # pastille verte dans le menu
+    saved = app.state.bot.scheduler.store.get("alliance_tokens")
+    assert (saved["enabled"], saved["min_minutes"], saved["max_minutes"]) == (True, 120.0, 240.0)
+    page.click("#tab-features")
+    assert page.locator("[data-feature=alliance_tokens] input[type=checkbox]").is_checked()  # même réglage dans la liste
+    assert page.locator("[data-feature=test]").count() == 0  # « Test » est masquée
     assert errors == []
 
 
