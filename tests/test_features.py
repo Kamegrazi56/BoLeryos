@@ -77,6 +77,49 @@ def test_a_feature_cannot_be_enabled_without_its_timer():
     assert validate_entry({"enabled": False}, floor=1) == {"enabled": False, "min_minutes": None, "max_minutes": None}
 
 
+def test_a_self_timed_feature_needs_no_timer_and_runs_again_when_its_mission_ends():
+    due = {"at": None}
+    runs = []
+
+    async def run(bot):
+        runs.append("f")
+        return "fait"
+
+    feature = Feature("f", "F", "test", run, self_timed=True, next_due=lambda bot: due["at"])
+    sched, _bot, clock = build((feature,))
+    sched.update("f", {"enabled": True})  # aucun minuteur demandé
+
+    async def scenario():
+        manual(sched)
+        due["at"] = time.time() + 600  # fin de mission + délai dans 10 minutes
+        assert await sched.step() is True
+        assert 599 <= sched._runtime["f"].next_at - clock.now <= 600
+        clock.now = sched._runtime["f"].next_at
+        due["at"] = time.time() + 5 * 3600  # dans 5 h : vérification de secours au bout de 30 minutes
+        assert await sched.step() is True
+        assert sched._runtime["f"].next_at - clock.now == 1800
+        clock.now = sched._runtime["f"].next_at
+        due["at"] = None  # rien à attendre : secours aussi
+        assert await sched.step() is True and sched._runtime["f"].next_at - clock.now == 1800
+        clock.now = sched._runtime["f"].next_at
+        due["at"] = time.time() - 50  # heure déjà passée : au moins une minute entre deux passages
+        assert await sched.step() is True and sched._runtime["f"].next_at - clock.now == 60
+
+    asyncio.run(scenario())
+    assert runs == ["f"] * 4
+    item = sched.summary()["features"][0]
+    assert item["self_timed"] is True and item["min_minutes"] is None
+
+
+def test_the_real_features_timers():
+    from app.features import FEATURES
+
+    by_id = {f.id: f for f in FEATURES}
+    assert by_id["excavations"].self_timed and by_id["hackings"].self_timed
+    assert not by_id["explorations"].self_timed and by_id["explorations"].timer_label == "Vague d'explorations toutes les"
+    assert by_id["constructions"].timer_label == "Relancer toutes les"
+
+
 @pytest.mark.parametrize("low,high", [(5, 2), (0.1, 3), (1, 99999), (True, 3), ("2", 3), (-1, 3)])
 def test_bad_timers_are_refused(low, high):
     with pytest.raises(FeaturesError):

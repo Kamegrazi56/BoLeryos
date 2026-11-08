@@ -20,6 +20,8 @@ from typing import Callable
 from .features import Feature, FeatureStore
 
 TICK_SECONDS = 1.0  # fréquence à laquelle l'ordonnanceur regarde si une fonctionnalité est due
+SELF_TIMED_MIN_SECONDS = 60.0  # relance automatique : jamais deux passages à moins d'une minute
+SELF_TIMED_FALLBACK_SECONDS = 30 * 60.0  # relance automatique : vérification de secours (Fouille lancée à la main…)
 
 
 @dataclass
@@ -155,7 +157,19 @@ class Scheduler:
         rt.last_at, rt.last_result, rt.last_ok = time.time(), result, ok
         self.bot.log(f"Fonctionnalité « {feature.label} » : {result}.", "info" if ok else "error", event=True)
         # Le minuteur repart de la FIN du passage (laisse des créneaux aux fonctionnalités moins prioritaires).
-        rt.next_at = self._clock() + self._draw_delay(feature.id) if self.store.get(feature.id)["enabled"] else None
+        delay = self._self_timed_delay(feature) if feature.self_timed else self._draw_delay(feature.id)
+        rt.next_at = self._clock() + delay if self.store.get(feature.id)["enabled"] else None
+
+    def _self_timed_delay(self, feature: Feature) -> float:
+        """Relance automatique : prochain passage à l'heure donnée par la fonctionnalité (fin de mission + délai du
+        joueur), au plus tôt dans une minute, au plus tard à la vérification de secours."""
+        try:
+            due = feature.next_due(self.bot) if feature.next_due else None
+        except Exception:  # noqa: BLE001 - heure illisible : vérification de secours
+            due = None
+        if due is None:
+            return SELF_TIMED_FALLBACK_SECONDS
+        return min(max(due - time.time(), SELF_TIMED_MIN_SECONDS), SELF_TIMED_FALLBACK_SECONDS)
 
     async def _loop(self) -> None:
         while self._on:
@@ -181,6 +195,8 @@ class Scheduler:
                 "id": fid,
                 "label": f.label,
                 "description": f.description,
+                "timer_label": f.timer_label,
+                "self_timed": f.self_timed,
                 **entry,
                 "running": rt.running,
                 "next_in_s": None if rt.next_at is None else max(0.0, rt.next_at - now),

@@ -27,6 +27,11 @@ class Feature:
     label: str
     description: str
     run: Callable[[object], Awaitable[str]]  # reçoit le bot, renvoie une phrase de résultat pour le journal
+    timer_label: str = "Relancer toutes les"  # texte devant le minuteur dans l'onglet Fonctionnalités
+    # Relance automatique (Fouilles, Piratage) : pas de minuteur ; après chaque passage, le suivant est programmé à
+    # l'heure renvoyée par `next_due(bot)` (fin de mission + délai du joueur), avec une vérification de secours.
+    self_timed: bool = False
+    next_due: Callable[[object], float | None] | None = None
 
 
 async def _run_constructions(bot) -> str:
@@ -73,9 +78,12 @@ FEATURES: tuple[Feature, ...] = (
     Feature("populations", "Recrutement de population", "Recrute les populations de la liste (onglet Population) : quantité fixe ou MAX à chaque passage, ou effectif à atteindre, population par population et planète par planète. Clique sur « Recruter » et dépense les ressources de la planète.", _run_populations),
     Feature("ships", "Assemblages de vaisseaux", "Construit les vaisseaux de la liste (onglet Assemblages) : quantité fixe ou MAX à chaque passage ou une seule fois, ou effectif à atteindre, sur toutes les planètes, une seule ou plusieurs. Construit avec des ressources (mode Construction), clique sur « Lancer » et dépense les ressources de la planète.", _run_ships),
     Feature("components", "Production de composants", "Produit les composants de la liste (onglet Composants) : quantité fixe ou MAX à chaque passage ou une seule fois, ou effectif à atteindre, sur toutes les planètes, une seule ou plusieurs. Clique sur « Produire » et dépense les ressources de la planète.", _run_components),
-    Feature("explorations", "Explorations", "Envoie des explorations (onglet Exploration) vers la brèche la plus proche de chaque planète choisie : Piliers ou Flotte, modèle du jeu ou quantités, copies et durée au choix. Relève brèches et modèles une fois par jour, respecte les quotas quotidien et d'explorations actives, et saute une planète à qui il manque quelque chose.", _run_explorations),
-    Feature("excavations", "Fouilles", "Lance les Fouilles des lignes réglées (onglet Fouilles) : planète de départ, équipe (1 à 5 000 unités), durée, nombre de places et Mira Venn. Vise le site libre le plus proche sans Fouille en cours, relève les sites une fois par jour, et relance une place à la fin de sa Fouille plus le délai choisi.", _run_excavations),
-    Feature("hackings", "Piratage (expérience de Naël)", "Fait pirater en boucle par Naël Soryn l'Errant le plus proche de la planète choisie (onglet Piratage), pour son expérience : relance dès que le piratage précédent est fini et que le délai choisi est passé, et passe à l'Errant suivant si le jeu refuse la cible. Relève les Errants une fois par jour.", _run_hackings),
+    Feature("explorations", "Explorations", "Envoie des explorations (onglet Exploration) vers la brèche la plus proche de chaque planète choisie : Piliers ou Flotte, modèle du jeu ou quantités, copies et durée au choix. Relève brèches et modèles une fois par jour, respecte les quotas quotidien et d'explorations actives, et saute une planète à qui il manque quelque chose.", _run_explorations,
+            timer_label="Vague d'explorations toutes les"),
+    Feature("excavations", "Fouilles", "Lance les Fouilles des lignes réglées (onglet Fouilles) : planète de départ, équipe (1 à 5 000 unités), durée, nombre de places et Mira Venn. Vise le site libre le plus proche sans Fouille en cours, relève les sites une fois par jour, et relance une place à la fin de sa Fouille plus le délai choisi.", _run_excavations,
+            self_timed=True, next_due=lambda bot: bot.excavator.next_due()),
+    Feature("hackings", "Piratage (expérience de Naël)", "Fait pirater en boucle par Naël Soryn l'Errant le plus proche de la planète choisie (onglet Piratage), pour son expérience : relance dès que le piratage précédent est fini et que le délai choisi est passé, et passe à l'Errant suivant si le jeu refuse la cible. Relève les Errants une fois par jour.", _run_hackings,
+            self_timed=True, next_due=lambda bot: bot.hacker.next_due()),
     Feature("test", "Test (ne fait rien)", "Écrit une ligne dans le journal à chaque passage. À retirer quand les vraies fonctionnalités arrivent.", _run_test),
 )
 
@@ -90,8 +98,8 @@ def _is_number(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def validate_entry(entry: dict, floor: float) -> dict:
-    """Entrée complète et valide. Activer sans minuteur renseigné est refusé."""
+def validate_entry(entry: dict, floor: float, timed: bool = True) -> dict:
+    """Entrée complète et valide. Activer sans minuteur renseigné est refusé (sauf relance automatique : `timed` faux)."""
     errors: list[str] = []
     out = {"enabled": entry.get("enabled", False), "min_minutes": entry.get("min_minutes"), "max_minutes": entry.get("max_minutes")}
     if not isinstance(out["enabled"], bool):
@@ -102,7 +110,7 @@ def validate_entry(entry: dict, floor: float) -> dict:
             errors.append(f"Minuteur : le {name} doit être entre {floor:g} et {MAX_MINUTES:g} minutes.")
     if not errors and low is not None and high is not None and low > high:
         errors.append("Minuteur : le minimum dépasse le maximum.")
-    if not errors and out["enabled"] is True and (low is None or high is None):
+    if not errors and timed and out["enabled"] is True and (low is None or high is None):
         errors.append("Renseignez le minuteur (minimum et maximum en minutes) avant d'activer.")
     if errors:
         raise FeaturesError(errors)
@@ -115,6 +123,7 @@ def validate_entry(entry: dict, floor: float) -> dict:
 class FeatureStore:
     def __init__(self, data_dir: str | None, features: tuple[Feature, ...], floor: float) -> None:
         self._ids = [f.id for f in features]
+        self._timed = {f.id: not f.self_timed for f in features}
         self._floor = floor
         folder = Path(data_dir) if data_dir and os.path.isdir(data_dir) else None
         self._path = folder / FILE_NAME if folder else None
@@ -135,7 +144,7 @@ class FeatureStore:
             raw = entries.get(fid) if isinstance(entries, dict) else None
             if isinstance(raw, dict):
                 try:
-                    self._entries[fid] = validate_entry(raw, self._floor)
+                    self._entries[fid] = validate_entry(raw, self._floor, self._timed[fid])
                 except FeaturesError:
                     pass  # entrée refusée : fonctionnalité éteinte, minuteur à refaire
         order = saved.get("order")
@@ -160,7 +169,7 @@ class FeatureStore:
     def update(self, fid: str, patch: dict) -> dict:
         if fid not in self._entries:
             raise KeyError(fid)
-        cleaned = validate_entry({**self._entries[fid], **patch}, self._floor)
+        cleaned = validate_entry({**self._entries[fid], **patch}, self._floor, self._timed[fid])
         self._entries[fid] = cleaned
         self._save()
         return dict(cleaned)

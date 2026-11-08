@@ -306,6 +306,13 @@ class ExcavationPass(ExplorationPass):
             raise GameUiError("compteurs de Fouilles illisibles")
         return raw
 
+    def next_due(self) -> float | None:
+        """Heure (epoch) où une place se libère : la plus proche fin de Fouille + délai. None : pas de Fouille suivie
+        (l'ordonnanceur repasse à la vérification de secours)."""
+        # Une heure déjà passée = place libre que ce passage n'a pas pu remplir : on ne repasse pas toutes les minutes.
+        upcoming = [t["ready"] for t in self.store.tracked() if t["ready"] > time.time()]
+        return min(upcoming) if upcoming else None
+
     @staticmethod
     def _full(counters: dict) -> str:
         (exc, exc_max), (mis, mis_max) = counters["excavations"], counters["missions"]

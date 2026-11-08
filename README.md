@@ -73,7 +73,7 @@ Dans **Réglages › Compte et univers**, saisissez l'identifiant, le mot de pas
 ## Fonctionnalités et interrupteur général (Réglages › Fonctionnalités)
 
 - **Bot : ON / OFF** (en haut de chaque page) : à OFF, aucune fonctionnalité ne tourne ; le bot reste pourtant connecté et scanne les planètes. Il repasse **toujours à OFF** après un redémarrage.
-- Chaque fonctionnalité a son interrupteur et son **minuteur** : après chaque passage, le bot attend une durée tirée au hasard entre le minimum et le maximum (le minuteur redémarre à la **fin** du passage). On ne peut pas activer sans minuteur. À l'activation (bot sur ON), le premier passage a lieu tout de suite.
+- Chaque fonctionnalité a son interrupteur et son **minuteur** : après chaque passage, le bot attend une durée tirée au hasard entre le minimum et le maximum (le minuteur redémarre à la **fin** du passage). On ne peut pas activer sans minuteur. À l'activation (bot sur ON), le premier passage a lieu tout de suite. Pour les Explorations, le minuteur s'appelle « Vague d'explorations toutes les X à Y minutes ». Exceptions : **Fouilles** et **Piratage** n'ont pas de minuteur — ils se relancent tout seuls à la fin de chaque mission, plus le délai choisi dans leur onglet, avec une vérification de secours toutes les 30 minutes.
 - **Un seul passage à la fois.** Si plusieurs sont dues, la plus haute de la liste de priorités passe d'abord ; un passage commencé n'est jamais interrompu (même si le bot passe à OFF) ; quelques secondes séparent deux passages.
 - Un passage est repoussé tant que le bot n'est pas dans une partie ou que le contrôle manuel est actif.
 - Activations, minuteurs et priorités sont enregistrés dans `/data/features.json` et survivent au redémarrage.

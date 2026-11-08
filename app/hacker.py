@@ -140,6 +140,11 @@ class HackingPass(ExplorationPass):
             self.bot.log(f"Piratage : {exc}.", "warn", event=True)
             return f"arrêté ({exc})"
 
+    def next_due(self) -> float | None:
+        """Heure (epoch) où le prochain piratage peut partir : fin du dernier + délai. None : inconnue."""
+        ready = self.store.state()["ready"]
+        return ready if ready is not None and ready > time.time() else None  # déjà passée : vérification de secours
+
     async def _nael_available(self) -> bool:
         """Vu sur le vrai jeu : l'état de Naël peut s'afficher un instant après le reste de la page."""
         end = time.monotonic() + READY_SECONDS

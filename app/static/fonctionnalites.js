@@ -55,7 +55,11 @@
     min.addEventListener("input", () => schedulePush(f.id, timer));
     max.addEventListener("input", () => schedulePush(f.id, timer));
     const toggle = el("input", { type: "checkbox", checked: f.enabled, ariaLabel: `Activer ${f.label}` });
-    toggle.addEventListener("change", () => push(f.id, { enabled: toggle.checked, ...timer() }));
+    toggle.addEventListener("change", () => push(f.id, f.self_timed ? { enabled: toggle.checked } : { enabled: toggle.checked, ...timer() }));
+    // Relance automatique (Fouilles, Piratage) : pas de minuteur, le bot repasse à la fin de chaque mission + le délai choisi.
+    const timing = f.self_timed
+      ? el("p", { className: "hint feature-timing", textContent: "Relance automatique : à la fin de chaque mission, plus le délai choisi dans son onglet (vérification de secours toutes les 30 minutes)." })
+      : el("div", { className: "row" }, el("label", {}, `${f.timer_label} `, min, " à ", max, " minutes"));
     const up = el("button", { type: "button", className: "secondary small", textContent: "↑", title: "Plus prioritaire", ariaLabel: `Monter ${f.label}`, disabled: index === 0 });
     const down = el("button", { type: "button", className: "secondary small", textContent: "↓", title: "Moins prioritaire", ariaLabel: `Descendre ${f.label}`, disabled: index === total - 1 });
     up.addEventListener("click", () => move(f.id, -1));
@@ -67,8 +71,7 @@
         el("label", { className: "switch" }, toggle, " Activée"),
         el("span", { className: "spacer" }), up, down),
       el("p", { className: "hint", textContent: f.description }),
-      el("div", { className: "row" },
-        el("label", {}, "Relancer toutes les ", min, " à ", max, " minutes")),
+      timing,
       el("p", { className: "status-line feature-status", textContent: statusText(f, waiting) }));
     li.dataset.feature = f.id;
     return li;
