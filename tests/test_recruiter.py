@@ -25,7 +25,7 @@ def _set(client, queue):
 
 
 def _line(population, mode, amount=0, planet=""):
-    return {"population": population, "mode": mode, "amount": amount, "planet": planet}
+    return {"population": population, "mode": mode, "amount": amount, "planets": [planet] if planet else []}
 
 
 def _recruited(game):

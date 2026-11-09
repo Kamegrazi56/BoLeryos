@@ -1,8 +1,9 @@
 """Réglages de la construction de bâtiments : catalogue des 16 bâtiments du jeu et liste d'objectifs.
 
 Le joueur compose une **liste ordonnée** de lignes « bâtiment + niveau cible » (l'ordre est la priorité) et choisit
-**toutes les planètes** ou **une seule**. Réglages enregistrés dans `<data_dir>/constructions.json`.
-Ce module ne clique sur rien : le lancement des constructions viendra ensuite.
+**toutes les planètes** (`planets` vide) ou **les planètes cochées**. L'ancien format (`scope` « all » / « one » +
+`planet`) est encore lu. Réglages enregistrés dans `<data_dir>/constructions.json`.
+Ce module ne clique sur rien : le lancement des constructions est dans builder.py.
 """
 
 from __future__ import annotations
@@ -15,11 +16,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from .quantities import _clean_planets
+
 FILE_NAME = "constructions.json"
 MAX_LINES = 50
 MAX_LEVEL = 500
 MAX_PLANET_LENGTH = 60
-SCOPES = ("all", "one")
 
 
 @dataclass(frozen=True)
@@ -50,7 +52,7 @@ BUILDINGS: tuple[Building, ...] = (
 )
 BUILDING_IDS = {b.id for b in BUILDINGS}
 
-DEFAULTS: dict = {"scope": "all", "planet": "", "queue": []}
+DEFAULTS: dict = {"planets": [], "queue": []}
 
 
 class ConstructionError(Exception):
@@ -59,22 +61,29 @@ class ConstructionError(Exception):
         self.errors = errors
 
 
+def _planets_of(data: dict):
+    """Planètes choisies : `planets` (liste, vide = toutes), ou l'ancien `scope` + `planet`."""
+    if "planets" in data:
+        return data["planets"]
+    if data.get("scope", "all") != "one":
+        return []
+    planet = data.get("planet", "")
+    if not isinstance(planet, str) or not planet.strip():
+        return None  # « une seule » sans planète : refusé
+    return [planet]
+
+
+def where(planets: list[str]) -> str:
+    return ", ".join(planets) or "toutes les planètes"
+
+
 def validate(data: dict, known_planets: list[str] | None = None) -> dict:
     """Réglages complets et valides, ou ConstructionError avec la liste des problèmes (en français)."""
     errors: list[str] = []
-    scope = data.get("scope", "all")
-    if scope not in SCOPES:
-        errors.append("Planètes : choisissez « toutes » ou « une seule ».")
-    planet = data.get("planet", "")
-    if not isinstance(planet, str) or len(planet) > MAX_PLANET_LENGTH:
-        errors.append(f"Planète : texte de {MAX_PLANET_LENGTH} caractères au plus.")
-        planet = ""
-    planet = planet.strip()
-    if scope == "one":
-        if not planet:
-            errors.append("Choisissez la planète sur laquelle construire.")
-        elif known_planets and planet not in known_planets:
-            errors.append("Planète inconnue : lancez d'abord un scan des planètes (Réglages).")
+    planets, problem = _clean_planets(_planets_of(data), known_planets)
+    if planets is None:
+        errors.append(f"Planètes : {problem}")
+        planets = []
     raw_queue = data.get("queue", [])
     queue: list[dict] = []
     if not isinstance(raw_queue, list) or len(raw_queue) > MAX_LINES:
@@ -95,7 +104,7 @@ def validate(data: dict, known_planets: list[str] | None = None) -> dict:
             queue.append({"building": building, "level": level})
     if errors:
         raise ConstructionError(errors)
-    return {"scope": scope, "planet": planet if scope == "one" else "", "queue": queue}
+    return {"planets": planets, "queue": queue}
 
 
 class ConstructionSettings:
@@ -149,6 +158,5 @@ def describe(settings: dict) -> str:
     labels = {b.id: b.label for b in BUILDINGS}
     if not settings["queue"]:
         return "aucune ligne de construction réglée"
-    scope = f"planète {settings['planet']}" if settings["scope"] == "one" else "toutes les planètes"
     lines = ", ".join(f"{labels[line['building']]} niveau {line['level']}" for line in settings["queue"])
-    return f"{len(settings['queue'])} ligne(s) sur {scope} : {lines}"
+    return f"{len(settings['queue'])} ligne(s) sur {where(settings['planets'])} : {lines}"

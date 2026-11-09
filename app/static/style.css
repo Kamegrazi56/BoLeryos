@@ -157,6 +157,20 @@ input.inline { width: 90px; display: inline-block; margin: 0 6px; }
 .row select, .row input[type=text] { width: auto; min-width: 200px; }
 .row input[type=number] { width: 130px; }
 .fields label { margin: 0; }
+/* Mode d'une ligne : « À chaque passage » / « Une seule fois », grisés pour « Effectif à atteindre ». */
+.repeat-choice { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; vertical-align: middle; }
+.repeat-choice label { margin: 0; display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; color: var(--muted); font-size: 13px; cursor: pointer; white-space: nowrap; transition: background 0.15s, color 0.15s; }
+.repeat-choice label + label { border-left: 1px solid var(--border); }
+.repeat-choice input { margin: 0; accent-color: var(--accent); }
+.repeat-choice label:has(input:checked) { background: rgba(79, 216, 255, 0.12); color: var(--text); }
+.repeat-choice label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+.repeat-choice.is-disabled { opacity: 0.4; }
+.repeat-choice.is-disabled label { cursor: not-allowed; }
+/* Compte et univers : les cinq champs sur une seule ligne (plusieurs lignes seulement sur écran étroit). */
+.fields-account { margin-top: 14px; grid-template-columns: minmax(200px, 2fr) minmax(170px, 1.5fr) minmax(150px, 1.3fr) minmax(110px, 1fr) minmax(110px, 1fr); align-items: end; }
+.fields-account label { white-space: nowrap; min-width: 0; }
+.fields-account label input { display: block; width: 100%; min-width: 0; margin-top: 4px; }
+@media (max-width: 1100px) { .fields-account { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); } }
 .switch { display: inline-flex; align-items: center; gap: 8px; margin: 6px 0; color: var(--text); cursor: pointer; user-select: none; font-size: 14px; }
 .switch input { width: 16px; height: 16px; accent-color: var(--accent); }
 
@@ -458,10 +472,10 @@ details.help-box p { margin: 6px 0 0; color: var(--muted); font-size: 13px; max-
 .line-cards legend { padding: 0 6px; font: 700 13px var(--head); letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); }
 .line-cards label { margin: 0; display: flex; flex-direction: column; align-items: stretch; text-align: left; gap: 4px; }
 /* Boutons de suppression d'une ligne : discrets, en rouge */
-.line-cards button, .cons-queue button:not(.icon):last-child {
+.line-cards button, .cons-queue li > button:not(.icon):last-child {
   color: var(--err); background: transparent; clip-path: none; border-radius: 3px; border: 1px solid rgba(251, 113, 133, 0.45);
 }
-.line-cards button:hover, .cons-queue button:not(.icon):last-child:hover { background: rgba(251, 113, 133, 0.1); filter: none; }
+.line-cards button:hover, .cons-queue li > button:not(.icon):last-child:hover { background: rgba(251, 113, 133, 0.1); filter: none; }
 .line-cards label:has(input[type=checkbox]), .line-cards label:has(input[type=radio]) { flex-direction: row; align-items: center; }
 .line-cards input[type=number], .line-cards select { width: 100%; min-width: 0; }
 .line-cards button { justify-self: start; }
@@ -509,6 +523,7 @@ button.icon { width: 30px; height: 26px; padding: 0; }
 .cons-queue li label { margin: 0; display: inline-flex; align-items: center; gap: 6px; }
 .cons-queue .name { flex: 1; min-width: 180px; font-weight: 600; }
 .cons-queue input[type="number"] { width: 90px; }
+.cons-queue li > select { width: auto; min-width: 140px; }
 .cons-queue:empty::before { content: "Liste vide : ajoutez une ligne ci-dessous."; color: var(--muted); font-style: italic; font-size: 13px; padding: 6px 2px; }
 .scope { border: 0; padding: 0; margin: 8px 0; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .scope legend { color: var(--muted); font-size: 13px; padding: 0; margin-bottom: 4px; }
@@ -528,8 +543,26 @@ button.icon { width: 30px; height: 26px; padding: 0; }
 }
 
 /* Chantier spatial : choix de la ou des planètes d'une ligne */
-.planet-picker { display: inline-block; position: relative; }
-.planet-picker > summary { cursor: pointer; padding: 4px 8px; border: 1px solid var(--line, #2a3a5a); border-radius: 6px; list-style: none; }
-.planet-picker[open] > summary { border-color: var(--accent, #3ab4ff); }
-.planet-picker label { display: block; padding: 2px 8px; white-space: nowrap; }
-.picker-slot { display: inline-block; }
+/* Choix des planètes (planet-choice.js) : « Toutes » / « Planètes choisies » + cases sur 2 lignes. */
+.planet-choice { display: flex; flex-direction: column; gap: 8px; }
+.planet-choice-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.planet-tools { display: inline-flex; gap: 6px; }
+/* Colonnes partagées dans la largeur disponible : jamais de barre de défilement (un nom trop long est abrégé « … »). */
+.planet-grid { display: grid; grid-template-columns: repeat(var(--cols, 7), auto); gap: 4px 5px; }
+.planet-grid label { margin: 0; display: flex; align-items: center; gap: 5px; min-width: 0; padding: 3px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--text); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.planet-grid label:has(input:checked) { border-color: var(--accent); background: rgba(79, 216, 255, 0.10); }
+.planet-grid label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.planet-grid input { margin: 0; flex: none; width: 13px; height: 13px; accent-color: var(--accent); }
+.planet-grid label span { overflow: hidden; text-overflow: ellipsis; }
+.planet-choice.is-all .planet-grid { opacity: 0.4; }
+.planet-choice.is-all .planet-grid label { cursor: not-allowed; }
+.add-planets { flex-basis: 100%; padding: 8px 0 2px; }
+/* Dans une ligne de la liste : replié derrière un résumé ; ouvert, il s'étale sous la ligne (jamais hors de l'écran). */
+.planet-picker { display: inline-block; }
+.planet-picker[open] { order: 10; flex-basis: 100%; min-width: 0; }
+.planet-choice, .add-planets { min-width: 0; max-width: 100%; }
+.planet-picker > summary { cursor: pointer; padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px; list-style: none; font-size: 13px; white-space: nowrap; }
+.planet-picker > summary::after { content: " ▾"; color: var(--muted); }
+.planet-picker[open] > summary { border-color: var(--accent); }
+.planet-picker[open] > summary { display: inline-block; }
+.planet-picker > .planet-choice { margin-top: 8px; padding: 12px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--panel-solid); }

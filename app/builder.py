@@ -294,8 +294,8 @@ class ConstructionPass:
 
     # ------------------------------------------------------------------ un passage
     def _targets(self, settings: dict) -> list[str]:
-        if settings["scope"] == "one":
-            return [settings["planet"]]
+        if settings["planets"]:  # planètes cochées ; vide = toutes
+            return list(settings["planets"])
         names = [p["name"] for p in self.bot.supervisor.scanned_planets]
         return names or self.bot.supervisor.prefs.get()["catalog"]["planets"]
 

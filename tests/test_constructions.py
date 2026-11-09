@@ -1,6 +1,8 @@
-"""Constructions : catalogue des 16 bâtiments, liste ordonnée « bâtiment + niveau cible », toutes les planètes ou une seule."""
+"""Constructions : catalogue des 16 bâtiments, liste ordonnée « bâtiment + niveau cible », toutes les planètes ou
+les planètes cochées."""
 
 import asyncio
+import json
 from dataclasses import replace
 
 import pytest
@@ -24,7 +26,7 @@ def test_catalog_has_the_sixteen_game_buildings_split_in_two_pages():
 
 # ------------------------------------------------------------------------------ validation
 def test_defaults_are_all_planets_and_an_empty_list():
-    assert validate({}) == {"scope": "all", "planet": "", "queue": []}
+    assert validate({}) == {"planets": [], "queue": []}
 
 
 def test_the_list_keeps_its_order_which_is_the_priority():
@@ -52,28 +54,41 @@ def test_bad_lines_are_refused_with_a_message(queue):
     assert err.value.errors[0].startswith("Ligne ")
 
 
-def test_one_planet_scope_needs_a_planet_known_from_the_scan():
-    with pytest.raises(ConstructionError, match="Choisissez la planète"):
-        validate({"scope": "one"})
+def test_chosen_planets_must_be_known_from_the_scan():
+    known = ["8-50-Concorde", "6-79-Egide"]
     with pytest.raises(ConstructionError, match="inconnue"):
-        validate({"scope": "one", "planet": "Nulle-Part"}, known_planets=["8-50-Concorde"])
-    assert validate({"scope": "one", "planet": "8-50-Concorde"}, known_planets=["8-50-Concorde"])["planet"] == "8-50-Concorde"
-    assert validate({"scope": "all", "planet": "8-50-Concorde"})["planet"] == ""  # ignorée quand « toutes »
-    with pytest.raises(ConstructionError):
-        validate({"scope": "peut-etre"})
+        validate({"planets": ["8-50-Concorde", "Nulle-Part"]}, known_planets=known)
+    assert validate({"planets": ["8-50-Concorde", "6-79-Egide", "8-50-Concorde"]}, known_planets=known)["planets"] == known  # doublon retiré
+    assert validate({"planets": []}, known_planets=known)["planets"] == []  # « toutes » : toujours valable
+    for bad in ("8-50-Concorde", [12], [""]):
+        with pytest.raises(ConstructionError, match="Planètes"):
+            validate({"planets": bad})
+
+
+def test_the_old_all_or_one_planet_format_is_still_read():
+    assert validate({"scope": "one", "planet": "8-50-Concorde"})["planets"] == ["8-50-Concorde"]
+    assert validate({"scope": "all", "planet": "8-50-Concorde"})["planets"] == []  # ignorée quand « toutes »
+    with pytest.raises(ConstructionError, match="Planètes"):
+        validate({"scope": "one"})  # « une seule » sans planète
 
 
 def test_describe_gives_a_readable_sentence():
     assert describe(validate({})) == "aucune ligne de construction réglée"
-    text = describe(validate({"scope": "one", "planet": "8-50-Concorde", "queue": [LINE]}))
-    assert "Mine de Fer niveau 45" in text and "planète 8-50-Concorde" in text
+    text = describe(validate({"planets": ["8-50-Concorde", "6-79-Egide"], "queue": [LINE]}))
+    assert "Mine de Fer niveau 45" in text and "sur 8-50-Concorde, 6-79-Egide" in text
+    assert "sur toutes les planètes" in describe(validate({"queue": [LINE]}))
 
 
 # ------------------------------------------------------------------------------ enregistrement
 def test_settings_survive_a_restart(tmp_path):
-    ConstructionSettings(str(tmp_path)).replace({"scope": "one", "planet": "Aurore-Bis", "queue": [LINE]})
+    ConstructionSettings(str(tmp_path)).replace({"planets": ["Aurore-Bis", "6-79-Egide"], "queue": [LINE]})
     again = ConstructionSettings(str(tmp_path)).get()
-    assert again == {"scope": "one", "planet": "Aurore-Bis", "queue": [LINE]}
+    assert again == {"planets": ["Aurore-Bis", "6-79-Egide"], "queue": [LINE]}
+
+
+def test_a_file_in_the_old_format_is_converted(tmp_path):
+    (tmp_path / "constructions.json").write_text(json.dumps({"scope": "one", "planet": "Aurore-Bis", "queue": [LINE]}), encoding="utf8")
+    assert ConstructionSettings(str(tmp_path)).get() == {"planets": ["Aurore-Bis"], "queue": [LINE]}
 
 
 def test_a_refused_change_keeps_the_previous_settings(tmp_path):
@@ -86,7 +101,7 @@ def test_a_refused_change_keeps_the_previous_settings(tmp_path):
 
 def test_a_corrupt_file_gives_an_empty_list(tmp_path):
     (tmp_path / "constructions.json").write_text("{pas du json", encoding="utf8")
-    assert ConstructionSettings(str(tmp_path)).get() == {"scope": "all", "planet": "", "queue": []}
+    assert ConstructionSettings(str(tmp_path)).get() == {"planets": [], "queue": []}
 
 
 # ------------------------------------------------------------------------------ API
@@ -99,7 +114,7 @@ def api(settings, tmp_path):
 def test_api_lists_the_catalog_and_saves_the_list(api):
     data = api.get("/api/constructions").json()
     assert len(data["buildings"]) == 16 and data["settings"]["queue"] == []
-    res = api.put("/api/constructions", json={"scope": "all", "queue": [LINE, {"building": "caserne", "level": 25}]})
+    res = api.put("/api/constructions", json={"planets": [], "queue": [LINE, {"building": "caserne", "level": 25}]})
     assert res.status_code == 200
     assert [line["building"] for line in api.get("/api/constructions").json()["settings"]["queue"]] == ["mine-de-fer", "caserne"]
 
@@ -107,16 +122,16 @@ def test_api_lists_the_catalog_and_saves_the_list(api):
 def test_api_refuses_a_bad_list_in_french_and_checks_the_origin(api):
     res = api.put("/api/constructions", json={"queue": [{"building": "x", "level": 3}]})
     assert res.status_code == 422 and "bâtiment inconnu" in " ".join(res.json()["detail"])
-    assert api.put("/api/constructions", json={"scope": "one"}).status_code == 422
+    assert api.put("/api/constructions", json={"planets": [""]}).status_code == 422
     assert api.put("/api/constructions", json={}, headers={"Origin": "http://evil.example"}).status_code == 403
 
 
-def test_one_planet_must_come_from_the_scan(game_client):
+def test_chosen_planets_must_come_from_the_scan(game_client):
     game_client.post("/api/planets/scan")
     planets = game_client.get("/api/constructions").json()["planets"]
     assert "8-50-Concorde" in planets
-    assert game_client.put("/api/constructions", json={"scope": "one", "planet": "8-50-Concorde"}).status_code == 200
-    assert game_client.put("/api/constructions", json={"scope": "one", "planet": "Nulle-Part"}).status_code == 422
+    assert game_client.put("/api/constructions", json={"planets": ["8-50-Concorde", "6-79-Egide"]}).status_code == 200
+    assert game_client.put("/api/constructions", json={"planets": ["Nulle-Part"]}).status_code == 422
 
 
 def test_the_construction_feature_with_an_empty_list_does_nothing(api):

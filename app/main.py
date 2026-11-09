@@ -87,8 +87,7 @@ class ConstructionLine(BaseModel):
 
 
 class ConstructionsRequest(BaseModel):
-    scope: str = Field(default="all", max_length=10)
-    planet: str = Field(default="", max_length=200)
+    planets: list[str] = Field(default_factory=list, max_length=200)  # vide : toutes les planètes
     queue: list[ConstructionLine] = Field(default_factory=list, max_length=200)
 
 
@@ -106,7 +105,7 @@ class PopulationLine(BaseModel):
     population: str = Field(max_length=60)
     mode: str = Field(max_length=10)
     amount: int = Field(default=0, ge=0, le=10**12)
-    planet: str = Field(default="", max_length=200)
+    planets: list[str] = Field(default_factory=list, max_length=200)  # vide : toutes les planètes
     repeat: bool = True
 
 

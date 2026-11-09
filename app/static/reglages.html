@@ -55,15 +55,15 @@
       </header>
       <p id="acct-status" class="status-line">Chargement…</p>
       <p id="conn-status" class="status-line" role="status" aria-live="polite"></p>
-      <div class="fields">
-        <label>Identifiant (adresse e-mail du compte) <input id="acct-id" type="text" autocomplete="off" spellcheck="false"></label>
+      <div class="fields fields-account">
+        <label>Identifiant (e-mail du compte) <input id="acct-id" type="text" autocomplete="off" spellcheck="false"></label>
         <label>Mot de passe <input id="acct-pw" type="password" autocomplete="off"></label>
         <label>Univers <span data-help-text="Le nom de l'univers tel qu'il est affiché sur la page « Choisissez votre univers ». Une fois connecté, le bot clique dessus. Des suggestions apparaissent dès que le bot a vu cette page."></span>
           <input id="universe" type="text" list="universe-list" autocomplete="off" spellcheck="false" placeholder="ex. Asterion"></label>
         <datalist id="universe-list"></datalist>
-        <label>Connexion : délai minimum entre deux clics (secondes) <span data-help-text="Pendant la connexion, le bot attend une durée au hasard entre le minimum et le maximum avant chaque clic ou saisie. Enregistré tout seul."></span>
+        <label>Délai min. (s) <span data-help-text="Délai entre deux clics pendant la connexion : le bot attend une durée au hasard entre le minimum et le maximum avant chaque clic ou saisie. Enregistré tout seul."></span>
           <input id="login-delay-min" type="number" min="0" max="60" step="0.1"></label>
-        <label>Connexion : délai maximum entre deux clics (secondes)
+        <label>Délai max. (s)
           <input id="login-delay-max" type="number" min="0" max="60" step="0.1"></label>
       </div>
       <div class="row actions">
@@ -108,14 +108,10 @@
       </header>
       <details class="help-box">
         <summary>Comment ça marche ?</summary>
-        <p>Chaque ligne dit « monter ce bâtiment jusqu'au niveau N ». L'ordre de la liste est la priorité : le bot lancera la première ligne réalisable. Une seule ligne par bâtiment. Quand la fonctionnalité est activée et le bot sur ON, il clique sur « Améliorer » et <strong>dépense les ressources du jeu</strong> : au plus une construction par planète et par passage.</p>
+        <p>Chaque ligne dit « monter ce bâtiment jusqu'au niveau N ». L'ordre de la liste est la priorité : le bot lancera la première ligne réalisable. Une seule ligne par bâtiment. Quand la fonctionnalité est activée et le bot sur ON, il clique sur « Améliorer » et <strong>dépense les ressources du jeu</strong> : au plus une construction par planète et par passage. Planètes : « Toutes les planètes » (y compris celles colonisées plus tard) ou les planètes cochées, pour toute la liste.</p>
       </details>
-      <fieldset class="scope">
-        <legend>Planètes</legend>
-        <label class="switch"><input type="radio" name="cons-scope" value="all"> Toutes les planètes</label>
-        <label class="switch"><input type="radio" name="cons-scope" value="one"> Une seule :</label>
-        <select id="cons-planet" aria-label="Planète choisie"></select>
-      </fieldset>
+      <h3>Planètes</h3>
+      <div id="cons-planets" class="add-planets"></div>
       <h3>Liste d'objectifs</h3>
       <ol id="cons-queue" class="cons-queue"></ol>
       <div class="row add-row">
@@ -155,15 +151,16 @@
       </header>
       <details class="help-box">
         <summary>Comment ça marche ?</summary>
-        <p>Chaque ligne règle <strong>une population</strong>, indépendamment des autres : <strong>quantité fixe</strong> (recrutée à chaque passage), <strong>MAX</strong> (le maximum payable, à chaque passage) ou <strong>effectif à atteindre</strong> (le bot recrute ce qui manque, planète par planète, puis ne fait plus rien une fois la cible atteinte). Choisissez une planète ou « toutes » (chacune est alors traitée séparément). L'ordre de la liste est la priorité quand plusieurs populations se partagent les mêmes ressources. Quand la fonctionnalité est activée et le bot sur ON, il clique sur « Recruter » et <strong>dépense les ressources de la planète</strong> : attention au MAX, qui vide les stocks. Quand la dernière ligne est terminée et que la liste est vide, la fonctionnalité <strong>se désactive d'elle-même</strong>.</p>
+        <p>Chaque ligne règle <strong>une population</strong>, indépendamment des autres : <strong>quantité fixe</strong> (recrutée à chaque passage), <strong>MAX</strong> (le maximum payable, à chaque passage) ou <strong>effectif à atteindre</strong> (le bot recrute ce qui manque, planète par planète, puis ne fait plus rien une fois la cible atteinte). Planètes : « Toutes les planètes » (y compris celles colonisées plus tard) ou les planètes cochées ; chacune est traitée séparément. L'ordre de la liste est la priorité quand plusieurs populations se partagent les mêmes ressources. Quand la fonctionnalité est activée et le bot sur ON, il clique sur « Recruter » et <strong>dépense les ressources de la planète</strong> : attention au MAX, qui vide les stocks. Quand la dernière ligne est terminée et que la liste est vide, la fonctionnalité <strong>se désactive d'elle-même</strong>.</p>
       </details>
       <h3>Lignes de recrutement</h3>
       <ol id="pop-queue" class="cons-queue"></ol>
       <div class="row add-row">
         <label>Ajouter <select id="pop-add-population" aria-label="Population à ajouter"></select></label>
         <label>mode <select id="pop-add-mode" aria-label="Mode de recrutement"></select></label>
+        <span id="pop-add-repeat"></span>
         <label id="pop-add-amount-label">quantité <input id="pop-add-amount" type="number" min="1" step="1" value="1"></label>
-        <label>planète <select id="pop-add-planet" aria-label="Planète du recrutement"></select></label>
+        <div id="pop-add-planets" class="add-planets"></div>
         <button id="pop-add" type="button" class="secondary">+ Ajouter à la liste</button>
       </div>
       <p id="pop-msg" class="msg" role="status" aria-live="polite"></p>
@@ -189,8 +186,9 @@
       <div class="row add-row">
         <label>Ajouter <select id="shp-add-item" aria-label="Modèle à ajouter"></select></label>
         <label>mode <select id="shp-add-mode" aria-label="Mode de construction"></select></label>
+        <span id="shp-add-repeat"></span>
         <label id="shp-add-amount-label">quantité <input id="shp-add-amount" type="number" min="1" step="1" value="1"></label>
-        <span id="shp-add-planets" class="picker-slot"></span>
+        <div id="shp-add-planets" class="add-planets"></div>
         <button id="shp-add" type="button" class="secondary">+ Ajouter à la liste</button>
       </div>
       <p id="shp-msg" class="msg" role="status" aria-live="polite"></p>
@@ -210,8 +208,9 @@
       <div class="row add-row">
         <label>Ajouter <select id="cmp-add-item" aria-label="Composant à ajouter"></select></label>
         <label>mode <select id="cmp-add-mode" aria-label="Mode de production"></select></label>
+        <span id="cmp-add-repeat"></span>
         <label id="cmp-add-amount-label">quantité <input id="cmp-add-amount" type="number" min="1" step="1" value="1"></label>
-        <span id="cmp-add-planets" class="picker-slot"></span>
+        <div id="cmp-add-planets" class="add-planets"></div>
         <button id="cmp-add" type="button" class="secondary">+ Ajouter à la liste</button>
       </div>
       <p id="cmp-msg" class="msg" role="status" aria-live="polite"></p>
@@ -393,8 +392,10 @@
   <script src="/static/shell.js"></script>
   <script src="/static/reglages.js"></script>
   <script src="/static/fonctionnalites.js"></script>
+  <script src="/static/planet-choice.js"></script>
   <script src="/static/constructions.js"></script>
   <script src="/static/recherches.js"></script>
+  <script src="/static/mode-choice.js"></script>
   <script src="/static/population.js"></script>
   <script src="/static/chantier.js"></script>
   <script src="/static/exploration.js"></script>

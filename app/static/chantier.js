@@ -1,46 +1,13 @@
 // Chantier spatial : listes « élément + mode + quantité + planètes » des Assemblages (vaisseaux) et des Composants.
-// Même principe que l'onglet Population ; les planètes sont « toutes » ou une ou plusieurs planètes cochées.
+// Même principe que l'onglet Population ; les planètes sont « toutes » ou une ou plusieurs planètes cochées
+// (choix commun : planet-choice.js).
 // Les lignes atteintes ou « une seule fois » faites sont retirées par le bot : la liste se rafraîchit toute seule.
 (() => {
   const { el } = window.ui;
   const $ = (id) => document.getElementById(id);
 
-  const MODES = [
-    ["fixed:1", "Quantité à chaque passage"],
-    ["fixed:0", "Quantité une seule fois"],
-    ["max:1", "MAX à chaque passage"],
-    ["max:0", "MAX une seule fois"],
-    ["target:0", "Effectif à atteindre"],
-  ];
-  const modeValue = (line) => `${line.mode}:${line.mode !== "target" && line.repeat !== false ? 1 : 0}`;
-  const applyMode = (line, value) => { const [mode, repeat] = value.split(":"); line.mode = mode; line.repeat = repeat === "1"; };
-  const modeOptions = () => MODES.map(([value, text]) => el("option", { value, textContent: text }));
-  const planetsText = (planets) => (planets.length ? planets.join(", ") : "Toutes les planètes");
   const errorText = (data) => (Array.isArray(data.detail) ? data.detail.join(" · ") : data.detail || "Refusé.");
-
-  /** Choix des planètes : « Toutes » ou une ou plusieurs cases cochées. `value()` rend [] pour « toutes ». */
-  function planetPicker(planets, selected, name, onChange) {
-    const names = [...new Set([...planets, ...selected])];
-    const all = el("input", { type: "checkbox", checked: selected.length === 0, ariaLabel: `Toutes les planètes pour ${name}` });
-    const boxes = names.map((p) => el("input", { type: "checkbox", checked: selected.includes(p), disabled: selected.length === 0, ariaLabel: `${p} pour ${name}` }));
-    const value = () => (all.checked ? [] : names.filter((_, i) => boxes[i].checked));
-    const summary = () => (all.checked ? planetsText([]) : boxes.some((b) => b.checked) ? planetsText(value()) : "Choisissez les planètes…");
-    const refresh = () => { node.querySelector("summary").textContent = summary(); onChange(); };
-    all.addEventListener("change", () => {
-      boxes.forEach((b) => { b.disabled = all.checked; if (all.checked) b.checked = false; });
-      refresh();
-    });
-    boxes.forEach((b) => b.addEventListener("change", () => {
-      if (!boxes.some((x) => x.checked)) { all.checked = true; boxes.forEach((x) => { x.disabled = true; }); } // plus aucune case : « toutes »
-      refresh();
-    }));
-    const node = el("details", { className: "planet-picker" },
-      el("summary", { textContent: planetsText(selected) }),
-      el("label", {}, all, " Toutes les planètes"),
-      ...names.map((p, i) => el("label", {}, boxes[i], " " + p)));
-    node.value = value;
-    return node;
-  }
+  const NO_PLANET = "Cochez au moins une planète, ou choisissez « Toutes les planètes ».";
 
   function editor({ prefix, api, itemsOf, emptyText }) {
     const id = (s) => $(`${prefix}-${s}`);
@@ -77,12 +44,21 @@
       }
       list.replaceChildren(...state.queue.map((line, i) => {
         const name = label(line.item);
-        const mode = el("select", { ariaLabel: `Mode de ${name}` }, ...modeOptions());
-        mode.value = modeValue(line);
         const amount = el("input", { type: "number", min: "1", step: "1", value: line.amount || 1, ariaLabel: `Quantité de ${name}`, disabled: line.mode === "max" });
-        mode.addEventListener("change", () => { applyMode(line, mode.value); amount.disabled = line.mode === "max"; if (line.mode !== "max" && !line.amount) line.amount = 1; scheduleSave(); });
+        const choice = window.modeChoice({ name, mode: line.mode, repeat: line.repeat, onChange: () => {
+          line.mode = choice.mode();
+          line.repeat = choice.repeat();
+          amount.disabled = line.mode === "max";
+          if (line.mode !== "max" && !line.amount) line.amount = 1;
+          scheduleSave();
+        } });
         amount.addEventListener("input", () => { if (amount.value !== "") { line.amount = Number(amount.value); scheduleSave(); } });
-        const where = planetPicker(planets, line.planets, name, () => { line.planets = where.value(); scheduleSave(); });
+        const where = window.planetChoice({ planets, selected: line.planets, name, compact: true, onChange: () => {
+          const chosen = where.value();
+          if (chosen === null) { say(NO_PLANET, "error"); return; } // rien coché : la ligne garde ses planètes
+          line.planets = chosen;
+          scheduleSave();
+        } });
         const button = (text, title, onClick, disabled = false) => {
           const b = el("button", { type: "button", className: "secondary small", textContent: text, title, ariaLabel: `${title} : ${name}`, disabled });
           b.addEventListener("click", onClick);
@@ -92,7 +68,7 @@
         const item = el("li", {},
           el("span", { className: "rank", textContent: String(i + 1) }),
           el("strong", { className: "name", textContent: name }),
-          mode, el("label", {}, "quantité ", amount), where,
+          choice.select, choice.node, el("label", {}, "quantité ", amount), where.node,
           button("↑", "Monter", () => swap(i - 1), i === 0),
           button("↓", "Descendre", () => swap(i + 1), i === state.queue.length - 1),
           button("Supprimer", "Supprimer", () => { state.queue.splice(i, 1); renderAll(); scheduleSave(); }));
@@ -101,7 +77,6 @@
       }));
     }
 
-    let picker = null;
     function renderAddForm() {
       const select = id("add-item");
       const chosen = select.value;
@@ -111,23 +86,27 @@
         ? groups.map((g) => el("optgroup", { label: g }, ...items.filter((i) => i.group === g).map(option)))
         : items.map(option)));
       if (chosen && items.some((i) => i.value === chosen)) select.value = chosen;
-      if (!id("add-mode").children.length) id("add-mode").replaceChildren(...modeOptions());
-      const selected = picker ? picker.value() : [];
-      picker = planetPicker(planets, selected, "la nouvelle ligne", () => {});
-      id("add-planets").replaceChildren(picker);
+      addPlanets.setPlanets(planets); // garde les cases déjà cochées
       id("add").disabled = !items.length;
-      id("add-amount-label").hidden = id("add-mode").value.startsWith("max");
+      id("add-amount-label").hidden = addChoice.mode() === "max";
     }
     const renderAll = () => { renderQueue(); renderAddForm(); };
 
-    id("add-mode").addEventListener("change", () => { id("add-amount-label").hidden = id("add-mode").value.startsWith("max"); });
+    const addChoice = window.modeChoice({ name: "la nouvelle ligne", select: id("add-mode"), onChange: () => {
+      id("add-amount-label").hidden = addChoice.mode() === "max";
+    } });
+    id("add-repeat").replaceChildren(addChoice.node);
+    const addPlanets = window.planetChoice({ planets: [], name: "la nouvelle ligne" });
+    id("add-planets").replaceChildren(addPlanets.node);
     id("add").addEventListener("click", () => {
       const item = id("add-item").value;
-      const [mode, repeat] = id("add-mode").value.split(":");
+      const mode = addChoice.mode();
+      const chosen = addPlanets.value();
       const amount = mode === "max" ? 0 : Number(id("add-amount").value);
       if (!item) return;
       if (mode !== "max" && (!Number.isInteger(amount) || amount < 1)) { say("La quantité est un nombre entier d'au moins 1.", "error"); return; }
-      state.queue.push({ item, mode, amount, planets: picker ? picker.value() : [], repeat: repeat === "1" });
+      if (chosen === null) { say(NO_PLANET, "error"); return; }
+      state.queue.push({ item, mode, amount, planets: chosen, repeat: addChoice.repeat() });
       renderAll();
       scheduleSave();
     });
@@ -140,10 +119,11 @@
         planets = data.planets;
         const idle = at === rev && !saveTimer && !saving;
         if (first === true) { if (!saveTimer) state = data.settings; renderAll(); return; }
-        const listFocused = id("queue").contains(document.activeElement) || id("add-planets").contains(document.activeElement);
-        if (idle && !listFocused) {
+        renderAddForm(); // nouvelles planètes ou nouveaux modèles : les cases cochées sont gardées
+        const editing = id("queue").contains(document.activeElement) || !!id("queue").querySelector("details[open]");
+        if (idle && !editing) {
           if (JSON.stringify(data.settings.queue) !== JSON.stringify(state.queue)) state = data.settings; // lignes retirées par le bot
-          renderAll();
+          renderQueue();
         }
       } catch { /* le bot redémarre : on réessaie */ }
     }

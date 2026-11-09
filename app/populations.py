@@ -5,8 +5,9 @@ Chaque ligne (l'ordre de la liste est la priorité) dit, pour UNE population :
     (en boucle) ; avec `repeat` faux, une seule fois (par planète) ;
   - « target » : atteindre un effectif de N unités, planète par planète (jamais répété).
 Une ligne qui ne se répète pas est retirée de la liste par le bot dès qu'elle est faite sur toutes ses planètes.
-et la planète concernée (« » = toutes les planètes, chacune étant traitée indépendamment).
-Une ligne par couple (population, planète). Réglages enregistrés dans `<data_dir>/populations.json`.
+et les planètes concernées (liste vide = toutes les planètes, chacune étant traitée indépendamment). L'ancien format
+(`planet` : une seule planète, « » pour toutes) est encore lu. Une ligne par couple (population, planètes).
+Réglages enregistrés dans `<data_dir>/populations.json`.
 Le Soldat n'est pas listé : il est produit automatiquement par la Caserne et n'a pas de bouton de recrutement.
 """
 
@@ -19,6 +20,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+
+from .quantities import _clean_planets
 
 FILE_NAME = "populations.json"
 MAX_LINES = 100
@@ -64,6 +67,20 @@ def _is_int(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+def _planets_of(line: dict):
+    """Planètes d'une ligne : `planets` (liste), ou l'ancien `planet` (une planète, « » pour toutes)."""
+    if "planets" in line:
+        return line["planets"]
+    planet = line.get("planet", "")
+    if not isinstance(planet, str) or len(planet) > MAX_PLANET_LENGTH:
+        return None  # refusé par _clean_planets
+    return [planet.strip()] if planet.strip() else []
+
+
+def where(planets: list[str]) -> str:
+    return ", ".join(planets) or "toutes les planètes"
+
+
 def validate(data: dict, known_planets: list[str] | None = None) -> dict:
     """Réglages complets et valides, ou PopulationError avec la liste des problèmes (en français)."""
     errors: list[str] = []
@@ -72,24 +89,21 @@ def validate(data: dict, known_planets: list[str] | None = None) -> dict:
     if not isinstance(raw_queue, list) or len(raw_queue) > MAX_LINES:
         errors.append(f"Liste : {MAX_LINES} lignes au plus.")
         raw_queue = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, tuple[str, ...]]] = set()
     for i, line in enumerate(raw_queue, start=1):
         if not isinstance(line, dict):
             errors.append(f"Ligne {i} : format illisible.")
             continue
-        population, mode, amount, planet = line.get("population"), line.get("mode"), line.get("amount", 0), line.get("planet", "")
+        population, mode, amount = line.get("population"), line.get("mode"), line.get("amount", 0)
         if population not in POPULATION_IDS:
             errors.append(f"Ligne {i} : population inconnue.")
             continue
         if mode not in MODES:
             errors.append(f"Ligne {i} : choisissez « quantité fixe », « maximum » ou « effectif à atteindre ».")
             continue
-        if not isinstance(planet, str) or len(planet) > MAX_PLANET_LENGTH:
-            errors.append(f"Ligne {i} : planète invalide.")
-            continue
-        planet = planet.strip()
-        if planet and known_planets and planet not in known_planets:
-            errors.append(f"Ligne {i} : planète inconnue (lancez d'abord un scan des planètes).")
+        planets, problem = _clean_planets(_planets_of(line), known_planets)
+        if planets is None:
+            errors.append(f"Ligne {i} : {problem}")
             continue
         if mode == "max":
             amount = 0
@@ -100,11 +114,12 @@ def validate(data: dict, known_planets: list[str] | None = None) -> dict:
         if not isinstance(repeat, bool):
             errors.append(f"Ligne {i} : « à chaque passage » ou « une seule fois » attendu.")
             continue
-        if (population, planet) in seen:
-            errors.append(f"Ligne {i} : cette population est déjà dans la liste pour {planet or 'toutes les planètes'}.")
+        key = (population, tuple(sorted(planets)))
+        if key in seen:
+            errors.append(f"Ligne {i} : cette population est déjà dans la liste pour {where(planets)}.")
             continue
-        seen.add((population, planet))
-        queue.append({"population": population, "mode": mode, "amount": amount, "planet": planet, "repeat": repeat and mode != "target"})
+        seen.add(key)
+        queue.append({"population": population, "mode": mode, "amount": amount, "planets": planets, "repeat": repeat and mode != "target"})
     if errors:
         raise PopulationError(errors)
     return {"queue": queue}
@@ -141,7 +156,7 @@ class PopulationSettings:
 
     @staticmethod
     def line_key(line: dict) -> str:
-        return f"{line['population']}|{line['planet']}|{line['mode']}|{line['amount']}"
+        return f"{line['population']}|{','.join(sorted(line['planets']))}|{line['mode']}|{line['amount']}"
 
     def _prune(self, done) -> dict[str, list[str]]:
         """Ne garde que le « fait » des lignes « une seule fois » encore présentes, inchangées."""
@@ -157,7 +172,7 @@ class PopulationSettings:
         gone = [
             ln
             for ln in self._data["queue"]
-            if not ln["repeat"] and all(self.is_done(ln, p) for p in ([ln["planet"]] if ln["planet"] else planets))
+            if not ln["repeat"] and all(self.is_done(ln, p) for p in (ln["planets"] or planets))
         ]
         if gone:
             keys = {self.line_key(ln) for ln in gone}
@@ -197,5 +212,5 @@ def describe(settings: dict) -> str:
         what = MODE_LABELS[line["mode"]].format(n=line["amount"])
         if line["mode"] != "target":
             what += " à chaque passage" if line["repeat"] else " une seule fois"
-        parts.append(f"{labels[line['population']]} : {what} sur {line['planet'] or 'toutes les planètes'}")
+        parts.append(f"{labels[line['population']]} : {what} sur {where(line['planets'])}")
     return f"{len(parts)} ligne(s) : " + " ; ".join(parts)

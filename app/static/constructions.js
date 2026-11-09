@@ -1,11 +1,15 @@
-// Liste d'objectifs de construction : lignes « bâtiment + niveau cible » (l'ordre = la priorité), toutes les planètes ou une seule.
+// Liste d'objectifs de construction : lignes « bâtiment + niveau cible » (l'ordre = la priorité), sur toutes les
+// planètes ou sur les planètes cochées (choix commun : planet-choice.js).
 (() => {
   const { el } = window.ui;
   const $ = (id) => document.getElementById(id);
+  const NO_PLANET = "Cochez au moins une planète, ou choisissez « Toutes les planètes ».";
 
   let buildings = [];
   let planets = [];
-  let state = { scope: "all", planet: "", queue: [] };
+  let state = { planets: [], queue: [] };
+  let planetBox = null; // choix des planètes affiché
+  let shown = null; // planètes qu'il affiche (JSON)
   let saveTimer = null;
   let saving = false; // enregistrement en cours
   let rev = 0; // change à chaque modification locale : une lecture partie avant ne doit pas écraser la liste
@@ -33,13 +37,22 @@
     saveTimer = setTimeout(save, 500);
   }
 
+  /** Choix des planètes : recréé seulement si les réglages enregistrés ont changé ; sinon, juste la liste des planètes. */
   function renderPlanets() {
-    const select = $("cons-planet");
-    if (document.activeElement === select) return;
-    const names = [...new Set([...planets, state.planet].filter(Boolean))];
-    select.replaceChildren(el("option", { value: "", textContent: "— choisir —" }), ...names.map((n) => el("option", { value: n, textContent: n })));
-    select.value = state.planet;
-    select.disabled = state.scope !== "one";
+    const key = JSON.stringify(state.planets);
+    if (planetBox && (key === shown || $("cons-planets").contains(document.activeElement))) {
+      planetBox.setPlanets(planets);
+      return;
+    }
+    planetBox = window.planetChoice({ planets, selected: state.planets, name: "les constructions", onChange: () => {
+      const chosen = planetBox.value();
+      if (chosen === null) { say(NO_PLANET, "error"); return; } // rien coché : les réglages ne changent pas
+      state.planets = chosen;
+      shown = JSON.stringify(chosen);
+      scheduleSave();
+    } });
+    shown = key;
+    $("cons-planets").replaceChildren(planetBox.node);
   }
 
   function renderQueue() {
@@ -82,18 +95,11 @@
   }
 
   function renderAll() {
-    document.querySelectorAll('input[name="cons-scope"]').forEach((r) => { r.checked = r.value === state.scope; });
     renderPlanets();
     renderQueue();
     renderAddOptions();
   }
 
-  document.querySelectorAll('input[name="cons-scope"]').forEach((radio) => radio.addEventListener("change", () => {
-    state.scope = radio.value;
-    renderAll();
-    scheduleSave();
-  }));
-  $("cons-planet").addEventListener("change", () => { state.planet = $("cons-planet").value; scheduleSave(); });
   $("cons-add").addEventListener("click", () => {
     const building = $("cons-add-building").value;
     const level = Number($("cons-add-level").value);

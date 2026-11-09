@@ -23,7 +23,8 @@ def _run(client):
 
 
 def _set(client, queue, scope="all", planet=""):
-    assert client.put("/api/constructions", json={"scope": scope, "planet": planet, "queue": queue}).status_code == 200
+    planets = [planet] if scope == "one" else []
+    assert client.put("/api/constructions", json={"planets": planets, "queue": queue}).status_code == 200
 
 
 def _launched(game):
@@ -164,7 +165,7 @@ def test_manual_control_stops_the_pass_without_any_click(game_client, game):
 def test_a_planet_missing_from_the_game_stops_the_pass_with_a_message(game_client, game):
     _scan(game_client)
     _set(game_client, [CENTRALE], scope="one", planet="8-50-Concorde")
-    _bot(game_client).constructions._data.update({"scope": "one", "planet": "Nulle-Part"})  # contourne la validation : le jeu ne la connaît pas
+    _bot(game_client).constructions._data.update({"planets": ["Nulle-Part"]})  # contourne la validation : le jeu ne la connaît pas
     assert "arrêté" in _run(game_client) and game.actions() == []
 
 

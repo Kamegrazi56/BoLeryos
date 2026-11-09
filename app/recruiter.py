@@ -23,7 +23,7 @@ from . import builder, human
 from .builder import COOLDOWN_EXTRA_SECONDS, COOLDOWN_MARGIN, UNCONFIRMED_LIMIT, ConstructionPass, parse_duration
 from .numbers import norm, parse_amount
 from .planets import GameUiError, Interrupted
-from .populations import POPULATIONS
+from .populations import POPULATIONS, where
 
 TAB_SWITCH_SECONDS = 8.0
 TARGET_ATTRIBUTE = "data-bot-target"
@@ -217,7 +217,7 @@ class PopulationPass(ConstructionPass):
         seen: set[str] = set()
         out = []
         for line in queue:
-            if line["planet"] in ("", planet) and line["population"] not in seen:
+            if (not line["planets"] or planet in line["planets"]) and line["population"] not in seen:
                 seen.add(line["population"])
                 out.append(line)
         return out
@@ -260,7 +260,7 @@ class PopulationPass(ConstructionPass):
         dropped = self.bot.populations.drop_done(planets)
         for line in dropped:  # faites partout : la ligne disparaît de la liste
             what = self._pops[line["population"]].label
-            self.bot.log(f"Population : ligne « {what} » terminée sur {line['planet'] or 'toutes les planètes'}, retirée de la liste.", event=True, kind="launch")
+            self.bot.log(f"Population : ligne « {what} » terminée sur {where(line['planets'])}, retirée de la liste.", event=True, kind="launch")
         if dropped and not self.bot.populations.get()["queue"]:  # plus rien à faire : la fonctionnalité s'arrête d'elle-même
             self.bot.scheduler.update("populations", {"enabled": False})
             self.bot.log("Recrutement de population désactivé : toutes les lignes sont terminées.", event=True, kind="launch")

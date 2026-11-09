@@ -285,12 +285,21 @@ def test_constructions_panel_builds_an_ordered_list_of_targets_for_all_or_one_pl
     page.click("button[aria-label='Monter : Caserne']")
     page.wait_for_function("document.querySelector('#cons-msg').textContent.includes('Enregistré')", timeout=5000)
     assert [line["building"] for line in app.state.bot.constructions.get()["queue"]] == ["caserne", "mine-de-fer"]
-    page.check("input[name=cons-scope][value=one]")
-    page.wait_for_function("document.querySelector('#cons-msg').className.includes('error')", timeout=5000)  # pas de planète choisie
-    page.wait_for_function("document.querySelectorAll('#cons-planet option').length > 1", timeout=10000)
-    page.select_option("#cons-planet", "8-50-Concorde")
+    page.wait_for_function("document.querySelectorAll('#cons-planets .planet-grid input').length === 3", timeout=10000)
+    assert page.is_checked("#cons-planets input[value='all']")
+    page.check("#cons-planets input[value='some']")
+    page.wait_for_function("document.querySelector('#cons-msg').className.includes('error')", timeout=5000)  # pas de planète cochée
+    assert app.state.bot.constructions.get()["planets"] == []  # rien enregistré
+    page.check("#cons-planets input[aria-label^='8-50-Concorde']")
+    page.check("#cons-planets input[aria-label^='6-79-Egide']")
     page.wait_for_function("document.querySelector('#cons-msg').textContent.includes('Enregistré')", timeout=5000)
-    assert app.state.bot.constructions.get()["planet"] == "8-50-Concorde"
+    assert app.state.bot.constructions.get()["planets"] == ["6-79-Egide", "8-50-Concorde"]
+    page.reload()  # réaffiché tel qu'enregistré
+    page.wait_for_function("document.querySelectorAll('#cons-planets .planet-grid input:checked').length === 2", timeout=10000)
+    assert page.is_checked("#cons-planets input[value='some']")
+    page.click("button[aria-label='Tout cocher : les constructions']")
+    page.wait_for_function("document.querySelector('#cons-msg').textContent.includes('Enregistré')", timeout=5000)
+    assert len(app.state.bot.constructions.get()["planets"]) == 3
     page.click("button[aria-label='Supprimer : Caserne']")
     page.wait_for_function("document.querySelectorAll('#cons-queue li[data-building]').length === 1", timeout=5000)
     assert errors == []
@@ -328,24 +337,46 @@ def test_population_panel_sets_mode_quantity_and_planet_for_each_population(ui):
     page.wait_for_function("document.querySelectorAll('#scan-list tr').length === 4", timeout=10000)
     page.goto(page.base + "/reglages#populations")
     page.wait_for_function("document.querySelectorAll('#pop-add-population option').length === 10", timeout=5000)
-    page.wait_for_function("document.querySelectorAll('#pop-add-planet option').length > 1", timeout=10000)
+    page.wait_for_function("document.querySelectorAll('#pop-add-planets .planet-grid input').length === 3", timeout=10000)
+    assert page.is_checked("#pop-add-planets input[value='all']")  # par défaut : toutes les planètes, cases grisées
+    assert page.is_disabled("#pop-add-planets input[aria-label^='6-79-Egide']")
     assert page.locator("#pop-add-population optgroup").evaluate_all("g => g.map(x => x.label)") == ["Assaut", "Logistique", "Administration"]
     page.select_option("#pop-add-population", "pilote")
-    page.select_option("#pop-add-mode", "target:0")
+    assert page.locator("#pop-add-mode option").evaluate_all("o => o.map(x => x.textContent)") == ["Quantité", "MAX", "Effectif à atteindre"]
+    assert page.is_checked("#pop-add-repeat input[value='1']")  # par défaut : à chaque passage
+    page.select_option("#pop-add-mode", "target")
+    # Effectif à atteindre : « À chaque passage » / « Une seule fois » grisés, aucun coché
+    assert page.locator("#pop-add-repeat input").evaluate_all("l => l.map(x => [x.disabled, x.checked])") == [[True, False], [True, False]]
     page.fill("#pop-add-amount", "100")
-    page.select_option("#pop-add-planet", "6-79-Egide")
+    page.check("#pop-add-planets input[value='some']")
+    page.click("#pop-add")  # aucune case cochée : refusé
+    assert "Cochez au moins une planète" in page.text_content("#pop-msg")
+    page.check("#pop-add-planets input[aria-label^='6-79-Egide']")
     page.click("#pop-add")
     page.select_option("#pop-add-population", "mineur")
-    page.select_option("#pop-add-mode", "max:0")  # MAX une seule fois
-    page.select_option("#pop-add-planet", "")  # toutes les planètes
+    page.select_option("#pop-add-mode", "max")
+    assert page.is_enabled("#pop-add-repeat input[value='0']") and page.is_checked("#pop-add-repeat input[value='1']")  # choix retrouvé
+    page.check("#pop-add-repeat input[value='0']")  # MAX une seule fois
+    page.check("#pop-add-planets input[value='all']")  # toutes les planètes
     assert page.locator("#pop-add-amount-label").is_hidden()  # MAX : pas de quantité
     page.click("#pop-add")
     page.wait_for_function("document.querySelector('#pop-msg').textContent.includes('Enregistré')", timeout=5000)
     assert app.state.bot.populations.get()["queue"] == [
-        {"population": "pilote", "mode": "target", "amount": 100, "planet": "6-79-Egide", "repeat": False},
-        {"population": "mineur", "mode": "max", "amount": 0, "planet": "", "repeat": False},
+        {"population": "pilote", "mode": "target", "amount": 100, "planets": ["6-79-Egide"], "repeat": False},
+        {"population": "mineur", "mode": "max", "amount": 0, "planets": [], "repeat": False},
     ]
-    page.select_option("select[aria-label='Mode de Mineur']", "fixed:0")
+    # dans la liste : planètes repliées derrière un résumé ; « Tout cocher » coche les 3 planètes connues
+    assert page.text_content("li[data-population='pilote'] .planet-picker summary") == "6-79-Egide"
+    page.click("li[data-population='mineur'] .planet-picker summary")
+    page.check("input[aria-label='Planètes choisies : Mineur']")
+    page.click("button[aria-label='Tout cocher : Mineur']")
+    page.wait_for_function("document.querySelector('#pop-msg').textContent.includes('Enregistré')", timeout=5000)
+    assert app.state.bot.populations.get()["queue"][1]["planets"] == ["6-79-Egide", "8-50-Concorde", "9-169-Strate"]
+    assert page.text_content("li[data-population='mineur'] .planet-picker summary") == "3 planètes"
+    page.click("li[data-population='mineur'] .planet-picker summary")  # referme le choix
+    assert page.is_disabled("input[aria-label='Une seule fois : Pilote']")  # ligne en effectif à atteindre
+    assert page.is_checked("input[aria-label='Une seule fois : Mineur']")
+    page.select_option("select[aria-label='Mode de Mineur']", "fixed")  # quantité, toujours une seule fois
     page.fill("input[aria-label='Quantité de Mineur']", "25")
     page.click("button[aria-label='Monter : Mineur']")
     page.wait_for_function("document.querySelector('#pop-msg').textContent.includes('Enregistré')", timeout=5000)
@@ -487,18 +518,19 @@ def test_ships_panel_scans_the_models_then_sets_mode_quantity_and_several_planet
     assert "3 modèle(s)" in page.inner_text("#shp-scan-status")
     page.wait_for_function("document.querySelectorAll('#shp-add-item option').length === 3", timeout=10000)
     page.select_option("#shp-add-item", "Anode")
-    page.select_option("#shp-add-mode", "target:0")
+    page.select_option("#shp-add-mode", "target")
+    assert page.is_disabled("#shp-add-repeat input[value='1']") and page.is_disabled("#shp-add-repeat input[value='0']")
     page.fill("#shp-add-amount", "60")
-    page.click("#shp-add-planets summary")
-    page.wait_for_function("document.querySelectorAll('#shp-add-planets input').length === 4", timeout=10000)
-    page.uncheck("#shp-add-planets input[aria-label^='Toutes']")
+    page.wait_for_function("document.querySelectorAll('#shp-add-planets .planet-grid input').length === 3", timeout=10000)
+    page.check("#shp-add-planets input[value='some']")
     page.check("#shp-add-planets input[aria-label^='6-79-Egide']")
     page.check("#shp-add-planets input[aria-label^='9-169-Strate']")
     page.click("#shp-add")
     page.select_option("#shp-add-item", "Plasmatique")
-    page.select_option("#shp-add-mode", "max:0")
-    page.click("#shp-add-planets summary")  # le formulaire garde le dernier choix de planètes : on revient à « toutes »
-    page.check("#shp-add-planets input[aria-label^='Toutes']")
+    page.select_option("#shp-add-mode", "max")
+    page.check("#shp-add-repeat input[value='0']")  # MAX une seule fois
+    assert page.is_checked("#shp-add-planets input[aria-label^='9-169-Strate']")  # le formulaire garde le dernier choix de planètes
+    page.check("#shp-add-planets input[value='all']")  # on revient à « toutes »
     assert page.locator("#shp-add-amount-label").is_hidden()  # MAX : pas de quantité
     page.click("#shp-add")
     page.wait_for_function("document.querySelector('#shp-msg').textContent.includes('Enregistré')", timeout=5000)
@@ -506,11 +538,40 @@ def test_ships_panel_scans_the_models_then_sets_mode_quantity_and_several_planet
         {"item": "Anode", "mode": "target", "amount": 60, "planets": ["6-79-Egide", "9-169-Strate"], "repeat": False},
         {"item": "Plasmatique", "mode": "max", "amount": 0, "planets": [], "repeat": False},
     ]
-    page.select_option("select[aria-label='Mode de Plasmatique']", "fixed:1")
+    page.select_option("select[aria-label='Mode de Plasmatique']", "fixed")
+    page.check("input[aria-label='À chaque passage : Plasmatique']")
     page.fill("input[aria-label='Quantité de Plasmatique']", "3")
     page.click("button[aria-label='Monter : Plasmatique']")
     page.wait_for_function("document.querySelector('#shp-msg').textContent.includes('Enregistré')", timeout=5000)
     assert [(ln["item"], ln["mode"], ln["amount"], ln["repeat"]) for ln in app.state.bot.ships.get()["queue"]] == [("Plasmatique", "fixed", 3, True), ("Anode", "target", 60, False)]
+    assert errors == []
+
+
+def test_planet_choice_sorts_naturally_on_two_rows_and_checks_all(ui):
+    page, errors, _ = ui
+    page.goto(page.base + "/reglages#populations")
+    page.wait_for_function("typeof window.planetChoice === 'function'")
+    result = page.evaluate("""() => {
+        const names = ['10-84-Silence', '2-69-Mnesis', 'Aurore-Bis', '1-146-Elyria', '12-13-Zenith'];
+        const choice = window.planetChoice({ planets: names, selected: ['2-69-Mnesis'], name: 'essai' });
+        document.body.append(choice.node);
+        const grid = choice.node.querySelector('.planet-grid');
+        const order = [...grid.querySelectorAll('label')].map((l) => l.textContent.trim());
+        const before = choice.value();
+        choice.node.querySelector("button[aria-label='Tout cocher : essai']").click();
+        const all = choice.value();
+        choice.node.querySelector("button[aria-label='Tout décocher : essai']").click();
+        const none = choice.value();
+        choice.node.querySelector("input[value='all']").click();
+        const disabled = [...grid.querySelectorAll('input')].every((b) => b.disabled);
+        return { order, cols: grid.style.getPropertyValue('--cols'), before, all, none, everything: choice.value(), disabled };
+    }""")
+    assert result["order"] == ["1-146-Elyria", "2-69-Mnesis", "10-84-Silence", "12-13-Zenith", "Aurore-Bis"]  # 1, 2, 10, 12, puis les noms
+    assert result["cols"] == "3"  # 5 planètes sur 2 lignes : 3 + 2
+    assert result["before"] == ["2-69-Mnesis"]
+    assert result["all"] == result["order"]  # « Tout cocher » : la liste explicite des planètes connues
+    assert result["none"] is None  # « Planètes choisies » sans case cochée : refusé par la page
+    assert result["everything"] == [] and result["disabled"]  # « Toutes les planètes » : cases grisées
     assert errors == []
 
 
