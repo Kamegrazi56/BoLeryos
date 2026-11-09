@@ -67,6 +67,23 @@ def test_the_game_message_confirms_a_hack_shown_late(game_client, game):
     assert _bot(game_client).hacker._unconfirmed == 0
 
 
+def test_an_unconfirmed_hack_is_checked_again_two_minutes_later_and_explained(game_client, game, monkeypatch):
+    # Vrai jeu (08/11 18:04) : clic fait, rien n'est parti, cause inconnue → revérifier vite et dire ce que montrait l'écran.
+    import time
+
+    from app import hacker
+
+    monkeypatch.setattr(hacker, "HACK_CONFIRM_SECONDS", 0.6)
+    _scan(game_client)
+    _set(game_client)
+    game.set_hack(no_effect=True)
+    assert _run(game_client) == "lancement non confirmé"
+    due = _bot(game_client).hacker.next_due()
+    assert due is not None and 100 <= due - time.time() <= 120
+    logs = [e["msg"] for e in game_client.get("/api/status?limit=50").json()["logs"]]
+    assert any("écran : cible « M69 " in line and "Naël disponible" in line and "dans 2 min" in line for line in logs), logs
+
+
 def test_nothing_is_launched_while_nael_is_busy(game_client, game):
     _scan(game_client)
     _set(game_client)

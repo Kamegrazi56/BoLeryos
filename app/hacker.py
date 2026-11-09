@@ -50,6 +50,26 @@ MESSAGES_JS = """() => [...document.querySelectorAll('body *')]
   .filter((e) => !e.children.length && e.getClientRects().length && /^Impossible/i.test((e.textContent || '').trim()))
   .map((e) => e.textContent.replace(/\\s+/g, ' ').trim())"""
 
+RECHECK_SECONDS = 2 * 60  # lancement non confirmé : on revérifie vite au lieu d'attendre la vérification de secours (30 min)
+
+# Diagnostic d'un lancement non confirmé : ce que montre l'écran juste après le clic (champ Cible, bouton, messages).
+SCREEN_JS = """() => {
+  const text = (el) => (el.textContent || '').replace(/\\s+/g, ' ').trim();
+  const visible = (el) => el.getClientRects().length > 0;
+  let target = null;
+  for (const label of document.querySelectorAll('main *')) {
+    if (label.children.length || text(label) !== 'Cible' || !visible(label)) continue;
+    let box = label;
+    while (box && !box.querySelector('input[type=text], input:not([type])')) box = box.parentElement;
+    const input = box && [...box.querySelectorAll('input[type=text], input:not([type])')].find(visible);
+    if (input) { target = input.value; break; }
+  }
+  const button = [...document.querySelectorAll('button')].find((b) => visible(b) && /^Lancer le piratage/i.test(text(b)));
+  const notes = [...document.querySelectorAll('[role=status], [role=alert], [data-sonner-toast], .toast, [class*=toast]')]
+    .filter(visible).map(text).filter(Boolean).slice(-3);
+  return { target, button: button ? (button.disabled ? 'grisé' : 'actif') : 'absent', notes };
+}"""
+
 
 def nearest_errants(objects: list, planet_address: str | None, bounds, limit: int = TARGETS_KEPT) -> list[dict]:
     """Planètes d'Errants (`PVE_PLANET`) de la fenêtre détaillée, de la plus proche à la plus lointaine."""
@@ -81,6 +101,7 @@ class HackingPass(ExplorationPass):
     """Piratage en boucle de l'Errant le plus proche par Naël Soryn."""
 
     feature_id = "hackings"
+    _recheck_at: float | None = None  # après un lancement non confirmé : revérification rapide (epoch)
 
     # ------------------------------------------------------------------ relevé du jour
     async def _daily_scan(self, settings: dict, source: str) -> None:
@@ -124,6 +145,7 @@ class HackingPass(ExplorationPass):
         s = self.store.get()
         if not s["planet"]:
             return "aucune planète de départ réglée (onglet Piratage), rien à lancer"
+        self._recheck_at = None  # la revérification rapide, si elle était prévue, a lieu maintenant
         try:
             if self.store.daily_due():
                 await self._daily_scan(s, "quotidien")
@@ -147,8 +169,10 @@ class HackingPass(ExplorationPass):
 
     def next_due(self) -> float | None:
         """Heure (epoch) où le prochain piratage peut partir : fin du dernier + délai. None : inconnue."""
+        now = time.time()
         ready = self.store.state()["ready"]
-        return ready if ready is not None and ready > time.time() else None  # déjà passée : vérification de secours
+        upcoming = [t for t in (ready, self._recheck_at) if t is not None and t > now]
+        return min(upcoming) if upcoming else None  # déjà passée : vérification de secours
 
     async def _nael_available(self) -> bool:
         """Vu sur le vrai jeu : l'état de Naël peut s'afficher un instant après le reste de la page."""
@@ -216,6 +240,16 @@ class HackingPass(ExplorationPass):
         await human.click(page, go.first, self.settings)
         return await self._confirm_hack(label, before)
 
+    async def _screen_report(self) -> str:
+        """Ce que montrait l'écran juste après un clic non confirmé (pour comprendre la cause au prochain échec)."""
+        try:
+            seen = await self.page.evaluate(SCREEN_JS)
+            nael = {"available": "disponible", "busy": "indisponible"}.get(await self.page.evaluate(NAEL_JS), "introuvable")
+        except Exception:  # noqa: BLE001 - diagnostic seulement : ne doit jamais faire échouer le passage
+            return "écran illisible"
+        notes = " | ".join(seen["notes"]) or "aucun"
+        return f"écran : cible « {seen['target'] or ''} », bouton {seen['button']}, Naël {nael}, messages : {notes}"
+
     async def _confirm_hack(self, label: str, before: int) -> str:
         """Naël « Indisponible » ou une carte Piratage = lancé ; un message « Impossible … » = cible refusée."""
         end = time.monotonic() + HACK_CONFIRM_SECONDS
@@ -231,7 +265,10 @@ class HackingPass(ExplorationPass):
                 return "refused"
             await asyncio.sleep(0.3)
         self._unconfirmed += 1
-        self.bot.log(f"Clic sur « Lancer le piratage » fait ({label}) mais Naël est toujours disponible.", "warn", event=True, kind="attention")
+        self._recheck_at = time.time() + RECHECK_SECONDS
+        self.bot.log(f"Clic sur « Lancer le piratage » fait ({label}) mais Naël est toujours disponible "
+                     f"({await self._screen_report()}) ; nouvelle vérification dans {RECHECK_SECONDS // 60} min.",
+                     "warn", event=True, kind="attention")
         if self._unconfirmed >= UNCONFIRMED_LIMIT:
             self.bot.scheduler.update(self.feature_id, {"enabled": False})
             self.bot.log("Piratage désactivé : deux lancements de suite non confirmés. Vérifiez à l'écran avant de le réactiver.", "error", event=True, kind="attention")
