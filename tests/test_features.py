@@ -154,6 +154,64 @@ def test_order_must_list_every_feature_once():
 
 
 # ------------------------------------------------------------------------ ordonnanceur
+class RecoveringBot(FakeBot):
+    """Le jeu affiche « Récupération interrompue » après les `blocked` premiers passages."""
+
+    def __init__(self, blocked):
+        super().__init__()
+        self.blocked = blocked
+        self.retries = 0
+
+    async def recovery_screen(self):
+        return self.blocked > 0
+
+    async def retry_recovery(self):
+        self.retries += 1
+        self.blocked -= 1
+        return True
+
+
+def _recovering(blocked):
+    sched, _bot, clock, runs = make(ids=("a", "b"))
+    bot = RecoveringBot(blocked)
+    sched.bot = bot
+    sched._recovery_wait = 0.01  # 2 min sur le vrai bot
+    enable(sched, "a")
+    enable(sched, "b")
+    return sched, bot, runs
+
+
+def test_the_recovery_screen_makes_the_pass_wait_and_try_again():
+    sched, bot, runs = _recovering(blocked=2)
+
+    async def scenario():
+        manual(sched)
+        assert await sched.step() is True
+
+    asyncio.run(scenario())
+    assert runs == ["a", "a", "a"] and bot.retries == 2  # 2 écrans, puis le 3e essai passe
+    item = next(f for f in sched.summary()["features"] if f["id"] == "a")
+    assert item["last_ok"] is True and item["last_result"] == "a fait"
+    assert sum("Récupération interrompue" in m for _, m in bot.messages) == 2
+
+
+def test_after_three_recovery_screens_the_bot_moves_on_to_the_next_feature():
+    sched, bot, runs = _recovering(blocked=10)
+
+    async def scenario():
+        manual(sched)
+        assert await sched.step() is True
+        bot.blocked = 0  # l'écran a disparu : la fonctionnalité suivante passe normalement
+        assert await sched.step() is True
+
+    asyncio.run(scenario())
+    assert runs == ["a", "a", "a", "b"] and bot.retries == 2
+    item = next(f for f in sched.summary()["features"] if f["id"] == "a")
+    assert item["last_ok"] is False and "Récupération interrompue" in item["last_result"]
+    assert sched._runtime["a"].next_at is not None  # elle repassera à son minuteur habituel
+    assert any(level == "error" and "fonctionnalité suivante" in m for level, m in bot.messages)
+
+
 def test_nothing_runs_while_the_bot_is_off():
     async def scenario():
         sched, _, _, runs = make()

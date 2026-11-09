@@ -43,7 +43,7 @@ from .shipyard import ComponentPass, ShipPass
 from .explorations import ExplorationStore
 from .explorer import ExplorationPass
 from .features import FEATURES, FeatureStore
-from . import bonus, planning
+from . import bonus, planning, recovery
 from .alliance import AllianceSettings, TokenPass
 from .miner import MiningPass
 from .minings import MiningStore
@@ -267,6 +267,14 @@ class BotSession:
     async def claim_bonus(self) -> str | None:
         """Récupère le bonus d'activité s'il est disponible (appelé au début de chaque action du bot)."""
         return await bonus.claim(self._page, self._settings, self.log)
+
+    async def recovery_screen(self) -> bool:
+        """Vrai si le jeu affiche l'écran « Récupération interrompue » (vérifié par l'ordonnanceur après chaque passage)."""
+        return await recovery.screen_shown(self._page)
+
+    async def retry_recovery(self) -> bool:
+        """Clique sur « Réessayer » de l'écran « Récupération interrompue », s'il est affiché."""
+        return await recovery.press_retry(self._page)
 
     def log(self, message: str, level: str = "info", event: bool = False, kind: str = "info") -> None:
         """`event` : fait marquant, affiché dans « Derniers événements » et le journal lisible.

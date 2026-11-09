@@ -22,6 +22,8 @@ from .features import Feature, FeatureStore
 TICK_SECONDS = 1.0  # fréquence à laquelle l'ordonnanceur regarde si une fonctionnalité est due
 SELF_TIMED_MIN_SECONDS = 60.0  # relance automatique : jamais deux passages à moins d'une minute
 SELF_TIMED_FALLBACK_SECONDS = 30 * 60.0  # relance automatique : vérification de secours (Fouille lancée à la main…)
+RECOVERY_WAIT_SECONDS = 2 * 60.0  # écran « Récupération interrompue » : attente avant de retenter le passage
+RECOVERY_ATTEMPTS = 3  # au bout de 3 passages tombés sur cet écran, on passe à la fonctionnalité suivante
 
 
 @dataclass
@@ -45,7 +47,9 @@ class Scheduler:
         tick: float = TICK_SECONDS,
         clock: Callable[[], float] = time.monotonic,
         rng: random.Random | None = None,
+        recovery_wait: float = RECOVERY_WAIT_SECONDS,
     ) -> None:
+        self._recovery_wait = recovery_wait
         self.bot = bot
         self.store = store
         self._features = {f.id: f for f in features}
@@ -140,18 +144,46 @@ class Scheduler:
             await self._run(feature)
         return True
 
-    async def _run(self, feature: Feature) -> None:
-        rt = self._runtime[feature.id]
-        rt.running = True
+    async def _attempt(self, feature: Feature) -> tuple[str, bool]:
+        """Un essai du passage : bonus d'activité au début, puis la fonctionnalité."""
         try:
             claim = getattr(self.bot, "claim_bonus", None)
             if claim is not None:  # bonus d'activité récupéré au début de chaque action, quelle que soit la planète
                 await claim()
-            result, ok = await feature.run(self.bot), True
+            return await feature.run(self.bot), True
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - une fonctionnalité en échec ne doit pas arrêter les autres
-            result, ok = f"erreur technique ({type(exc).__name__})", False
+            return f"erreur technique ({type(exc).__name__})", False
+
+    async def _recovery_screen(self) -> bool:
+        check = getattr(self.bot, "recovery_screen", None)
+        return bool(check is not None and await check())
+
+    async def _run(self, feature: Feature) -> None:
+        """Passage d'une fonctionnalité. Si le jeu affiche « Récupération interrompue » à la fin, le bot attend 2 min,
+        clique sur « Réessayer » et retente ; au bout de 3 essais tombés sur cet écran, il passe à la suite."""
+        rt = self._runtime[feature.id]
+        rt.running = True
+        try:
+            for attempt in range(1, RECOVERY_ATTEMPTS + 1):
+                result, ok = await self._attempt(feature)
+                if not await self._recovery_screen():
+                    break
+                if attempt == RECOVERY_ATTEMPTS:
+                    result, ok = f"abandonné : écran « Récupération interrompue » {RECOVERY_ATTEMPTS} fois de suite", False
+                    self.bot.log(f"« {feature.label} » : écran « Récupération interrompue » au {attempt}e essai ; "
+                                 "passage à la fonctionnalité suivante.", "error", event=True, kind="attention")
+                    break
+                self.bot.log(f"« {feature.label} » : écran « Récupération interrompue » du jeu (essai {attempt}/{RECOVERY_ATTEMPTS}) ; "
+                             f"nouvel essai dans {int(self._recovery_wait // 60)} min.", "warn", event=True)
+                await asyncio.sleep(self._recovery_wait)
+                if not self._on:  # bot passé sur OFF pendant l'attente : on s'arrête là
+                    result, ok = "arrêté : écran « Récupération interrompue », bot passé sur OFF", False
+                    break
+                retry = getattr(self.bot, "retry_recovery", None)
+                if retry is not None:
+                    await retry()
         finally:
             rt.running = False
         rt.last_at, rt.last_result, rt.last_ok = time.time(), result, ok
