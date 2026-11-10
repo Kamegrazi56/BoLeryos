@@ -151,6 +151,9 @@ def initial_state():
                                {"name": "Veines Profondes", "progress": 0, "need": 0}]},
         # Fouilles : plafond personnel, Fouilles en cours (origine, site, durée, fin), Mira Venn, autres missions actives
         "exc": {"max": 6, "active": [], "mira_busy": False, "other_missions": 0, "no_effect": False},
+        # Piliers (fenêtre « Gérer les Piliers », vrai jeu 10/11) : planète → {"closed", "pending": {"to", "end"} | None} ;
+        # absente = Piliers actifs. no_effect : le clic de confirmation ne fait rien.
+        "pillars": {}, "pillar_no_effect": False,
         # Capteurs interstellaires : un déploiement du joueur, comme dans l'export (aucune attaque au départ)
         "movements": [_movement("Déploiement", ("6-79-Egide", "M69 38 06", "KameGrazi"), ("8-50-Concorde", "Z25 95 16", "KameGrazi"))],
         # Liste de la Galaxie autour de la planète active (structure de l'export du 2026-11-03)
@@ -442,6 +445,28 @@ function missionsMain() {
   return '<h2>Missions</h2><div role="tablist">' + tabs + '<button type="button">Actualiser</button></div>'
     + `<section><h3>Quotidiennes</h3>${rows}</section>` + (ui.missionMsg ? `<div role="status">${ui.missionMsg}</div>` : '');
 }
+// Opérations › « Gérer les Piliers » : une ligne par planète, colonne Piliers (bouton ou compte à rebours) et Champ de force.
+function pillarsDialog() {
+  if (!ui.pillarsOpen) return '';
+  const now = Date.now() / 1000;
+  const rows = state.planets.map((pl) => {
+    const st = state.pillars[pl.name] || {closed: false, pending: null};
+    const left = st.pending ? Math.max(0, Math.round(st.pending.end - now)) : 0;
+    const pil = st.pending ? `<div title="Changement de statut en cours..."><span>${Math.floor(left / 60)} min ${left % 60} s</span></div>`
+      : st.closed ? `<button type="button" class="pil" data-p="${pl.name}" data-to="open" title="Réactiver les Piliers (permet les missions terrestres)">ACTIVER</button>`
+      : `<button type="button" class="pil" data-p="${pl.name}" data-to="close" title="Désactiver les Piliers (protège contre les attaques terrestres)">DÉSACTIVER</button>`;
+    const ff = st.closed ? '<button type="button" class="ff" disabled title="Les Piliers doivent être actifs pour activer le champ de force.">ACTIVER</button>'
+      : '<button type="button" class="ff" title="Champ de force des Piliers">ACTIVER</button>';
+    return `<li aria-label="${pl.name}"><h3><button type="button" aria-label="${pl.name}"><span>${pl.name}</span><span>${pl.coords}</span></button></h3>`
+      + `<div role="group" aria-label="Piliers"><span>Piliers</span>${pil}</div><div role="group" aria-label="Champ de force"><span>Champ de force</span>${ff}</div></li>`;
+  }).join('');
+  const c = ui.pillarConfirm;
+  const confirm = c ? `<div role="dialog" aria-label="${c.verb} les Piliers — ${c.planet}"><p>Êtes-vous sûr de vouloir ${c.verb} les Piliers sur cette colonie ? Cette action prendra 1 heure.</p>`
+    + `<button type="button" id="pcancel">Annuler</button><button type="button" id="pok">${c.verb}</button></div>` : '';
+  return `<div role="dialog" aria-modal="true" aria-label="Gérer les Piliers"><button type="button" class="pclose" aria-label="Fermer">x</button>`
+    + `<h2>Gérer les Piliers</h2><ul>${rows}</ul><button type="button" class="pclose">Fermer</button></div>` + confirm
+    + (ui.toasts.length ? `<div role="alert" class="pillar-toasts">${ui.toasts.map((t) => `<div>${t.text}</div>`).join('')}</div>` : '');
+}
 function opsMain() {
   const ex = state.exp;
   const ways = ['Piliers', 'Flotte'].map((w) => `<button type="button" class="way" data-way="${w}">${w.toUpperCase()}</button>`).join('');
@@ -453,7 +478,7 @@ function opsMain() {
   if (ui.mission === 'EXCAVATION') body = excForm(state.planets[state.active]);
   if (ui.mission === 'HACKING') body = hackForm();
   if (ui.mission === 'MINING') body = mineForm(state.planets[state.active]);
-  return '<h2>Opérations</h2><div><span>Moyen de lancement</span>' + ways + '</div><div><span>Mission</span>' + missions + '</div>' + body;
+  return '<h2>Opérations</h2><button type="button" id="gpil">Gérer les Piliers</button><div><span>Moyen de lancement</span>' + ways + '</div><div><span>Mission</span>' + missions + '</div>' + body + pillarsDialog();
 }
 function sensors() {
   const side = (s) => `<div><span>${s.planet}</span><button type="button">${s.coords}</button><span>${s.player}</span></div>`;
@@ -624,6 +649,21 @@ function render() {
     if (r.ok) ui.form = {target: '', units: {}, copies: '1', duration: '1'};
     await load();
   };
+  const gp = document.getElementById('gpil'); if (gp) gp.onclick = () => { ui.pillarsOpen = true; render(); };
+  document.querySelectorAll('.pclose').forEach((b) => b.onclick = () => { ui.pillarsOpen = false; ui.pillarConfirm = null; render(); });
+  document.querySelectorAll('.pil').forEach((b) => b.onclick = () => {
+    ui.pillarConfirm = {planet: b.dataset.p, to: b.dataset.to, verb: b.dataset.to === 'open' ? 'ACTIVER' : 'DÉSACTIVER'}; render();
+  });
+  document.querySelectorAll('.ff').forEach((b) => b.onclick = () => post('/api/_forbidden', {what: 'Champ de force des Piliers'}));
+  const pc = document.getElementById('pcancel'); if (pc) pc.onclick = () => { ui.pillarConfirm = null; render(); };
+  const pk = document.getElementById('pok');
+  if (pk) pk.onclick = async () => {
+    const c = ui.pillarConfirm;
+    const r = await (await post('/api/pillar', {planet: c.planet, to: c.to})).json();
+    ui.pillarConfirm = null;
+    if (r.refused) { const t = {text: r.refused}; ui.toasts.push(t); setTimeout(() => { ui.toasts = ui.toasts.filter((x) => x !== t); render(); }, 3000); }
+    await load();
+  };
   document.querySelectorAll('.way').forEach((b) => b.onclick = () => { ui.way = b.dataset.way; render(); });
   document.querySelectorAll('.mission').forEach((b) => b.onclick = () => { ui.mission = b.dataset.m; render(); });
   document.querySelectorAll('.tab').forEach((b) => b.onclick = () => { ui.tab = b.dataset.tab; render(); });
@@ -686,10 +726,49 @@ def create_mock_game() -> FastAPI:
     async def page(section: str):
         return RedirectResponse("/") if _denied() else PAGE
 
+    def _settle_pillars(g: dict) -> None:
+        """Un changement de Piliers arrivé à son heure devient effectif."""
+        for st in g["pillars"].values():
+            if st.get("pending") and st["pending"]["end"] <= time.time():
+                st["closed"], st["pending"] = st["pending"]["to"] == "close", None
+
     @app.get("/api/state")
     async def get_state():
         g = app.state.game
+        _settle_pillars(g)
         return {**g, "planets": [{k: v for k, v in p.items()} for p in g["planets"]]}
+
+    @app.post("/api/pillar")
+    async def pillar(request: Request):
+        """Confirmation dans « Gérer les Piliers » : changement effectif dans 1 h ; refusé au-delà de 2 planètes fermées
+        (le jeu compte au clic : une réouverture en cours libère la place)."""
+        g, body = app.state.game, await request.json()
+        _settle_pillars(g)
+        pl = g["pillars"]
+        st = pl.setdefault(body["planet"], {"closed": False, "pending": None})
+        g["actions"].append({"kind": "pillar", "planet": body["planet"], "to": body["to"]})
+        if g["pillar_no_effect"]:
+            return {"ok": True}
+        if st["pending"]:
+            return {"refused": "Un changement de statut est déjà en cours."}
+        if body["to"] == "close":
+            def counted(s: dict) -> bool:
+                return (s["closed"] and not (s["pending"] and s["pending"]["to"] == "open")) or bool(s["pending"] and s["pending"]["to"] == "close")
+            if sum(1 for name, s in pl.items() if name != body["planet"] and counted(s)) >= 2:
+                return {"refused": "Vous ne pouvez pas désactiver les Piliers de plus de 2 planètes en même temps."}
+        st["pending"] = {"to": body["to"], "end": time.time() + 3600}
+        return {"ok": True}
+
+    @app.post("/api/_pillars")
+    async def set_pillars(request: Request):
+        """Crochet de test : état des Piliers ({planète: {"closed", "pending_to", "end_in"}}) et clic sans effet."""
+        body, g = await request.json(), app.state.game
+        if "no_effect" in body:
+            g["pillar_no_effect"] = body["no_effect"]
+        for name, p in (body.get("planets") or {}).items():
+            pending = {"to": p["pending_to"], "end": time.time() + p.get("end_in", 3600)} if p.get("pending_to") else None
+            g["pillars"][name] = {"closed": bool(p.get("closed")), "pending": pending}
+        return {"ok": True}
 
     @app.post("/api/select")
     async def select(request: Request):

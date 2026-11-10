@@ -6,6 +6,15 @@ Relevé sur le vrai jeu (2026-11-07) :
   - copies 1 à 10 (le jeu ne propose que les places actives libres), durée nominale 1 à 6 h ;
   - les compteurs « Explorations quotidiennes » et « Explorations actives » sont communs à tout le compte.
 
+Réglages (une seule configuration) :
+  - l'envoi commun : moyen, composition (modèle ou quantités), durée ;
+  - « toutes les planètes » (`planets` vide) avec `copies` expéditions simultanées chacune, ou les planètes choisies, chacune
+    avec son nombre d'expéditions simultanées (`copies`, le champ « Copies » du jeu) ;
+  - `per_planet` : chaque planète choisie a son propre envoi (`send`). Décoché, l'envoi commun vaut pour toutes, mais les
+    envois par planète restent en mémoire.
+À chaque passage, le bot fait UN lancement par planète. L'ancien format (`planets` en liste de noms, `rhythm`, `per_pass`) est
+encore lu.
+
 Fichier `<data_dir>/explorations.json` : {"settings": {...}, "daily": {...}}. Le relevé du jour (brèches + modèles) est refait
 une fois par jour par le bot, ou à la demande.
 """
@@ -26,19 +35,21 @@ PILLAR_UNITS = ("Soldat", "Rempart de Fer", "Spectre du Rift", "Surchargeur Plas
 MAX_COPIES = 10
 MAX_DURATION_HOURS = 6
 MAX_UNITS = 10_000_000_000
-MAX_PER_PASS = 50
+MAX_PLANETS = 200
+SEND_KEYS = ("method", "composition", "model", "units", "duration")  # l'envoi : commun, ou propre à une planète
 DEFAULT_SETTINGS: dict = {
     "method": "PILLARS",  # PILLARS (Piliers) ou FLEET (Flotte)
     "composition": "model",  # model : un modèle du jeu ; manual : une quantité par unité
     "model": "",
     "units": {},
-    "copies": 1,
     "duration": 1,  # heures
-    "planets": [],  # [] = toutes les planètes
-    "rhythm": "fixed",  # fixed : `per_pass` lancements par planète et par passage ; max : autant que possible
-    "per_pass": 1,
+    "copies": 1,  # expéditions simultanées par planète avec « toutes les planètes »
+    "planets": [],  # [] = toutes les planètes ; sinon [{"name", "copies", "send": {SEND_KEYS…} | None}]
+    "per_planet": False,  # vrai : chaque planète choisie utilise son propre envoi
 }
-EMPTY_DAILY: dict = {"day": "", "scanned_at": None, "source": "", "error": "", "breaches": {}, "models": {"PILLARS": [], "FLEET": []}}
+# `tried` : planètes dont la brèche a été cherchée ce jour-là (trouvée ou non) ; une planète choisie après le relevé est
+# cherchée au passage suivant, une seule fois par jour.
+EMPTY_DAILY: dict = {"day": "", "scanned_at": None, "source": "", "error": "", "breaches": {}, "models": {"PILLARS": [], "FLEET": []}, "tried": []}
 
 
 class ExplorationError(Exception):
@@ -55,76 +66,133 @@ def _int_in(value, low: int, high: int) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and low <= value <= high
 
 
+def _clean_send(raw, prefix: str, errors: list[str], known_models: dict | None, complete: bool) -> dict:
+    """Envoi (moyen, composition, modèle, unités, durée) nettoyé ; les problèmes vont dans `errors`, précédés de `prefix`.
+    `complete` : vérifie aussi qu'il est utilisable (modèle choisi et connu, au moins une unité autorisée)."""
+    if not isinstance(raw, dict):
+        errors.append(f"{prefix}envoi illisible.")
+        return {k: copy.deepcopy(DEFAULT_SETTINGS[k]) for k in SEND_KEYS}
+    out = {k: copy.deepcopy(raw.get(k, DEFAULT_SETTINGS[k])) for k in SEND_KEYS}
+    before = len(errors)
+    if out["method"] not in METHODS:
+        errors.append(f"{prefix}moyen : Piliers ou Flotte.")
+    if out["composition"] not in ("model", "manual"):
+        errors.append(f"{prefix}composition : un modèle du jeu ou une quantité par unité.")
+    if not isinstance(out["model"], str):
+        errors.append(f"{prefix}modèle : un nom.")
+        out["model"] = ""
+    out["model"] = out["model"].strip()
+    if not isinstance(out["units"], dict):
+        errors.append(f"{prefix}unités : une quantité par unité.")
+        out["units"] = {}
+    cleaned = {}
+    for name, qty in out["units"].items():
+        if not isinstance(name, str) or not name.strip():
+            errors.append(f"{prefix}unités : nom manquant.")
+        elif not _int_in(qty, 0, MAX_UNITS):
+            errors.append(f"{prefix}la quantité de « {name.strip()} » doit être un nombre entier positif.")
+        elif qty > 0:
+            cleaned[name.strip()] = qty
+    out["units"] = cleaned
+    if not _int_in(out["duration"], 1, MAX_DURATION_HOURS):
+        errors.append(f"{prefix}durée de 1 à {MAX_DURATION_HOURS} heures.")
+    if not complete or len(errors) > before:
+        return out
+    if out["composition"] == "model":
+        if not out["model"]:
+            errors.append(f"{prefix}choisissez un modèle du jeu (ou passez en quantité par unité).")
+        elif known_models and known_models.get(out["method"]) and out["model"] not in known_models[out["method"]]:
+            errors.append(f"{prefix}modèle inconnu pour {METHODS[out['method']]} : {out['model']} (relancez le relevé du jour).")
+    elif not out["units"]:
+        errors.append(f"{prefix}indiquez au moins une unité avec une quantité.")
+    elif out["method"] == "PILLARS":
+        wrong = [n for n in out["units"] if n not in PILLAR_UNITS]
+        if wrong:
+            errors.append(f"{prefix}unité non autorisée en exploration par les Piliers : {wrong[0]}.")
+    return out
+
+
+def _clean_planets(raw, default_copies, per_planet: bool, errors: list[str], known_planets, known_models) -> list[dict]:
+    """Planètes choisies : [{"name", "copies", "send"}]. Une liste de noms (ancien format) prend `default_copies`."""
+    if not isinstance(raw, list) or len(raw) > MAX_PLANETS:
+        errors.append("Planètes : toutes, ou une liste de planètes.")
+        return []
+    out: list[dict] = []
+    for entry in raw:
+        if isinstance(entry, str):
+            entry = {"name": entry, "copies": default_copies}
+        name = entry.get("name") if isinstance(entry, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            errors.append("Planètes : nom de planète manquant.")
+            continue
+        name = name.strip()
+        if any(p["name"] == name for p in out):
+            continue  # doublon
+        if known_planets and name not in known_planets:
+            errors.append(f"Planète inconnue : {name} (relancez le scan des planètes).")
+            continue
+        copies = entry.get("copies", 1)
+        if not _int_in(copies, 1, MAX_COPIES):
+            errors.append(f"{name} : expéditions simultanées de 1 à {MAX_COPIES}.")
+            continue
+        send = entry.get("send")
+        if send is not None:
+            send = _clean_send(send, f"{name} : ", errors, known_models, complete=per_planet)
+        out.append({"name": name, "copies": copies, "send": send})
+    return out
+
+
 def validate(data, known_planets: list[str] | None = None, known_models: dict | None = None) -> dict:
     """Réglages complets et valides, ou ExplorationError (messages en français)."""
     if not isinstance(data, dict):
         raise ExplorationError(["Réglages d'exploration illisibles."])
-    out = {**copy.deepcopy(DEFAULT_SETTINGS), **{k: data[k] for k in DEFAULT_SETTINGS if k in data}}
     errors: list[str] = []
-    if out["method"] not in METHODS:
-        errors.append("Moyen : Piliers ou Flotte.")
-    if out["composition"] not in ("model", "manual"):
-        errors.append("Composition : un modèle du jeu ou une quantité par unité.")
-    if not isinstance(out["model"], str):
-        errors.append("Modèle : un nom.")
-    else:
-        out["model"] = out["model"].strip()
-    units = out["units"] if isinstance(out["units"], dict) else None
-    if units is None:
-        errors.append("Unités : une quantité par unité.")
-    else:
-        cleaned = {}
-        for name, qty in units.items():
-            if not isinstance(name, str) or not name.strip():
-                errors.append("Unités : nom manquant.")
-            elif not _int_in(qty, 0, MAX_UNITS):
-                errors.append(f"Unités : la quantité de « {name.strip()} » doit être un nombre entier positif.")
-            elif qty > 0:
-                cleaned[name.strip()] = qty
-        out["units"] = cleaned
-    if not _int_in(out["copies"], 1, MAX_COPIES):
-        errors.append(f"Copies : de 1 à {MAX_COPIES}.")
-    if not _int_in(out["duration"], 1, MAX_DURATION_HOURS):
-        errors.append(f"Durée : de 1 à {MAX_DURATION_HOURS} heures.")
-    if out["rhythm"] not in ("fixed", "max"):
-        errors.append("Rythme : un nombre fixe par passage ou autant que possible.")
-    if not _int_in(out["per_pass"], 1, MAX_PER_PASS):
-        errors.append(f"Lancements par planète et par passage : de 1 à {MAX_PER_PASS}.")
-    planets = out["planets"]
-    if not isinstance(planets, list) or any(not isinstance(p, str) or not p.strip() for p in planets):
-        errors.append("Planètes : toutes, ou une liste de noms.")
-    else:
-        names: list[str] = []
-        for p in planets:
-            if p.strip() not in names:
-                names.append(p.strip())
-        out["planets"] = names
-        unknown = [p for p in names if known_planets and p not in known_planets]
-        if unknown:
-            errors.append(f"Planète inconnue : {unknown[0]} (relancez le scan des planètes).")
-    if not errors and out["composition"] == "model":
-        if not out["model"]:
-            errors.append("Choisissez un modèle du jeu (ou passez en quantité par unité).")
-        elif known_models and known_models.get(out["method"]) and out["model"] not in known_models[out["method"]]:
-            errors.append(f"Modèle inconnu pour {METHODS[out['method']]} : {out['model']} (relancez le relevé du jour).")
-    if not errors and out["composition"] == "manual":
-        if not out["units"]:
-            errors.append("Indiquez au moins une unité avec une quantité.")
-        elif out["method"] == "PILLARS":
-            wrong = [n for n in out["units"] if n not in PILLAR_UNITS]
-            if wrong:
-                errors.append(f"Unité non autorisée en exploration par les Piliers : {wrong[0]}.")
+    send = _clean_send({k: data.get(k, DEFAULT_SETTINGS[k]) for k in SEND_KEYS}, "", errors, known_models, complete=False)
+    copies = data.get("copies", 1)
+    if not _int_in(copies, 1, MAX_COPIES):
+        errors.append(f"Expéditions simultanées : de 1 à {MAX_COPIES}.")
+        copies = 1
+    per_planet = data.get("per_planet", False)
+    if not isinstance(per_planet, bool):
+        errors.append("Réglages différents par planète : oui ou non.")
+        per_planet = False
+    planets = _clean_planets(data.get("planets", []), copies, per_planet, errors, known_planets, known_models)
+    if per_planet and not planets:
+        errors.append("Réglages différents par planète : choisissez d'abord les planètes.")
+    if not errors:
+        # L'envoi commun doit être utilisable s'il sert à au moins une planète.
+        if not per_planet or not planets or any(p["send"] is None for p in planets):
+            _clean_send(send, "", errors, known_models, complete=True)
     if errors:
-        raise ExplorationError(errors)
-    return out
+        raise ExplorationError([e[0].upper() + e[1:] for e in errors])
+    return {**send, "copies": copies, "planets": planets, "per_planet": per_planet}
+
+
+def plans(settings: dict, all_planets: list[str]) -> list[dict]:
+    """Envois du passage, planète par planète : {"planet", "copies", + l'envoi (SEND_KEYS)}."""
+    common = {k: settings[k] for k in SEND_KEYS}
+    if not settings["planets"]:
+        return [{"planet": p, "copies": settings["copies"], **common} for p in all_planets]
+    return [
+        {"planet": p["name"], "copies": p["copies"], **(p["send"] if settings["per_planet"] and p["send"] else common)}
+        for p in settings["planets"]
+    ]
+
+
+def describe_send(send: dict) -> str:
+    what = f"modèle « {send['model']} »" if send["composition"] == "model" else ", ".join(f"{q} × {n}" for n, q in send["units"].items())
+    return f"{METHODS[send['method']]}, {what}, {send['duration']} h"
 
 
 def describe(settings: dict) -> str:
     """Phrase lisible pour le journal et les réglages."""
-    what = f"modèle « {settings['model']} »" if settings["composition"] == "model" else ", ".join(f"{q} × {n}" for n, q in settings["units"].items())
-    where = ", ".join(settings["planets"]) or "toutes les planètes"
-    rhythm = "autant que possible" if settings["rhythm"] == "max" else f"{settings['per_pass']} par planète et par passage"
-    return f"{METHODS[settings['method']]}, {what}, {settings['copies']} copie(s), {settings['duration']} h, {where}, {rhythm}"
+    if not settings["planets"]:
+        return f"{describe_send(settings)} ; {settings['copies']} expédition(s) simultanée(s) depuis chaque planète"
+    parts = []
+    for p in settings["planets"]:
+        own = f" ({describe_send(p['send'])})" if settings["per_planet"] and p["send"] else ""
+        parts.append(f"{p['copies']} depuis {p['name']}{own}")
+    return f"{describe_send(settings)} ; expéditions simultanées : " + ", ".join(parts)
 
 
 class ExplorationStore:
@@ -152,6 +220,8 @@ class ExplorationStore:
         daily = saved.get("daily")
         if isinstance(daily, dict) and isinstance(daily.get("breaches"), dict) and isinstance(daily.get("models"), dict):
             self._daily = {**copy.deepcopy(EMPTY_DAILY), **daily}
+            if not isinstance(daily.get("tried"), list):  # relevé d'avant `tried` : ses brèches comptent comme cherchées
+                self._daily["tried"] = list(daily["breaches"])
 
     @property
     def persistent(self) -> bool:
@@ -174,9 +244,18 @@ class ExplorationStore:
     def known_models(self) -> dict:
         return {m: [x["name"] for x in self._daily["models"].get(m, [])] for m in METHODS}
 
-    def set_daily(self, breaches: dict, models: dict, source: str, error: str = "") -> dict:
+    def set_daily(self, breaches: dict, models: dict, source: str, error: str = "", tried: list[str] | None = None) -> dict:
         self._daily = {"day": today(), "scanned_at": time.time(), "source": source, "error": error,
-                       "breaches": copy.deepcopy(breaches), "models": {m: list(models.get(m, [])) for m in METHODS}}
+                       "breaches": copy.deepcopy(breaches), "models": {m: list(models.get(m, [])) for m in METHODS},
+                       "tried": list(tried if tried is not None else breaches)}
+        self._save()
+        return self.daily()
+
+    def add_breaches(self, breaches: dict, tried: list[str], error: str = "") -> dict:
+        """Complète le relevé du jour avec des planètes choisies après lui."""
+        errors = " ; ".join(e for e in (self._daily["error"], error) if e)
+        self._daily = {**self._daily, "breaches": {**self._daily["breaches"], **copy.deepcopy(breaches)},
+                       "tried": [*self._daily["tried"], *(p for p in tried if p not in self._daily["tried"])], "error": errors}
         self._save()
         return self.daily()
 

@@ -74,6 +74,10 @@ async def _run_alliance_tokens(bot) -> str:
     return await bot.token_giver.run_pass()
 
 
+async def _run_pillars(bot) -> str:
+    return await bot.pillar.run_pass()
+
+
 async def _run_test(bot) -> str:
     return "passage de test : rien n'a été fait dans le jeu"
 
@@ -88,7 +92,7 @@ FEATURES: tuple[Feature, ...] = (
     Feature("components", "Production de composants", "Produit les composants de la liste (onglet Composants) : quantité fixe ou MAX à chaque passage ou une seule fois, ou effectif à atteindre, sur toutes les planètes, une seule ou plusieurs. Clique sur « Produire » et dépense les ressources de la planète.", _run_components),
     Feature("explorations", "Explorations", "Envoie des explorations (onglet Exploration) vers la brèche la plus proche de chaque planète choisie : Piliers ou Flotte, modèle du jeu ou quantités, copies et durée au choix. Relève brèches et modèles une fois par jour, respecte les quotas quotidien et d'explorations actives, et saute une planète à qui il manque quelque chose.", _run_explorations,
             timer_label="Vague d'explorations toutes les"),
-    Feature("excavations", "Fouilles", "Lance les Fouilles des lignes réglées (onglet Fouilles) : planète de départ, équipe (1 à 5 000 unités), durée, nombre de places et Mira Venn. Vise le site libre le plus proche sans Fouille en cours, relève les sites une fois par jour, et relance une place à la fin de sa Fouille plus le délai choisi.", _run_excavations,
+    Feature("excavations", "Fouilles", "Lance les Fouilles réglées (onglet Fouilles) : planètes de départ, Fouilles simultanées, durée et équipe (1 à 5 000 unités) de chaque Fouille, Mira Venn. Vise le site libre le plus proche sans Fouille en cours, relève les sites une fois par jour, et relance chaque Fouille à l'identique à sa fin plus le délai choisi.", _run_excavations,
             self_timed=True, next_due=lambda bot: bot.excavator.next_due()),
     Feature("hackings", "Piratage (expérience de Naël)", "Fait pirater en boucle par Naël Soryn l'Errant le plus proche de la planète choisie (onglet Piratage), pour son expérience : relance dès que le piratage précédent est fini et que le délai choisi est passé, et passe à l'Errant suivant si le jeu refuse la cible. Relève les Errants une fois par jour.", _run_hackings,
             self_timed=True, next_due=lambda bot: bot.hacker.next_due()),
@@ -96,6 +100,8 @@ FEATURES: tuple[Feature, ...] = (
             self_timed=True, next_due=lambda bot: bot.miner.next_due()),
     Feature("alliance_tokens", "Dons de jetons d'alliance", "Donne vos jetons d'alliance (onglet Alliance : tous, 1 ou 2 à chaque passage) à la technologie marquée « priorité de dons de l'alliance ». Ne donne rien si aucune technologie n'est prioritaire ; ne change jamais la priorité. Un jeton revient environ toutes les 2 h (6 au plus).", _run_alliance_tokens,
             timer_label="Donner des jetons toutes les"),
+    Feature("pillars", "Piliers programmés", "Ouvre ou ferme les Piliers des planètes aux dates et heures programmées (onglet Piliers) : le bot clique 1 h avant l'heure voulue (le changement prend 1 h dans le jeu) et confirme. Un changement qu'il n'a pas pu faire avec plus d'1 h de retard (bot sur OFF…) est abandonné. Ne touche jamais au champ de force.", _run_pillars,
+            self_timed=True, next_due=lambda bot: bot.pillar.next_due()),
     Feature("test", "Test (ne fait rien)", "Écrit une ligne dans le journal à chaque passage. À retirer quand les vraies fonctionnalités arrivent.", _run_test),
 )
 

@@ -41,6 +41,7 @@
         <button role="tab" id="tab-excavations" data-tab="excavations" aria-controls="panel-excavations">Fouilles<span class="dot" data-dot="excavations" aria-hidden="true"></span></button>
         <button role="tab" id="tab-hackings" data-tab="hackings" aria-controls="panel-hackings">Piratage<span class="dot" data-dot="hackings" aria-hidden="true"></span></button>
         <button role="tab" id="tab-minings" data-tab="minings" aria-controls="panel-minings">Forages<span class="dot" data-dot="minings" aria-hidden="true"></span></button>
+        <button role="tab" id="tab-pillars" data-tab="pillars" aria-controls="panel-pillars">Piliers<span class="dot" data-dot="pillars" aria-hidden="true"></span></button>
         <button role="tab" id="tab-spying" data-tab="spying" aria-controls="panel-spying">Espionnage</button>
         <p class="side-group" aria-hidden="true">Alliance</p>
         <button role="tab" id="tab-alliance" data-tab="alliance" aria-controls="panel-alliance">Jetons d'alliance<span class="dot" data-dot="alliance" aria-hidden="true"></span></button>
@@ -223,8 +224,30 @@
       </header>
       <details class="help-box">
         <summary>Comment ça marche ?</summary>
-        <p>Une fois par jour, le bot relève pour chaque planète choisie la <strong>brèche la plus proche</strong> (positions réelles lues sur la carte de la Galaxie, formule des adresses en secours) et les <strong>modèles</strong> Piliers et Flotte du jeu. À chaque passage, il lance les explorations réglées ci-dessous, planète par planète, tant que le <strong>quota quotidien</strong> et les <strong>places d'explorations actives</strong> le permettent ; une planète à qui il manque des unités, de l'énergie ou de la Trame est sautée. Quand la fonctionnalité est activée et le bot sur ON, il clique sur « Lancer l'exploration » : <strong>les unités partent réellement</strong> et peuvent être perdues.</p>
+        <p>Une fois par jour, le bot relève pour chaque planète choisie la <strong>brèche la plus proche</strong> (positions réelles lues sur la carte de la Galaxie, formule des adresses en secours) et les <strong>modèles</strong> Piliers et Flotte du jeu. À chaque passage, il fait <strong>un lancement par planète de départ</strong>, avec son nombre d'expéditions simultanées (le champ « Copies » du jeu), tant que le <strong>quota quotidien</strong> et les <strong>places d'explorations actives</strong> le permettent ; une planète à qui il manque des unités, de l'énergie, de la Trame ou des places est sautée. Une planète cochée dans la journée a sa brèche relevée au passage suivant. Avec « Réglages différents par planète », chaque planète cochée a son propre envoi (moyen, composition, durée), et une planète ajoutée reprend celui de la précédente ; décochée, « Composition et durée de chaque expédition » vaut pour toutes, et les réglages par planète sont gardés pour plus tard. Quand la fonctionnalité est activée et le bot sur ON, il clique sur « Lancer l'exploration » : <strong>les unités partent réellement</strong> et peuvent être perdues.</p>
       </details>
+      <h3>Planètes de départ</h3>
+      <div id="exp-planets" class="add-planets"></div>
+      <div class="row exp-planet-options">
+        <label id="exp-copies-label">Expéditions simultanées par planète <span data-help-text="Champ « Copies » du jeu : nombre d'expéditions identiques lancées d'un seul clic, de 1 à 10."></span>
+          <input id="exp-copies" type="number" min="1" max="10" step="1" value="1"></label>
+        <label class="switch" id="exp-per-planet-label" title="Seulement avec « Planètes choisies »."><input type="checkbox" id="exp-per-planet"> Réglages différents par planète</label>
+      </div>
+      <ol id="exp-planet-rows" class="exp-planet-rows"></ol>
+      <div id="exp-common">  <!-- caché avec « Réglages différents par planète » : tout se règle alors dans les cartes des planètes -->
+        <h3>Composition et durée de chaque expédition</h3>
+        <div class="row">
+          <label>Envoyer par <select id="exp-method" aria-label="Envoyer par"></select></label>
+          <label>Composition <select id="exp-composition" aria-label="Composition">
+            <option value="model">Un modèle du jeu</option><option value="manual">Une quantité par unité</option>
+          </select></label>
+          <label id="exp-model-label">Modèle <select id="exp-model" aria-label="Modèle du jeu"></select></label>
+          <label>Durée de l'expédition <select id="exp-duration" aria-label="Durée de l'expédition"></select></label>
+        </div>
+        <div id="exp-units" class="row unit-grid"></div>
+      </div>
+      <p id="exp-summary" class="status-line exp-summary" role="status" aria-live="polite"></p>
+      <div class="row actions"><button id="exp-save" type="button">Enregistrer</button><p id="exp-msg" class="msg" role="status" aria-live="polite"></p></div>
       <h3>Relevé du jour</h3>
       <div class="row">
         <button id="exp-scan" type="button" class="secondary">Refaire le relevé du jour</button>
@@ -232,26 +255,6 @@
       </div>
       <p id="exp-daily" class="status-line" role="status" aria-live="polite">Aucun relevé pour l'instant.</p>
       <ul id="exp-breaches" class="hint"></ul>
-      <h3>Composition</h3>
-      <div class="row">
-        <label>Moyen <select id="exp-method" aria-label="Moyen de lancement"></select></label>
-        <label>Composition <select id="exp-composition" aria-label="Composition">
-          <option value="model">Un modèle du jeu</option><option value="manual">Une quantité par unité</option>
-        </select></label>
-        <label id="exp-model-label">Modèle <select id="exp-model" aria-label="Modèle du jeu"></select></label>
-      </div>
-      <div id="exp-units" class="row unit-grid"></div>
-      <h3>Rythme</h3>
-      <div class="row">
-        <label>Copies <input id="exp-copies" type="number" min="1" max="10" step="1" value="1" aria-label="Copies"></label>
-        <label>Durée <select id="exp-duration" aria-label="Durée nominale"></select></label>
-        <label>Rythme <select id="exp-rhythm" aria-label="Rythme">
-          <option value="fixed">Un nombre fixe par planète et par passage</option><option value="max">Autant que possible</option>
-        </select></label>
-        <label id="exp-per-pass-label">par planète et par passage <input id="exp-per-pass" type="number" min="1" max="50" step="1" value="1" aria-label="Lancements par planète et par passage"></label>
-      </div>
-      <fieldset class="row chip-set"><legend>Planètes</legend><span id="exp-planets"></span></fieldset>
-      <div class="row actions"><button id="exp-save" type="button">Enregistrer</button><p id="exp-msg" class="msg" role="status" aria-live="polite"></p></div>
     </section>
 
     <section class="tabpanel card" id="panel-excavations" role="tabpanel" aria-labelledby="tab-excavations" hidden>
@@ -261,8 +264,31 @@
       </header>
       <details class="help-box">
         <summary>Comment ça marche ?</summary>
-        <p>Chaque ligne réserve des <strong>places</strong> de Fouille depuis une planète, avec son équipe (de 1 à 5 000 unités) et sa durée. Une fois par jour, le bot relève les <strong>sites libres les plus proches</strong> de chaque planète de départ. À chaque passage, il lit les Fouilles en cours dans le jeu et relance une place quand sa Fouille est finie <strong>et</strong> que le délai tiré au hasard entre votre minimum et votre maximum est écoulé. Mira Venn part avec la ligne cochée quand elle est disponible, sinon la Fouille part sans héros. Le bot clique sur « Lancer la fouille » : <strong>une Fouille ne peut pas être rappelée</strong>.</p>
+        <p>Chaque planète de départ lance ses <strong>Fouilles simultanées</strong>, chacune avec sa durée et son équipe (de 1 à 5 000 unités) : celles de « Durée et équipe de chaque Fouille », ou les siennes avec « Réglages différents par Fouille » (une nouvelle Fouille reprend alors celles de la précédente). Une fois par jour, le bot relève les <strong>sites libres les plus proches</strong> de chaque planète de départ (une planète cochée dans la journée est relevée au passage suivant). À chaque passage, il lit les Fouilles en cours dans le jeu et relance <strong>à l'identique</strong> une Fouille finie dès que le délai tiré au hasard entre votre minimum et votre maximum est écoulé. Mira Venn part avec la Fouille 1 de la planète choisie quand elle est disponible, sinon la Fouille part sans héros. Le bot clique sur « Lancer la fouille » : <strong>une Fouille ne peut pas être rappelée</strong>.</p>
       </details>
+      <h3>Planètes de départ</h3>
+      <div id="exc-planets" class="add-planets"></div>
+      <div class="row exp-planet-options">
+        <label id="exc-copies-label">Fouilles simultanées par planète <input id="exc-copies" type="number" min="1" max="10" step="1" value="1"></label>
+        <label class="switch"><input type="checkbox" id="exc-per-slot"> Réglages différents par Fouille</label>
+        <label>Mira Venn accompagne <select id="exc-mira" aria-label="Mira Venn accompagne"></select></label>
+        <span id="exc-limit" class="hint" role="status" aria-live="polite"></span>
+      </div>
+      <ol id="exc-planet-rows" class="exp-planet-rows"></ol>
+      <div id="exc-common">  <!-- caché avec « Réglages différents par Fouille » : tout se règle alors dans les cartes des planètes -->
+        <h3>Durée et équipe de chaque Fouille</h3>
+        <div class="row">
+          <label>Durée <select id="exc-duration" aria-label="Durée"></select></label>
+        </div>
+        <div id="exc-units" class="row unit-grid"></div>
+      </div>
+      <h3>Relance</h3>
+      <div class="row">
+        <label>Délai avant relance : de <input id="exc-delay-min" type="number" min="0" step="1" aria-label="Délai minimum avant relance (minutes)"></label>
+        <label>à <input id="exc-delay-max" type="number" min="0" step="1" aria-label="Délai maximum avant relance (minutes)"> minutes</label>
+      </div>
+      <p id="exc-summary" class="status-line exp-summary" role="status" aria-live="polite"></p>
+      <div class="row actions"><button id="exc-save" type="button">Enregistrer</button><p id="exc-msg" class="msg" role="status" aria-live="polite"></p></div>
       <h3>Relevé du jour</h3>
       <div class="row">
         <button id="exc-scan" type="button" class="secondary">Refaire le relevé du jour</button>
@@ -270,15 +296,6 @@
       </div>
       <p id="exc-daily" class="status-line" role="status" aria-live="polite">Aucun relevé pour l'instant.</p>
       <ul id="exc-sites" class="hint"></ul>
-      <h3>Lignes de Fouille</h3>
-      <div id="exc-lines" class="line-cards"></div>
-      <div class="row"><button id="exc-add" type="button" class="secondary">+ Ajouter une ligne</button></div>
-      <h3>Relance</h3>
-      <div class="row">
-        <label>Délai avant relance : de <input id="exc-delay-min" type="number" min="0" step="1" aria-label="Délai minimum avant relance (minutes)"></label>
-        <label>à <input id="exc-delay-max" type="number" min="0" step="1" aria-label="Délai maximum avant relance (minutes)"> minutes</label>
-      </div>
-      <div class="row actions"><button id="exc-save" type="button">Enregistrer</button><p id="exc-msg" class="msg" role="status" aria-live="polite"></p></div>
       <h3>Fouilles suivies</h3>
       <ul id="exc-tracked" class="tracked"></ul>
     </section>
@@ -325,6 +342,38 @@
       <div class="row actions"><button id="mine-save" type="button">Enregistrer</button><p id="mine-msg" class="msg" role="status" aria-live="polite"></p></div>
       <h3>Forages suivis</h3>
       <ul id="mine-tracked" class="tracked"></ul>
+    </section>
+
+    <section class="tabpanel card" id="panel-pillars" role="tabpanel" aria-labelledby="tab-pillars" hidden>
+      <header class="panel-head">
+        <div><p class="eyebrow">Opérations · programmé</p><h2 id="pil-title">Piliers</h2><p class="lede">Ouvrir ou fermer les Piliers d'une planète à une date et une heure précises.</p></div>
+        <div class="fhead-slot" data-feature-head="pillars"></div>
+      </header>
+      <details class="help-box">
+        <summary>Comment ça marche ?</summary>
+        <p>Choisissez la planète, « Ouvrir » ou « Fermer », et la date et l'heure où le changement doit être <strong>effectif</strong>. Dans le jeu, un changement prend <strong>1 heure</strong> : le bot clique donc 1 h avant (Opérations › Gérer les Piliers), puis confirme. Règles du jeu vérifiées à l'enregistrement : il faut <strong>24 h</strong> entre deux changements d'une même planète (1 h d'effet puis 23 h d'attente), et <strong>2 planètes au plus</strong> peuvent avoir leurs Piliers fermés en même temps. Des Piliers fermés protègent des attaques terrestres, mais aucune mission Piliers (Exploration, Fouille, Piratage, Espionnage…) ne peut partir de la planète ni l'atteindre. Si le bot n'a pas pu cliquer à temps (sur OFF, en pause, déconnecté) et que le retard dépasse 1 h, le changement est abandonné. La fonctionnalité doit être activée et le bot sur ON. Le bot ne touche jamais au champ de force.</p>
+      </details>
+      <h3>État des Piliers</h3>
+      <div class="row">
+        <button id="pil-scan" type="button" class="secondary">Relever l'état des Piliers</button>
+        <span id="pil-scan-msg" class="hint" role="status" aria-live="polite"></span>
+      </div>
+      <p id="pil-status-line" class="status-line" role="status" aria-live="polite">Aucun relevé pour l'instant.</p>
+      <ul id="pil-status" class="chips pil-status"></ul>
+      <h3>Programmer un changement</h3>
+      <div class="row add-row">
+        <label>Planète <select id="pil-planet" aria-label="Planète"></select></label>
+        <span class="repeat-choice" role="radiogroup" aria-label="Changement">
+          <label><input type="radio" name="pil-action" value="open"> Ouvrir</label>
+          <label><input type="radio" name="pil-action" value="close" checked> Fermer</label>
+        </span>
+        <label>Effectif le <input id="pil-at" type="datetime-local" aria-label="Date et heure où le changement est effectif"></label>
+        <button id="pil-add" type="button" class="secondary">+ Programmer</button>
+      </div>
+      <p id="pil-hint" class="hint"></p>
+      <p id="pil-msg" class="msg" role="status" aria-live="polite"></p>
+      <h3>Changements programmés</h3>
+      <ol id="pil-changes" class="cons-queue"></ol>
     </section>
 
     <section class="tabpanel card" id="panel-spying" role="tabpanel" aria-labelledby="tab-spying" hidden>
@@ -405,5 +454,6 @@
   <script src="/static/planning.js"></script>
   <script src="/static/alliance.js"></script>
   <script src="/static/mining.js"></script>
+  <script src="/static/pillars.js"></script>
 </body>
 </html>

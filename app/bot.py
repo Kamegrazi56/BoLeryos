@@ -53,6 +53,8 @@ from .excavations import ExcavationStore
 from .excavator import ExcavationPass
 from .hacker import HackingPass
 from .hackings import HackingStore
+from .pillar_pass import PillarPass
+from .pillars import PillarStore
 from .scheduler import Scheduler
 from .spy import SpyCampaign
 from .spying import SpySettings
@@ -180,6 +182,8 @@ class BotSession:
         self.miner = MiningPass(self, self.minings)  # forages de planètes minières
         self.alliance = AllianceSettings(settings.data_dir)  # jetons d'alliance à donner à chaque passage (tous, 1 ou 2)
         self.token_giver = TokenPass(self, self.alliance)  # dons de jetons à la technologie prioritaire de l'alliance
+        self.pillars = PillarStore(settings.data_dir)  # Piliers programmés : changements, état lu dans le jeu, historique
+        self.pillar = PillarPass(self, self.pillars)  # ouverture / fermeture des Piliers à l'heure programmée
         self.mission_state = MissionsState(settings.data_dir)  # date de la dernière récupération des missions
         self.missions = MissionClaimer(self, self.mission_state)  # « Récupérer » de l'onglet Missions, 1 fois par jour
         self._missions_task: asyncio.Task | None = None

@@ -1,4 +1,4 @@
-"""Fouilles : relevé du jour (sites libres les plus proches, nombre de Fouilles possibles) et lancements, ligne par ligne.
+"""Fouilles : relevé du jour (sites libres les plus proches, nombre de Fouilles possibles) et lancements, Fouille par Fouille.
 
 Relevé sur le vrai jeu (2026-11-07, Fouille Egide → M58 80 21, 1 Scientifique, 3 h) :
   - carte : les emplacements libres arrivent dans la fenêtre visible (`/map/continuous/window`) avec `kind` FREE_SLOT et la
@@ -19,7 +19,7 @@ import time
 
 from . import builder, human
 from .builder import UNCONFIRMED_LIMIT
-from .excavations import SITES_KEPT, describe
+from .excavations import SITES_KEPT, describe, slots
 from .explorer import CLEAR_MARK_JS, MARK_TARGET_JS, TARGET_ATTRIBUTE, ExplorationPass, formula_distance
 from .planets import GameUiError, Interrupted
 
@@ -217,14 +217,17 @@ def draw_delay(settings: dict) -> float:
     return random.uniform(settings["delay_min"], settings["delay_max"]) * 60
 
 
-def sync_tracked(tracked: list[dict], missions: list[dict], settings: dict, now: float, complete: bool = True) -> list[dict]:
+def sync_tracked(tracked: list[dict], missions: list[dict], settings: dict, now: float, complete: bool = True,
+                 wanted: list[dict] | None = None) -> list[dict]:
     """Met à jour les Fouilles suivies d'après « Missions en cours ».
 
     - une Fouille encore en cours : sa fin est celle que le jeu affiche (retards compris) et le délai tiré reste le même ;
     - une Fouille terminée (absente de la liste) : sa place reste occupée jusqu'à sa fin + délai, puis elle est oubliée (la place
       est libre) ; si la liste lue ne compte pas autant de Fouilles que le compteur du jeu (`complete` faux), rien n'est oublié ;
-    - une Fouille du jeu que le bot ne suivait pas (lancée à la main, bot redémarré…) est adoptée si une ligne a la même planète
-      et la même durée."""
+    - une Fouille du jeu que le bot ne suivait pas (lancée à la main, bot redémarré…) est adoptée par une Fouille réglée libre
+      (`wanted`, voir excavations.slots) de la même planète et de la même durée ; une Fouille suivie sans numéro (ancien suivi)
+      reçoit de même celui d'une Fouille réglée libre."""
+    wanted = slots(settings, []) if wanted is None else wanted
     out: list[dict] = []
     matched: set[int] = set()
     for entry in tracked:
@@ -241,12 +244,23 @@ def sync_tracked(tracked: list[dict], missions: list[dict], settings: dict, now:
             ready = end + (entry["ready"] - entry["end"])
             if now < ready:
                 out.append({**entry, "end": end, "ready": ready})
-    lines = {(ln["planet"], ln["duration"]) for ln in settings["lines"]}
+    taken = {(t["planet"], t["slot"]) for t in out if t.get("slot") is not None}
+
+    def free_slot(planet: str, duration) -> int | None:
+        index = next((w["index"] for w in wanted if w["planet"] == planet and w["duration"] == duration and (planet, w["index"]) not in taken), None)
+        if index is not None:
+            taken.add((planet, index))
+        return index
+
+    out = [t if t.get("slot") is not None else {**t, "slot": free_slot(t["planet"], t["duration"])} for t in out]
     for i, m in enumerate(missions):
-        if i in matched or (m["origin"], m["duration"]) not in lines:
+        if i in matched:
+            continue
+        index = free_slot(m["origin"], m["duration"])
+        if index is None:
             continue
         end = now + (m["left"] or 0)
-        out.append({"planet": m["origin"], "duration": m["duration"], "site": m["site"], "end": end, "ready": end + draw_delay(settings)})
+        out.append({"planet": m["origin"], "slot": index, "duration": m["duration"], "site": m["site"], "end": end, "ready": end + draw_delay(settings)})
     return out
 
 
@@ -256,16 +270,34 @@ class ExcavationPass(ExplorationPass):
     feature_id = "excavations"
 
     # ------------------------------------------------------------------ relevé du jour
-    async def _daily_scan(self, settings: dict, source: str) -> None:
+    def _planets_of(self, settings: dict) -> list[str]:
+        return list(dict.fromkeys(w["planet"] for w in slots(settings, self._all_planets())))
+
+    async def _sites_of(self, planets: list[str]) -> tuple[dict, list[str]]:
         sites: dict = {}
         problems: list[str] = []
-        for planet in dict.fromkeys(ln["planet"] for ln in settings["lines"]):
+        for planet in planets:
             try:
                 sites[planet] = await self._find_sites(planet)
                 await self._remember(planet)
             except GameUiError as exc:
                 problems.append(f"{planet} : {exc}")
                 self.bot.log(f"Fouilles : pas de site libre relevé pour {planet} ({exc}).", "warn", event=True)
+        return sites, problems
+
+    async def _complete_daily(self, settings: dict) -> None:
+        """Planètes de départ choisies après le relevé du jour : leurs sites sont relevés maintenant (une fois par jour chacune)."""
+        missing = [p for p in self._planets_of(settings) if p not in self.store.daily()["tried"]]
+        if not missing:
+            return
+        sites, problems = await self._sites_of(missing)
+        self.store.add_sites(sites, missing, " ; ".join(problems))
+        found = ", ".join(f"{p} → {v[0]['address']}" for p, v in sites.items() if v) or "aucun"
+        self.bot.log(f"Fouilles : sites relevés pour {', '.join(missing)} — le plus proche : {found}.", event=True)
+
+    async def _daily_scan(self, settings: dict, source: str) -> None:
+        planets = self._planets_of(settings)
+        sites, problems = await self._sites_of(planets)
         max_active = None
         try:
             await self._open_excavations()
@@ -273,7 +305,7 @@ class ExcavationPass(ExplorationPass):
             max_active = counters["excavations"][1] if counters.get("excavations") else None
         except GameUiError as exc:
             problems.append(f"compteur des Fouilles : {exc}")
-        self.store.set_daily(sites, max_active, source, " ; ".join(problems))
+        self.store.set_daily(sites, max_active, source, " ; ".join(problems), tried=planets)
         found = ", ".join(f"{p} → {len(v)} site(s), le plus proche {v[0]['address']}" for p, v in sites.items() if v) or "aucun"
         self.bot.log(f"Fouilles : relevé du jour ({source}) — {found} ; Fouilles actives au plus : {max_active}.", event=True)
 
@@ -325,14 +357,20 @@ class ExcavationPass(ExplorationPass):
     # ------------------------------------------------------------------ passage
     async def run_pass(self) -> str:
         s = self.store.get()
-        if not s["lines"]:
-            return "aucune ligne de Fouille réglée (onglet Fouilles), rien à lancer"
+        wanted = slots(s, self._all_planets())
+        unset = "Fouilles non réglées (équipe ou délai avant relance, onglet Fouilles), rien à lancer"
+        if s["delay_min"] is None or any(not w["units"] for w in wanted) or (not wanted and not s["units"]):
+            return unset
+        if not wanted:
+            return "aucune planète connue : lancez un scan des planètes (Réglages › Compte et univers)"
         launched: list[str] = []
         waiting = 0
         stop = ""
         try:
             if self.store.daily_due():
                 await self._daily_scan(s, "quotidien")
+            else:
+                await self._complete_daily(s)
             await self._open_excavations()
             async def read():
                 return await self.page.evaluate(MISSIONS_JS, "Fouille"), (await self._counters())["excavations"][0]
@@ -340,15 +378,23 @@ class ExcavationPass(ExplorationPass):
             (missions, _count), complete = await stable_read(read, lambda v: len(v[0]) == v[1])
             if not complete:
                 self.bot.log(f"Fouilles : {len(missions)} Fouille(s) lue(s) dans « Missions en cours » pour un compteur différent ; aucune place n'est libérée ce passage.", "warn", event=True)
-            tracked = sync_tracked(self.store.tracked(), missions, s, time.time(), complete)
+            tracked = sync_tracked(self.store.tracked(), missions, s, time.time(), complete, wanted)
             self.store.set_tracked(tracked)
             busy = {m["site"] for m in missions} | {t["site"] for t in tracked}
-            for line in s["lines"]:
-                stop, done, free = await self._serve(line, s, tracked, busy)
-                launched += done
-                waiting += free <= 0
+            stuck: set[str] = set()  # planètes sans site libre ou dont un lancement a échoué : leurs autres Fouilles attendent
+            for slot in wanted:
+                if any((t["planet"], t.get("slot")) == (slot["planet"], slot["index"]) for t in tracked):
+                    waiting += 1  # Fouille en cours (ou délai avant relance pas écoulé)
+                    continue
+                if slot["planet"] in stuck:
+                    continue
+                stop, sentence = await self._serve(slot, s, tracked, busy)
                 if stop:
                     break
+                if sentence is None:
+                    stuck.add(slot["planet"])
+                else:
+                    launched.append(sentence)
         except Interrupted as exc:
             return self._report(launched, waiting, f"interrompu ({exc})")
         except GameUiError as exc:
@@ -356,34 +402,30 @@ class ExcavationPass(ExplorationPass):
             return self._report(launched, waiting, f"arrêté ({exc})")
         return self._report(launched, waiting, stop)
 
-    async def _serve(self, line: dict, s: dict, tracked: list[dict], busy: set[str]) -> tuple[str, list[str], int]:
-        """Lance les Fouilles qui manquent à une ligne. Renvoie (raison d'arrêt général, lancements, places libres au départ)."""
-        key = (line["planet"], line["duration"])
-        free = line["slots"] - sum(1 for t in tracked if (t["planet"], t["duration"]) == key)
-        done: list[str] = []
-        for _ in range(max(0, free)):
-            stop = self._full(await self._counters())
-            if stop:
-                return stop, done, free
-            site = next((x["address"] for x in self.store.daily()["sites"].get(line["planet"], []) if x["address"] not in busy), None)
-            if site is None:
-                self._skip(line["planet"], "aucun site libre connu sans Fouille en cours")
-                break
-            sentence = await self._launch(line, site)
-            if sentence is None:
-                break
-            end = time.time() + line["duration"] * 3600
-            tracked.append({"planet": line["planet"], "duration": line["duration"], "site": site, "end": end, "ready": end + draw_delay(s)})
-            self.store.set_tracked(tracked)
-            busy.add(site)
-            done.append(sentence)
-        return "", done, free
+    async def _serve(self, slot: dict, s: dict, tracked: list[dict], busy: set[str]) -> tuple[str, str | None]:
+        """Lance une Fouille réglée libre. Renvoie (raison d'arrêt général, phrase du lancement ou None si rien n'est parti)."""
+        stop = self._full(await self._counters())
+        if stop:
+            return stop, None
+        planet = slot["planet"]
+        site = next((x["address"] for x in self.store.daily()["sites"].get(planet, []) if x["address"] not in busy), None)
+        if site is None:
+            self._skip(planet, "aucun site libre connu sans Fouille en cours")
+            return "", None
+        sentence = await self._launch(slot, site)
+        if sentence is None:
+            return "", None
+        end = time.time() + slot["duration"] * 3600
+        tracked.append({"planet": planet, "slot": slot["index"], "duration": slot["duration"], "site": site, "end": end, "ready": end + draw_delay(s)})
+        self.store.set_tracked(tracked)
+        busy.add(site)
+        return "", sentence
 
     @staticmethod
     def _report(launched: list[str], waiting: int, stop: str) -> str:
         parts = [f"{len(launched)} Fouille(s) lancée(s)" + (" : " + ", ".join(launched) if launched else "")]
         if waiting:
-            parts.append(f"{waiting} ligne(s) complète(s)")
+            parts.append(f"{waiting} Fouille(s) déjà en cours")
         if stop:
             parts.append(stop)
         return " ; ".join(parts)
@@ -392,7 +434,7 @@ class ExcavationPass(ExplorationPass):
         self.bot.log(f"Fouilles : {planet} sautée ({reason}).", event=True)
 
     async def _launch(self, line: dict, site: str) -> str | None:
-        """Prépare et lance une Fouille de la ligne vers le site. None : rien n'est lancé (il manque quelque chose)."""
+        """Prépare et lance une Fouille réglée (`line` : planète, équipe, durée, Mira) vers le site. None : rien n'est lancé."""
         page = self.page
         planet = line["planet"]
         await self._open_excavations()

@@ -157,6 +157,41 @@ input.inline { width: 90px; display: inline-block; margin: 0 6px; }
 .row select, .row input[type=text] { width: auto; min-width: 200px; }
 .row input[type=number] { width: 130px; }
 .fields label { margin: 0; }
+/* Exploration : planètes cochées, chacune avec ses expéditions simultanées (et son envoi propre, en option). */
+.exp-planet-options { align-items: flex-end; gap: 18px; }
+.exp-planet-options label { margin: 0; }
+.exp-planet-options #exp-copies { width: 90px; }
+.switch.is-disabled { opacity: 0.45; cursor: not-allowed; }
+.exp-planet-rows { list-style: none; margin: 6px 0 14px; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px; }
+.exp-planet-rows li { padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: rgba(3, 8, 20, 0.4); }
+.exp-planet-rows li:has(.exp-send) { grid-column: 1 / -1; }
+.exp-planet-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.exp-planet-head label { margin: 0; display: inline-flex; align-items: center; gap: 6px; }
+.exp-planet-head input[type="number"] { width: 70px; }
+.exp-send { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.exp-send .row { margin: 4px 0; }
+.exp-send label, .exp-send select { width: auto; }
+.exp-send .row select { min-width: 0; max-width: 220px; }
+/* Piliers programmés : état de chaque planète et changements programmés. */
+.pil-status { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; padding: 0; margin: 6px 0 12px; }
+.pil-status li { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); font-size: 12.5px; }
+.pil-status li.closed { border-color: var(--err, #fb7185); color: var(--err, #fb7185); }
+.pil-status li.pending { border-color: var(--warn, #f5b04c); color: var(--warn, #f5b04c); }
+.pil-change .pill { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); }
+.pil-change .pil-done { color: var(--ok, #4ade80); border-color: var(--ok, #4ade80); }
+.pil-change .pil-failed, .pil-change .pil-abandoned { color: var(--err, #fb7185); border-color: var(--err, #fb7185); }
+.pil-change .warn { color: var(--warn, #f5b04c); }
+#pil-at { width: auto; }
+/* Fouilles : chaque Fouille d'une planète (durée + équipe). */
+.exc-slot { display: grid; grid-template-columns: 90px auto 1fr; align-items: center; gap: 10px; padding: 6px 0; }
+.exc-slot + .exc-slot { border-top: 1px dashed var(--border); }
+.exc-slot label { margin: 0; display: inline-flex; align-items: center; gap: 6px; }
+.exc-slot select { width: auto; min-width: 0; }
+.exc-slot .unit-grid { margin: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.exc-slot .unit-grid label { flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 6px; font-size: 12.5px; white-space: nowrap; }
+.exc-slot .unit-grid input[type=number] { width: 78px; }
+.team-total.warn { color: var(--warn, #f5b04c); }
+.exp-summary { padding: 8px 12px; border-left: 3px solid var(--accent); background: rgba(79, 216, 255, 0.05); }
 /* Mode d'une ligne : « À chaque passage » / « Une seule fois », grisés pour « Effectif à atteindre ». */
 .repeat-choice { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; vertical-align: middle; }
 .repeat-choice label { margin: 0; display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; color: var(--muted); font-size: 13px; cursor: pointer; white-space: nowrap; transition: background 0.15s, color 0.15s; }

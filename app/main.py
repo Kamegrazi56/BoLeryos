@@ -32,6 +32,10 @@ from .excavations import DURATIONS as EXCAVATION_DURATIONS
 from .excavations import MAX_TEAM as EXCAVATION_MAX_TEAM
 from .excavations import UNITS as EXCAVATION_UNITS
 from .excavations import ExcavationError
+from .pillars import ACTIONS as PILLAR_ACTIONS
+from .pillars import PillarError
+from .pillars import click_time as pillar_click_time
+from .pillars import when as pillar_when
 from .alliance import AllianceError
 from .minings import MAX_MINERS as MINING_MAX_MINERS
 from .minings import RESOURCES as MINING_RESOURCES
@@ -125,30 +129,51 @@ class QuantityRequest(BaseModel):
     queue: list[QuantityLine] = Field(default_factory=list, max_length=500)
 
 
-class ExplorationRequest(BaseModel):
+class ExplorationSend(BaseModel):
     method: str = Field(default="PILLARS", max_length=10)
     composition: str = Field(default="model", max_length=10)
     model: str = Field(default="", max_length=200)
     units: dict[str, int] = Field(default_factory=dict, max_length=60)
-    copies: int = Field(default=1, ge=0, le=100)
     duration: int = Field(default=1, ge=0, le=100)
-    planets: list[str] = Field(default_factory=list, max_length=200)
-    rhythm: str = Field(default="fixed", max_length=10)
-    per_pass: int = Field(default=1, ge=0, le=1000)
 
 
-class ExcavationLine(BaseModel):
-    planet: str = Field(default="", max_length=200)
-    units: dict[str, int] = Field(default_factory=dict, max_length=10)
+class ExplorationPlanet(BaseModel):
+    name: str = Field(max_length=200)
+    copies: int = Field(default=1, ge=0, le=100)  # expéditions simultanées
+    send: ExplorationSend | None = None  # envoi propre à la planète (gardé en mémoire même si l'option est décochée)
+
+
+class ExplorationRequest(ExplorationSend):
+    copies: int = Field(default=1, ge=0, le=100)  # expéditions simultanées par planète avec « toutes les planètes »
+    planets: list[ExplorationPlanet] = Field(default_factory=list, max_length=200)
+    per_planet: bool = False
+
+
+class ExcavationSend(BaseModel):  # durée + équipe d'une Fouille
     duration: int = Field(default=3, ge=0, le=100)
-    slots: int = Field(default=1, ge=0, le=100)
-    mira: bool = False
+    units: dict[str, int] = Field(default_factory=dict, max_length=10)
 
 
-class ExcavationRequest(BaseModel):
-    lines: list[ExcavationLine] = Field(default_factory=list, max_length=50)
+class ExcavationPlanet(BaseModel):
+    name: str = Field(max_length=200)
+    copies: int = Field(default=1, ge=0, le=100)  # Fouilles simultanées
+    fouilles: list[ExcavationSend] = Field(default_factory=list, max_length=20)  # réglages de la Fouille 1, 2, …
+
+
+class ExcavationRequest(ExcavationSend):  # durée + équipe : l'envoi commun
+    copies: int = Field(default=1, ge=0, le=100)  # Fouilles simultanées par planète avec « toutes les planètes »
+    fouilles: list[ExcavationSend] = Field(default_factory=list, max_length=20)
+    planets: list[ExcavationPlanet] = Field(default_factory=list, max_length=100)
+    per_slot: bool = False
+    mira: str = Field(default="", max_length=200)
     delay_min: int | None = Field(default=None, ge=0, le=100_000)
     delay_max: int | None = Field(default=None, ge=0, le=100_000)
+
+
+class PillarChangeRequest(BaseModel):
+    planet: str = Field(default="", max_length=200)
+    action: str = Field(default="", max_length=10)  # open | close
+    at: str = Field(default="", max_length=40)  # « AAAA-MM-JJTHH:MM », heure de Paris, heure où le changement est effectif
 
 
 class HackingRequest(BaseModel):
@@ -659,6 +684,43 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if bot.hackings.get()["planet"]:
             await bot.hacker.scan("manuel")
         return JSONResponse(_hackings_payload(), headers=NO_STORE)
+
+    # --- Piliers programmés : ouverture / fermeture à une date et une heure précises -----------
+    def _pillars_payload(error: str = "") -> dict:
+        store = bot.pillars
+        problems = store.problems()
+        changes = [{**c, "click_at": pillar_click_time(c), "problem": problems.get(c["id"], "")} for c in store.changes()]
+        return {"changes": changes, "status": store.status(), "planets": _known_planets(), "scanning": bot.pillar.scanning,
+                "persistent": store.persistent, "error": error, "rules": {"effect_minutes": 60, "between_hours": 24, "max_closed": 2}}
+
+    @app.get("/api/pillars")
+    async def api_pillars():
+        return JSONResponse(_pillars_payload(), headers=NO_STORE)
+
+    @app.post("/api/pillars/changes")
+    async def api_pillars_add(body: PillarChangeRequest, request: Request):
+        """Programme un changement ; refusé (422, raison en français) si le jeu ne pourra pas le faire."""
+        _check_origin(request)
+        try:
+            change = bot.pillars.add(body.planet, body.action, body.at, _known_planets())
+        except PillarError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        bot.log(f"Piliers : {PILLAR_ACTIONS[change['action']].lower()} {change['planet']} programmé, effectif le {pillar_when(change['at'])}.", event=True)
+        return JSONResponse(_pillars_payload(), headers=NO_STORE)
+
+    @app.delete("/api/pillars/changes/{change_id}")
+    async def api_pillars_remove(change_id: str, request: Request):
+        _check_origin(request)
+        if not bot.pillars.remove(change_id):
+            raise HTTPException(404, detail=["Changement introuvable."])
+        return JSONResponse(_pillars_payload(), headers=NO_STORE)
+
+    @app.post("/api/pillars/scan")
+    async def api_pillars_scan(request: Request):
+        """Relève tout de suite l'état des Piliers de chaque planète (fenêtre « Gérer les Piliers »)."""
+        _check_origin(request)
+        result = await bot.pillar.scan()
+        return JSONResponse(_pillars_payload(result.get("error", "")), headers=NO_STORE)
 
     # --- Planning : plages horaires actives par jour (heure française) -----------
     def _planning_payload() -> dict:

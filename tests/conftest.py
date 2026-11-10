@@ -109,6 +109,9 @@ class GameHandle:
     def set_hack(self, **values) -> None:
         httpx.post(self.url + "/api/_hack", json=values, timeout=5).raise_for_status()
 
+    def set_pillars(self, **values) -> None:
+        httpx.post(self.url + "/api/_pillars", json=values, timeout=5).raise_for_status()
+
     def set_exc(self, **values) -> None:
         httpx.post(self.url + "/api/_exc", json=values, timeout=5).raise_for_status()
 

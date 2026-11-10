@@ -8,7 +8,7 @@
   /** Page de réglages de chaque fonctionnalité (id de fonctionnalité → onglet). */
   const FEATURE_TAB = {
     constructions: "constructions", researches: "researches", populations: "populations", ships: "ships", components: "components",
-    explorations: "explorations", excavations: "excavations", hackings: "hackings", minings: "minings", alliance_tokens: "alliance",
+    explorations: "explorations", excavations: "excavations", hackings: "hackings", minings: "minings", pillars: "pillars", alliance_tokens: "alliance",
   };
   // « Test (ne fait rien) » ne sert qu'aux essais : masquée sauf si localStorage « boleryos.showTest » vaut « 1 ».
   const HIDDEN = new Set(["test"]);

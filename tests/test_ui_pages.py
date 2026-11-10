@@ -105,12 +105,13 @@ def test_the_removed_features_have_no_settings_and_no_routes(ui):
     page, _, _ = ui
     page.goto(page.base + "/reglages")
     tabs = [t.strip().lower() for t in page.locator("[role=tab]").all_inner_texts()]
-    assert tabs == ["compte et univers", "fonctionnalités", "planning", "constructions", "recherches", "population", "assemblages", "composants", "exploration", "fouilles", "piratage", "forages", "espionnage", "jetons d'alliance"]
+    assert tabs == ["compte et univers", "fonctionnalités", "planning", "constructions", "recherches", "population", "assemblages", "composants", "exploration", "fouilles", "piratage", "forages", "piliers", "espionnage", "jetons d'alliance"]
     for tab in tabs:  # aucune section supprimée ne réapparaît, quel que soit l'onglet
         page.click(f'[role=tab]:has-text("{tab}")', strict=False)
-        text = page.inner_text("main").lower()
+        # titres seulement : « Expéditions simultanées » (Exploration) est un réglage, pas l'ancienne section Expéditions
+        titles = " ".join(page.locator("main h2:visible, main h3:visible, [role=tab]").all_inner_texts()).lower()
         for word in ("expéditions", "attaques", "horaires", "alertes"):
-            assert word not in text
+            assert word not in titles
     for route in ("/api/automation", "/api/dashboard", "/api/notifications"):
         assert page.request.get(page.base + route).status == 404
 
@@ -384,12 +385,37 @@ def test_population_panel_sets_mode_quantity_and_planet_for_each_population(ui):
     assert errors == []
 
 
-def test_settings_page_has_fourteen_tabs_and_only_one_panel_shows_at_a_time(ui):
+def test_pillars_panel_programs_a_change_and_explains_a_refusal(ui):
+    page, errors, app = ui
+    page.click("#scan-run")
+    page.wait_for_function("document.querySelectorAll('#scan-list tr').length === 4", timeout=10000)
+    page.goto(page.base + "/reglages#pillars")
+    page.reload()
+    page.wait_for_function("document.querySelectorAll('#pil-planet option').length === 3", timeout=10000)
+    assert page.input_value("#pil-at")  # date proposée : dans 2 h
+    assert "Le bot cliquera le" in page.text_content("#pil-hint")
+    page.select_option("#pil-planet", "6-79-Egide")
+    page.check("input[name=pil-action][value=close]")
+    page.click("#pil-add")
+    page.wait_for_function("document.getElementById('pil-msg').classList.contains('ok')")
+    (change,) = app.state.bot.pillars.pending()
+    assert (change["planet"], change["action"]) == ("6-79-Egide", "close")
+    assert page.locator("#pil-changes li[data-id]").count() == 1 and "Programmé" in page.text_content("#pil-changes")
+    page.click("#pil-add")  # même planète, même heure : déjà fermée à ce moment-là
+    page.wait_for_function("document.getElementById('pil-msg').classList.contains('error')")
+    assert "déjà fermés" in page.text_content("#pil-msg")
+    page.click(f"#pil-changes li[data-id='{change['id']}'] button")
+    page.wait_for_function("document.querySelectorAll('#pil-changes li[data-id]').length === 0")
+    assert app.state.bot.pillars.pending() == []
+    assert errors == []
+
+
+def test_settings_page_has_fifteen_tabs_and_only_one_panel_shows_at_a_time(ui):
     page, errors, _ = ui
     page.goto(page.base + "/reglages")
     # ordre du menu latéral : Bot, Économie, Opérations, Alliance
-    ids = ["account", "features", "planning", "constructions", "researches", "populations", "ships", "components", "explorations", "excavations", "hackings", "minings", "spying", "alliance"]
-    assert page.locator("[role=tab]").count() == 14
+    ids = ["account", "features", "planning", "constructions", "researches", "populations", "ships", "components", "explorations", "excavations", "hackings", "minings", "pillars", "spying", "alliance"]
+    assert page.locator("[role=tab]").count() == 15
     for tab in ids:
         page.click(f"#tab-{tab}")
         assert page.get_attribute(f"#tab-{tab}", "aria-selected") == "true"
@@ -422,22 +448,26 @@ def test_each_feature_page_has_its_switch_and_the_menu_shows_its_state(ui):
     assert errors == []
 
 
-def test_excavation_panel_saves_a_line_with_its_team_and_the_delay(ui):
+def test_excavation_panel_sets_departure_planets_and_the_duration_and_team_of_each_excavation(ui):
     page, errors, app = ui
+    egide, concorde = "6-79-Egide", "8-50-Concorde"
     page.click("#scan-run")  # scan des planètes (page Compte et univers), comme les autres onglets
     page.wait_for_function("document.querySelectorAll('#scan-list tr').length === 4", timeout=10000)
     page.goto(page.base + "/reglages#excavations")
     page.reload()  # même page (seul l'onglet change) : on la recharge pour relire les planètes scannées
-    page.wait_for_selector("#exc-add")
-    planets = page.evaluate("fetch('/api/excavations').then((r) => r.json()).then((d) => d.planets)")
-    page.wait_for_function("document.getElementById('exc-daily').textContent !== \"Aucun relevé pour l'instant.\"")  # données chargées
-    page.click("#exc-add")
-    page.select_option("#exc-lines select[aria-label='Planète de départ, ligne 1']", planets[0])
-    page.select_option("#exc-lines select[aria-label='Durée, ligne 1']", "12")
-    page.fill("#exc-lines input[aria-label='Places, ligne 1']", "2")
-    page.fill("#exc-lines input[aria-label='Scientifique, ligne 1']", "3000")
-    page.fill("#exc-lines input[aria-label='Mineur, ligne 1']", "2000")
-    page.check("#exc-lines input[aria-label='Mira Venn, ligne 1']")
+    page.wait_for_function("document.querySelectorAll('#exc-planets .planet-grid input').length === 3", timeout=10000)
+    # envoi commun : équipe et durée
+    page.fill("#exc-units input[aria-label='Quantité Scientifique']", "3000")
+    page.fill("#exc-units input[aria-label='Quantité Mineur']", "2000")
+    assert "Équipe : 5000 / 5000" in page.text_content("#exc-units")
+    page.select_option("#exc-duration", "12")
+    # planètes choisies, chacune avec ses Fouilles simultanées ; Mira avec la Fouille 1 d'Egide
+    page.check("#exc-planets input[value='some']")
+    page.check(f"#exc-planets input[aria-label^='{egide}']")
+    page.check(f"#exc-planets input[aria-label^='{concorde}']")
+    page.fill(f"input[aria-label='Fouilles simultanées : {egide}']", "2")
+    page.dispatch_event(f"input[aria-label='Fouilles simultanées : {egide}']", "change")
+    page.select_option("#exc-mira", egide)
     page.click("#exc-save")  # délai pas encore choisi : refusé avec un message en français
     page.wait_for_function("document.getElementById('exc-msg').classList.contains('error')")
     assert "Délai" in page.text_content("#exc-msg")
@@ -445,9 +475,22 @@ def test_excavation_panel_saves_a_line_with_its_team_and_the_delay(ui):
     page.fill("#exc-delay-max", "15")
     page.click("#exc-save")
     page.wait_for_function("document.getElementById('exc-msg').textContent === 'Enregistré.'")
-    assert app.state.bot.excavations.get() == {"lines": [{"planet": planets[0], "units": {"Scientifique": 3000, "Mineur": 2000},
-                                                          "duration": 12, "slots": 2, "mira": True}], "delay_min": 5, "delay_max": 15}
-    assert "Équipe : 5000 / 5000" in page.text_content("#exc-lines")
+    s = app.state.bot.excavations.get()
+    assert (s["duration"], s["units"], s["mira"], s["per_slot"], s["delay_min"], s["delay_max"]) == (12, {"Scientifique": 3000, "Mineur": 2000}, egide, False, 5, 15)
+    assert [(p["name"], p["copies"]) for p in s["planets"]] == [(egide, 2), (concorde, 1)]
+    # réglages différents par Fouille : chaque Fouille part de l'envoi commun, puis se modifie
+    page.check("#exc-per-slot")
+    where = f"{egide}, Fouille 2"
+    assert page.input_value(f"select[aria-label='Durée : {where}']") == "12"
+    page.select_option(f"select[aria-label='Durée : {where}']", "24")
+    page.fill(f"input[aria-label='Quantité Scientifique : {where}']", "")
+    page.fill(f"input[aria-label='Quantité Mineur : {where}']", "1000")
+    assert "Fouille 2 : 24 h, 1000 unités" in page.text_content("#exc-summary")
+    page.click("#exc-save")
+    page.wait_for_function("document.getElementById('exc-msg').textContent === 'Enregistré.'")
+    s = app.state.bot.excavations.get()
+    assert s["per_slot"] is True
+    assert s["planets"][0]["fouilles"] == [{"duration": 12, "units": {"Scientifique": 3000, "Mineur": 2000}}, {"duration": 24, "units": {"Mineur": 1000}}]
     assert errors == []
 
 
@@ -488,18 +531,53 @@ def test_spying_panel_saves_the_minimums_and_refuses_a_launch_without_planet(ui)
     assert errors == []
 
 
-def test_exploration_panel_saves_a_manual_composition_with_copies_duration_and_rhythm(ui):
+def test_exploration_panel_sets_departure_planets_simultaneous_expeditions_and_a_send_per_planet(ui):
     page, errors, _ = ui
+    page.click("#scan-run")
+    page.wait_for_function("document.querySelectorAll('#scan-list tr').length === 4", timeout=10000)
     page.goto(page.base + "/reglages#explorations")
+    page.wait_for_function("document.querySelectorAll('#exp-planets .planet-grid input').length === 3", timeout=10000)
+    saved = lambda: page.evaluate("fetch('/api/explorations').then((r) => r.json()).then((d) => d.settings)")  # noqa: E731
+    # toutes les planètes : un seul nombre d'expéditions simultanées, pas de réglages par planète
+    assert page.is_visible("#exp-copies-label") and page.is_disabled("#exp-per-planet")
     page.select_option("#exp-composition", "manual")
     page.fill("#exp-units input[aria-label='Quantité Rempart de Fer']", "1500")
     page.fill("#exp-copies", "3")
     page.select_option("#exp-duration", "4")
-    page.select_option("#exp-rhythm", "max")
+    assert "3 expéditions simultanées depuis chaque planète (4 h, par les Piliers, 1500 × Rempart de Fer)" in page.text_content("#exp-summary")
     page.click("#exp-save")
     page.wait_for_function("document.getElementById('exp-msg').textContent === 'Enregistré.'")
-    saved = page.evaluate("fetch('/api/explorations').then((r) => r.json()).then((d) => d.settings)")
-    assert (saved["composition"], saved["units"], saved["copies"], saved["duration"], saved["rhythm"]) == ("manual", {"Rempart de Fer": 1500}, 3, 4, "max")
+    s = saved()
+    assert (s["composition"], s["units"], s["copies"], s["duration"], s["planets"], s["per_planet"]) == ("manual", {"Rempart de Fer": 1500}, 3, 4, [], False)
+    # planètes choisies : un nombre par planète cochée
+    page.check("#exp-planets input[value='some']")
+    page.click("#exp-save")  # aucune planète cochée : refusé
+    assert "Cochez au moins une planète" in page.text_content("#exp-msg")
+    page.check("#exp-planets input[aria-label^='8-50-Concorde']")
+    page.check("#exp-planets input[aria-label^='6-79-Egide']")
+    assert page.is_hidden("#exp-copies-label") and page.is_enabled("#exp-per-planet")
+    page.fill("input[aria-label='Expéditions simultanées : 8-50-Concorde']", "7")
+    assert "7 expéditions depuis 8-50-Concorde" in page.text_content("#exp-summary")
+    # réglages différents par planète : chaque planète part de l'envoi commun, puis se modifie
+    page.check("#exp-per-planet")
+    assert page.input_value("select[aria-label='Durée de l\\'expédition : 6-79-Egide']") == "4"
+    page.select_option("select[aria-label='Durée de l\\'expédition : 6-79-Egide']", "2")
+    page.click("#exp-save")
+    page.wait_for_function("document.getElementById('exp-msg').textContent === 'Enregistré.'")
+    s = saved()
+    planets = {p["name"]: p for p in s["planets"]}
+    assert s["per_planet"] is True and planets["8-50-Concorde"]["copies"] == 7 and planets["6-79-Egide"]["copies"] == 1
+    assert planets["6-79-Egide"]["send"]["duration"] == 2 and planets["8-50-Concorde"]["send"]["duration"] == 4
+    # option décochée : l'envoi commun vaut pour toutes, les réglages par planète restent en mémoire
+    page.uncheck("#exp-per-planet")
+    assert page.locator("#exp-planet-rows .exp-send").count() == 0
+    page.click("#exp-save")
+    page.wait_for_function("document.getElementById('exp-msg').textContent === 'Enregistré.'")
+    s = saved()
+    assert s["per_planet"] is False and {p["name"]: p["send"]["duration"] for p in s["planets"]}["6-79-Egide"] == 2
+    page.check("#exp-per-planet")
+    assert page.input_value("select[aria-label='Durée de l\\'expédition : 6-79-Egide']") == "2"  # retrouvé
+    page.uncheck("#exp-per-planet")  # l'envoi commun sert de nouveau : il doit être complet
     page.select_option("#exp-composition", "model")
     page.click("#exp-save")  # aucun modèle choisi : refusé avec un message en français
     page.wait_for_function("document.getElementById('exp-msg').classList.contains('error')")

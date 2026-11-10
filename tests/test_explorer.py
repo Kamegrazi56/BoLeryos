@@ -5,7 +5,7 @@ from app.explorer import formula_distance, nearest_from_objects, parse_address
 
 CONCORDE, EGIDE, STRATE = "8-50-Concorde", "6-79-Egide", "9-169-Strate"
 BASE = {"method": "PILLARS", "composition": "model", "model": "Expe", "units": {}, "copies": 1, "duration": 1,
-        "planets": [CONCORDE], "rhythm": "fixed", "per_pass": 1}
+        "planets": [CONCORDE], "per_planet": False}
 
 
 def _bot(client):
@@ -17,7 +17,10 @@ def _scan(client):
 
 
 def _set(client, **patch):
-    res = client.put("/api/explorations", json={**BASE, **patch})
+    """Une planète donnée par son nom prend `copies` expéditions simultanées (comme « toutes les planètes »)."""
+    body = {**BASE, **patch}
+    body["planets"] = [{"name": p, "copies": body["copies"]} if isinstance(p, str) else p for p in body["planets"]]
+    res = client.put("/api/explorations", json=body)
     assert res.status_code == 200, res.text
 
 
@@ -119,19 +122,51 @@ def test_the_daily_quota_and_the_active_places_are_respected(game_client, game):
     _scan(game_client)
     game.set_exp(daily=45, daily_max=46)
     _set(game_client, copies=2)
-    assert "quota quotidien atteint (45/46)" in _run(game_client)
+    assert "1 planète(s) sautée(s)" in _run(game_client)  # 2 expéditions demandées, 1 seule restante : planète sautée
     assert _launched(game) == []
-    game.set_exp(daily=3, active=7, active_max=10)
-    _set(game_client, rhythm="max")
+    assert any("il en reste 1 dans le quota quotidien" in e["msg"] for e in _bot(game_client).events(20))
+    game.set_exp(daily=46, daily_max=46)
+    assert "quota quotidien atteint (46/46)" in _run(game_client)  # plus rien : le passage s'arrête
+    game.set_exp(daily=3, active=9, active_max=10)  # une seule place active libre
+    _set(game_client, copies=1, planets=[{"name": CONCORDE, "copies": 2}, {"name": EGIDE, "copies": 1}])
+    result = _run(game_client)
+    assert "1 lancement(s)" in result and "1 planète(s) sautée(s)" in result  # Concorde en voulait 2 : sautée, Egide servie
+    assert [(a["planet"], a["copies"]) for a in _launched(game)] == [(EGIDE, 1)]
+    game.set_exp(daily=3, active=10, active_max=10)
     assert "plus de place pour une exploration active (10/10)" in _run(game_client)
-    assert len(_launched(game)) == 3  # autant que possible : jusqu'à remplir les places actives
 
 
-def test_a_fixed_number_of_launches_per_planet_and_per_pass(game_client, game):
+def test_a_planet_chosen_after_the_daily_record_gets_its_breach_at_the_next_pass_once(game_client, game):
     _scan(game_client)
-    _set(game_client, per_pass=2, planets=[CONCORDE, EGIDE])
+    _set(game_client)
+    _run(game_client)  # relevé du jour : Concorde seule
+    assert set(_bot(game_client).explorations.daily()["breaches"]) == {CONCORDE}
+    _set(game_client, planets=[CONCORDE, EGIDE, STRATE])  # Egide et Strate ajoutées dans la journée
     _run(game_client)
-    assert [a["planet"] for a in _launched(game)] == [CONCORDE, CONCORDE, EGIDE, EGIDE]
+    daily = _bot(game_client).explorations.daily()
+    assert daily["breaches"][EGIDE]["address"] == "M79 50 37" and STRATE not in daily["breaches"]  # aucune brèche autour de Strate
+    assert EGIDE in [a["planet"] for a in _launched(game)]
+    events = len(_bot(game_client).events(200))
+    _run(game_client)
+    assert not any("brèches relevées" in e["msg"] for e in _bot(game_client).events(200)[events:])  # Strate n'est pas recherchée à chaque passage
+
+
+def test_one_launch_per_planet_with_its_own_number_of_simultaneous_expeditions(game_client, game):
+    _scan(game_client)
+    _set(game_client, planets=[{"name": CONCORDE, "copies": 3}, {"name": EGIDE, "copies": 1}])
+    _run(game_client)
+    assert [(a["planet"], a["copies"]) for a in _launched(game)] == [(CONCORDE, 3), (EGIDE, 1)]
+
+
+def test_each_planet_can_have_its_own_send(game_client, game):
+    _scan(game_client)
+    fleet = {"method": "FLEET", "composition": "manual", "model": "", "units": {">Lentus": 1}, "duration": 2}
+    _set(game_client, per_planet=True, duration=3,
+         planets=[{"name": CONCORDE, "copies": 2}, {"name": EGIDE, "copies": 1, "send": fleet}])
+    _run(game_client)
+    concorde, egide = _launched(game)
+    assert (concorde["planet"], concorde["method"], concorde["copies"], concorde["duration"]) == (CONCORDE, "PILLARS", 2, 3)
+    assert (egide["planet"], egide["method"], egide["units"], egide["duration"]) == (EGIDE, "FLEET", {">Lentus": 1}, 2)
 
 
 def test_two_unconfirmed_launches_disable_the_feature(game_client, game, monkeypatch):
@@ -139,6 +174,6 @@ def test_two_unconfirmed_launches_disable_the_feature(game_client, game, monkeyp
     _scan(game_client)
     game.set_exp(no_effect=True)  # le clic passe mais le compteur ne bouge pas
     game_client.put("/api/features/explorations", json={"enabled": True, "min_minutes": 1, "max_minutes": 2})
-    _set(game_client, per_pass=2)
+    _set(game_client, planets=[CONCORDE, EGIDE])  # deux lancements dans le passage
     assert "désactivée" in _run(game_client)
     assert _bot(game_client).scheduler.store.get("explorations")["enabled"] is False

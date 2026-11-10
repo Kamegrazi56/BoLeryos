@@ -22,7 +22,7 @@ import time
 
 from . import builder, human
 from .builder import UNCONFIRMED_LIMIT, ConstructionPass
-from .explorations import MAX_PER_PASS, METHODS
+from .explorations import METHODS, plans
 from .numbers import norm
 from .planets import GameUiError, Interrupted
 
@@ -224,11 +224,14 @@ class ExplorationPass(ConstructionPass):
         self._target_debug = ""  # ce que montrait le champ Cible au dernier refus
 
     # ------------------------------------------------------------------ planètes
-    def _targets(self, settings: dict) -> list[str]:
-        if settings["planets"]:
-            return list(settings["planets"])
+    def _all_planets(self) -> list[str]:
         names = [p["name"] for p in self.bot.supervisor.scanned_planets]
         return names or self.bot.supervisor.prefs.get()["catalog"]["planets"]
+
+    def _targets(self, settings: dict) -> list[str]:
+        if settings["planets"]:  # Exploration : [{"name", …}] ; les autres passes dérivées : une liste de noms
+            return [p["name"] if isinstance(p, dict) else p for p in settings["planets"]]
+        return self._all_planets()
 
     def _coords(self, planet: str) -> str | None:
         return next((p.get("coords") for p in self.bot.supervisor.scanned_planets if p["name"] == planet), None)
@@ -255,16 +258,31 @@ class ExplorationPass(ConstructionPass):
             self.scanning = False
         return self.store.daily()
 
-    async def _daily_scan(self, settings: dict, source: str) -> None:
+    async def _find_breaches(self, planets: list[str]) -> tuple[dict, list[str]]:
         breaches: dict = {}
         problems: list[str] = []
-        for planet in self._targets(settings):
+        for planet in planets:
             try:
                 breaches[planet] = await self._find_breach(planet)
                 await self._remember(planet)
             except GameUiError as exc:
                 problems.append(f"{planet} : {exc}")
                 self.bot.log(f"Exploration : pas de brèche relevée pour {planet} ({exc}).", "warn", event=True)
+        return breaches, problems
+
+    async def _complete_daily(self, settings: dict) -> None:
+        """Planètes choisies après le relevé du jour : leur brèche est cherchée maintenant (une fois par jour chacune)."""
+        missing = [p for p in self._targets(settings) if p not in self.store.daily()["tried"]]
+        if not missing:
+            return
+        breaches, problems = await self._find_breaches(missing)
+        self.store.add_breaches(breaches, missing, " ; ".join(problems))
+        found = ", ".join(f"{p} → {b['address']}" for p, b in breaches.items()) or "aucune"
+        self.bot.log(f"Exploration : brèches relevées pour {', '.join(missing)} — {found}.", event=True)
+
+    async def _daily_scan(self, settings: dict, source: str) -> None:
+        planets = self._targets(settings)
+        breaches, problems = await self._find_breaches(planets)
         models: dict = {}
         previous = self.store.daily()["models"]
         for method, label in METHODS.items():
@@ -273,7 +291,7 @@ class ExplorationPass(ConstructionPass):
             except GameUiError as exc:
                 problems.append(f"modèles {label} : {exc}")
                 models[method] = previous.get(method, [])
-        self.store.set_daily(breaches, models, source, " ; ".join(problems))
+        self.store.set_daily(breaches, models, source, " ; ".join(problems), tried=planets)
         found = ", ".join(f"{p} → {b['address']}" for p, b in breaches.items()) or "aucune"
         self.bot.log(f"Exploration : relevé du jour ({source}) — brèches : {found} ; modèles : "
                      + ", ".join(f"{METHODS[m]} {len(v)}" for m, v in models.items()) + ".", event=True)
@@ -399,11 +417,13 @@ class ExplorationPass(ConstructionPass):
 
     # ------------------------------------------------------------------ lancement
     async def run_pass(self) -> str:
+        """Un lancement par planète, avec l'envoi de la planète (commun ou le sien) et ses expéditions simultanées."""
         s = self.store.get()
-        if (s["composition"] == "model" and not s["model"]) or (s["composition"] == "manual" and not s["units"]):
+        common_used = not (s["per_planet"] and s["planets"] and all(p["send"] for p in s["planets"]))
+        if common_used and not self._composed(s):
             return "composition non réglée (onglet Exploration), rien à lancer"
-        planets = self._targets(s)
-        if not planets:
+        todo = [p for p in plans(s, self._all_planets()) if self._composed(p)]
+        if not todo:
             return "aucune planète connue : lancez un scan des planètes (Réglages › Compte et univers)"
         launched: list[str] = []
         skipped = 0
@@ -411,27 +431,30 @@ class ExplorationPass(ConstructionPass):
         try:
             if self.store.daily_due():
                 await self._daily_scan(s, "quotidien")
+            else:
+                await self._complete_daily(s)
             breaches = self.store.daily()["breaches"]
-            await self._open_operations(s["method"])
-            limit = MAX_PER_PASS if s["rhythm"] == "max" else s["per_pass"]
-            for planet in planets:
+            for plan in todo:
+                planet = plan["planet"]
                 breach = breaches.get(planet)
                 if not breach:
                     skipped += 1
                     self.bot.log(f"Exploration : aucune brèche connue pour {planet}, planète sautée.", "warn", event=True)
                     continue
-                for _ in range(limit):
-                    stop = self._quota_reached(await self._counters(), s["copies"])
-                    if stop:
-                        break
-                    outcome = await self._launch(planet, breach, s)
-                    if outcome is None:
-                        skipped += 1
-                        break
-                    launched.append(outcome)
-                await self._remember(planet)
+                await self._open_operations(plan["method"])
+                stop, short = self._room(await self._counters(), plan["copies"])
                 if stop:
                     break
+                if short:  # il reste des places, mais pas assez pour les expéditions de cette planète
+                    skipped += 1
+                    self._skip(planet, short)
+                    continue
+                outcome = await self._launch(planet, breach, plan)
+                if outcome is None:
+                    skipped += 1
+                else:
+                    launched.append(outcome)
+                await self._remember(planet)
         except Interrupted as exc:
             return self._summary(launched, skipped, f"interrompu ({exc})")
         except GameUiError as exc:
@@ -440,13 +463,22 @@ class ExplorationPass(ConstructionPass):
         return self._summary(launched, skipped, stop)
 
     @staticmethod
-    def _quota_reached(counters: dict, copies: int) -> str:
+    def _composed(plan: dict) -> bool:
+        return bool(plan["model"]) if plan["composition"] == "model" else bool(plan["units"])
+
+    @staticmethod
+    def _room(counters: dict, copies: int) -> tuple[str, str]:
+        """(arrêt du passage, planète sautée) : plus aucune place → arrêt ; pas assez pour `copies` → planète sautée."""
         (daily, daily_max), (active, active_max) = counters["daily"], counters["active"]
+        if daily >= daily_max:
+            return f"quota quotidien atteint ({daily}/{daily_max})", ""
+        if active >= active_max:
+            return f"plus de place pour une exploration active ({active}/{active_max})", ""
         if daily_max - daily < copies:
-            return f"quota quotidien atteint ({daily}/{daily_max})"
+            return "", f"{copies} expéditions demandées, il en reste {daily_max - daily} dans le quota quotidien"
         if active_max - active < copies:
-            return f"plus de place pour une exploration active ({active}/{active_max})"
-        return ""
+            return "", f"{copies} expéditions demandées, {active_max - active} place(s) active(s) libre(s)"
+        return "", ""
 
     @staticmethod
     def _summary(launched: list[str], skipped: int, stop: str) -> str:
