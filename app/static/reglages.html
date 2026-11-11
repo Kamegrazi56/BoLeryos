@@ -429,11 +429,12 @@
       </header>
       <details class="help-box">
         <summary>Comment ça marche ?</summary>
-        <p>Le bouton ON/OFF reste le maître. Quand le bot est sur <strong>ON</strong> et que le planning est utilisé, il n'agit que <strong>pendant les plages ci-dessous</strong> (heure française) ; en dehors, il <strong>se déconnecte du jeu</strong> et ne fait rien, puis se reconnecte seul au début de la plage suivante. Un passage en cours se termine avant la déconnexion. Une plage peut passer minuit (ex. 22:00 → 02:00). Un jour sans plage est inactif. Chaque début et chaque fin de plage est décalé au hasard de X à Y minutes, avant ou après l'heure indiquée. L'espionnage manuel n'est pas concerné.</p>
+        <p>Le bouton ON/OFF reste le maître. Quand le bot est sur <strong>ON</strong> et que le planning est utilisé, il n'agit que <strong>pendant les plages ci-dessous</strong> (heure française) ; en dehors, il <strong>ferme la page du jeu</strong>, comme vous fermez l'onglet (sans « Déconnexion » : la session est gardée), et ne fait rien ; au début de la plage suivante, il rouvre le jeu et retrouve la partie (il ne se reconnecte avec vos identifiants que si le jeu a expiré la session). Un passage en cours se termine avant la fermeture. Une plage peut passer minuit (ex. 22:00 → 02:00). Un jour sans plage est inactif. Chaque début et chaque fin de plage est décalé au hasard de X à Y minutes, avant ou après l'heure indiquée. L'espionnage manuel n'est pas concerné.</p>
+        <p><strong>Saisie</strong> : cliquez-glissez sur la grille pour allumer ou éteindre des heures (au quart d'heure) ; en glissant vers le bas, plusieurs jours d'un coup. Ou tapez les plages à droite de chaque jour, par exemple <code>8-12, 18h30-23</code> ou <code>22-2</code> (passe minuit).</p>
       </details>
       <div class="row"><label class="switch"><input id="plan-enabled" type="checkbox" aria-label="Utiliser le planning"> Utiliser le planning</label></div>
       <p id="plan-status" class="status-line" role="status" aria-live="polite"></p>
-      <div id="plan-days" class="plan-days"></div>
+      <div id="plan-days"></div>
       <div class="row">
         <label>Décalage aléatoire : de <input id="plan-offset-min" type="number" min="0" max="120" step="1" aria-label="Décalage minimum (minutes)"></label>
         <label>à <input id="plan-offset-max" type="number" min="0" max="120" step="1" aria-label="Décalage maximum (minutes)"> minutes, avant ou après</label>
@@ -472,6 +473,7 @@
   <script src="/static/excavation.js"></script>
   <script src="/static/hacking.js"></script>
   <script src="/static/spying.js"></script>
+  <script src="/static/week-grid.js"></script>
   <script src="/static/planning.js"></script>
   <script src="/static/alliance.js"></script>
   <script src="/static/mining.js"></script>

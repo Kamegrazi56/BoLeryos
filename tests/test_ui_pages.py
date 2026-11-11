@@ -109,9 +109,11 @@ def test_the_removed_features_have_no_settings_and_no_routes(ui):
     for tab in tabs:  # aucune section supprimée ne réapparaît, quel que soit l'onglet
         page.click(f'[role=tab]:has-text("{tab}")', strict=False)
         # titres seulement : « Expéditions simultanées » (Exploration) est un réglage, pas l'ancienne section Expéditions
-        titles = " ".join(page.locator("main h2:visible, main h3:visible, [role=tab]").all_inner_texts()).lower()
-        for word in ("expéditions", "attaques", "horaires", "alertes"):
+        shown = [t.strip().lower() for t in page.locator("main h2:visible, main h3:visible, [role=tab]").all_inner_texts()]
+        titles = " ".join(shown)
+        for word in ("expéditions", "attaques", "alertes"):
             assert word not in titles
+        assert "horaires" not in shown  # l'ancienne section « Horaires » ; « Horaires du piratage » est la nouvelle
     for route in ("/api/automation", "/api/dashboard", "/api/notifications"):
         assert page.request.get(page.base + route).status == 404
 
@@ -519,23 +521,62 @@ def test_excavation_panel_sets_departure_planets_and_the_duration_and_team_of_ea
     assert errors == []
 
 
-def test_planning_panel_saves_slots_and_the_random_offset(ui):
+def _drag(page, scope, start, end):
+    """Cliquer-glisser sur la grille de la semaine, de la case (jour, quart d'heure) `start` à `end`."""
+    boxes = [page.locator(f"{scope} .wg-cell[data-d='{d}'][data-i='{i}']").bounding_box() for d, i in (start, end)]
+    page.mouse.move(boxes[0]["x"] + boxes[0]["width"] / 2, boxes[0]["y"] + boxes[0]["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(boxes[1]["x"] + boxes[1]["width"] / 2, boxes[1]["y"] + boxes[1]["height"] / 2, steps=8)
+    page.mouse.up()
+
+
+def test_planning_panel_paints_and_types_slots_and_saves_the_random_offset(ui):
     page, errors, app = ui
     page.goto(page.base + "/reglages#planning")
-    page.wait_for_selector("#plan-days button[aria-label='Ajouter une plage le lundi']")
+    page.wait_for_selector("#plan-days input[aria-label='Planning, lundi']")
     page.check("#plan-enabled")
-    page.click("#plan-days button[aria-label='Ajouter une plage le lundi']")
-    page.fill("#plan-days input[aria-label='Lundi, plage 1, début']", "07:30")
-    page.fill("#plan-days input[aria-label='Lundi, plage 1, fin']", "11:45")
-    page.click("#plan-days button[aria-label='Ajouter une plage le mardi']")
+    page.fill("#plan-days input[aria-label='Planning, lundi']", "7:30-11h45")  # au clavier : minutes exactes gardées
+    page.press("#plan-days input[aria-label='Planning, lundi']", "Tab")
+    page.fill("#plan-days input[aria-label='Planning, jeudi']", "22-2")  # passe minuit : une seule plage
+    page.press("#plan-days input[aria-label='Planning, jeudi']", "Tab")
+    _drag(page, "#plan-days", (1, 32), (2, 47))  # mardi 08:00 → mercredi 11:45 (dernière case) : 2 jours d'un geste
+    assert page.input_value("#plan-days input[aria-label='Planning, mardi']") == "08:00-12:00"
     page.fill("#plan-offset-min", "2")
     page.fill("#plan-offset-max", "9")
     page.click("#plan-save")
     page.wait_for_function("document.getElementById('plan-msg').textContent === 'Enregistré.'")
     saved = app.state.bot.planning.get()
     assert saved["enabled"] is True and saved["offset_min"] == 2 and saved["offset_max"] == 9
-    assert saved["days"]["mon"] == [{"start": "07:30", "end": "11:45"}] and saved["days"]["tue"] == [{"start": "08:00", "end": "12:00"}]
+    assert saved["days"]["mon"] == [{"start": "07:30", "end": "11:45"}]
+    assert saved["days"]["tue"] == saved["days"]["wed"] == [{"start": "08:00", "end": "12:00"}]
+    assert saved["days"]["thu"] == [{"start": "22:00", "end": "02:00"}] and saved["days"]["fri"] == []
+    _drag(page, "#plan-days", (1, 40), (1, 40))  # un clic sur une case allumée l'éteint : mardi 10:00-10:15
+    assert page.input_value("#plan-days input[aria-label='Planning, mardi']") == "08:00-10:00, 10:15-12:00"
+    page.fill("#plan-days input[aria-label='Planning, vendredi']", "8 à midi")
+    page.press("#plan-days input[aria-label='Planning, vendredi']", "Tab")
+    page.click("#plan-save")
+    page.wait_for_function("document.getElementById('plan-msg').textContent.startsWith('À corriger')")
+    assert "non compris" in page.text_content("#plan-msg")
     assert page.text_content("#plan-status").startswith(("Dans une plage", "Hors plage"))
+    assert errors == []
+
+
+def test_week_grid_keeps_midnight_slots_whole(ui):
+    page, errors, _ = ui
+    page.goto(page.base + "/reglages#planning")
+    page.wait_for_selector("#plan-days .wg-cell")
+    roundtrip = "(days) => window.weekGrid.fromCells(window.weekGrid.toCells(days))"
+    assert page.evaluate(roundtrip, {"tue": [{"start": "22:00", "end": "02:00"}]})["tue"] == [{"start": "22:00", "end": "02:00"}]
+    sunday = page.evaluate(roundtrip, {"sun": [{"start": "23:00", "end": "01:30"}]})  # dimanche → lundi
+    assert sunday["sun"] == [{"start": "23:00", "end": "01:30"}] and sunday["mon"] == []
+    full = page.evaluate(roundtrip, {"wed": [{"start": "00:00", "end": "12:00"}, {"start": "12:00", "end": "00:00"}]})
+    assert full["wed"] == [{"start": "00:00", "end": "12:00"}, {"start": "12:00", "end": "00:00"}]  # journée entière
+    long_run = {"mon": [{"start": "20:00", "end": "00:00"}], "tue": [{"start": "00:00", "end": "12:00"}, {"start": "12:00", "end": "00:00"}],
+                "wed": [{"start": "00:00", "end": "03:00"}]}
+    split = page.evaluate(roundtrip, long_run)  # plus de 24 h d'affilée : coupée à minuit
+    assert split["mon"] == long_run["mon"] and split["tue"] == long_run["tue"] and split["wed"] == long_run["wed"]
+    assert page.evaluate("() => window.weekGrid.parse('8-10; 16h30-20, 24-1')") == [
+        {"start": "00:00", "end": "01:00"}, {"start": "08:00", "end": "10:00"}, {"start": "16:30", "end": "20:00"}]
     assert errors == []
 
 
@@ -548,18 +589,25 @@ def test_hacking_hours_save_inside_the_bot_planning_and_refuse_outside(ui):
     box = "#panel-hackings [data-feature-hours=hackings]"
     page.wait_for_selector(f"{box} input[aria-label='Limiter le piratage à des horaires']")
     page.check(f"{box} input[aria-label='Limiter le piratage à des horaires']")
-    assert "Planning du bot : 08:00 → 22:00." in page.text_content(f"{box} fieldset:first-child")
-    page.click(f"{box} button[aria-label='Ajouter une plage le lundi (horaires du piratage)']")
-    page.click(f"{box} button[aria-label='Ajouter une plage le lundi (horaires du piratage)']")
-    page.fill(f"{box} input[aria-label='Horaires du piratage, Lundi, plage 2, début']", "16:00")
-    page.fill(f"{box} input[aria-label='Horaires du piratage, Lundi, plage 2, fin']", "20:00")
+    grey = f"{box} .wg-cell.blocked"
+    assert page.locator(f"{box} .wg-cell[data-d='0'][data-i='90']").get_attribute("class").count("blocked") == 1  # lundi 22:30
+    assert "blocked" not in page.locator(f"{box} .wg-cell[data-d='0'][data-i='40']").get_attribute("class")  # lundi 10:00
+    assert page.locator(grey).count() == 96 * 7 - 56  # seul le lundi 08:00-22:00 (56 quarts d'heure) n'est pas grisé
+    field = f"{box} input[aria-label='Horaires du piratage, lundi']"
+    page.fill(field, "8-10, 16-20")
+    page.press(field, "Tab")
+    _drag(page, box, (0, 84), (0, 92))  # lundi 21:00 → 23:00 : seules les cases du planning du bot s'allument
+    assert page.input_value(field) == "08:00-10:00, 16:00-20:00, 21:00-22:00"
     page.click(f"{box} button:has-text('Enregistrer les horaires')")
     page.wait_for_function(f"document.querySelector(\"{box} .msg\").textContent === 'Enregistré.'", timeout=5000)
-    assert bot.feature_hours.get("hackings")["days"]["mon"] == [{"start": "08:00", "end": "10:00"}, {"start": "16:00", "end": "20:00"}]
-    page.fill(f"{box} input[aria-label='Horaires du piratage, Lundi, plage 2, fin']", "23:00")
+    assert bot.feature_hours.get("hackings")["days"]["mon"] == [
+        {"start": "08:00", "end": "10:00"}, {"start": "16:00", "end": "20:00"}, {"start": "21:00", "end": "22:00"}]
+    page.fill(field, "8-10, 16-23")  # au clavier, on peut sortir du planning : le serveur refuse
+    page.press(field, "Tab")
     page.click(f"{box} button:has-text('Enregistrer les horaires')")
     page.wait_for_function(f"document.querySelector(\"{box} .msg\").textContent.includes('sort du planning du bot')", timeout=5000)
     assert bot.feature_hours.get("hackings")["days"]["mon"][1]["end"] == "20:00"  # refusé : rien n'a changé
+    assert "on" in page.locator(f"{box} .wg-cell[data-d='0'][data-i='90']").get_attribute("class")  # 22:30 en rouge (allumé + grisé)
     assert page.locator("#panel-explorations [data-feature-hours=explorations]").count() == 1
     assert errors == []
 

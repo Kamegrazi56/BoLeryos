@@ -106,7 +106,7 @@ def test_the_api_saves_the_planning_and_shows_the_state(client):
     assert refused.status_code == 422
 
 
-def test_outside_the_planning_the_bot_on_does_nothing_and_logs_out(game_client):
+def test_outside_the_planning_the_bot_on_does_nothing_and_closes_the_game(game_client):
     bot = game_client.app.state.bot
     bot.planning.replace({"enabled": True, "days": {}, "offset_min": 0, "offset_max": 0})  # aucune plage
     assert bot.planning_pause() is None  # bot sur OFF : le planning ne s'applique pas
@@ -114,11 +114,12 @@ def test_outside_the_planning_the_bot_on_does_nothing_and_logs_out(game_client):
     try:
         assert bot.planning_pause() == "hors planning — aucune plage prévue"
         assert bot._feature_blocker() == "hors planning — aucune plage prévue"
-        page_before = bot._page
+        page_before, context_before = bot._page, bot._context
         reason = game_client.portal.call(bot.supervisor.ensure_ready)
         assert reason == "hors planning — aucune plage prévue"
-        # déconnecté : session du navigateur effacée (nouvelle page) et état « non connecté »
-        assert bot._state == State.IDLE and bot._page is not page_before
+        # page du jeu fermée (page vide), même navigateur et mêmes cookies : rien n'est effacé
+        assert bot._state == State.IDLE and bot._page is page_before and bot._context is context_before
+        assert bot._page.url == "about:blank"
         assert any("Planning : hors planning" in entry["msg"] for entry in bot.logs(10))
         assert game_client.portal.call(bot.supervisor.ensure_ready) == reason  # une seule déconnexion, puis attente
     finally:

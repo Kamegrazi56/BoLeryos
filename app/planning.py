@@ -1,7 +1,7 @@
 """Planning : plages horaires actives par jour de la semaine (heure française).
 
-Le bouton ON/OFF reste le maître : sur ON, en dehors d'une plage active, le bot ne lance aucun passage et se déconnecte du
-jeu ; il se reconnecte seul au début de la plage suivante. Chaque début et chaque fin de plage est décalé au hasard de X à Y
+Le bouton ON/OFF reste le maître : sur ON, en dehors d'une plage active, le bot ne lance aucun passage et ferme la page du
+jeu en gardant la session (comme un onglet fermé) ; il rouvre le jeu seul au début de la plage suivante. Chaque début et chaque fin de plage est décalé au hasard de X à Y
 minutes, avant ou après l'heure de base (le tirage est fixe pour une plage donnée d'un jour donné). Une plage peut passer
 minuit (ex. 22:00 → 02:00). Un jour sans plage est inactif. Sans la case « Utiliser le planning », le bot est toujours actif.
 L'espionnage manuel n'est pas concerné. Fichier `<data_dir>/planning.json`.

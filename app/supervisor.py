@@ -200,9 +200,10 @@ class ConnectionSupervisor:
                 self._in_game = False
                 await b.pause_session(pause)
             return pause
-        if self._paused:
+        if self._paused:  # début de plage : le jeu est rouvert avec la session gardée (comme un onglet rouvert)
             self._paused = False
-            b.log("Planning : début de plage, reconnexion au jeu.", event=True)
+            b.log("Planning : début de plage, réouverture du jeu.", event=True)
+            await b.resume_session()
         if b._lock.locked():
             return "une autre opération est en cours"
         if b._page is None or b._page.is_closed():

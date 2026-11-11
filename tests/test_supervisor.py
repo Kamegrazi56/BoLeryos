@@ -143,6 +143,43 @@ def test_an_expired_session_is_reconnected_automatically(world_client, game):
     assert _until(lambda: game.info()["login_attempts"] == 2 and "dans la partie" in _connection(c)), _logs(c)[-8:]
 
 
+def _page_url(c):
+    return c.app.state.bot._page.url
+
+
+def test_outside_the_planning_the_game_page_is_closed_but_the_session_is_kept(world_client, game):
+    """Fin de plage = onglet fermé (pas de « Déconnexion ») ; début de plage = jeu rouvert sans nouvelle connexion."""
+    c = world_client
+    bot = c.app.state.bot
+    _universe(c, "Asterion")
+    _creds(c)
+    assert _until(lambda: "dans la partie" in _connection(c)), _logs(c)[-8:]
+    context = bot._context
+    cleared = []
+    bot._session_store.clear = lambda: cleared.append(True)  # les tests n'ont pas de dossier de données : on espionne
+    bot.planning.replace({"enabled": True, "days": {}, "offset_min": 0, "offset_max": 0})  # aucune plage
+    bot.scheduler._on = True  # ON sans lancer la boucle des fonctionnalités
+    try:
+        assert _until(lambda: _has(c, "page du jeu fermée (session gardée)")), _logs(c)[-8:]
+        assert _until(lambda: _page_url(c) == "about:blank")
+        assert bot._context is context  # même navigateur : cookies gardés
+        assert cleared == []  # session enregistrée jamais effacée
+        assert "hors planning" in _connection(c)
+        bot.planning.replace({"enabled": False, "days": {}, "offset_min": 0, "offset_max": 0})  # début de plage
+        assert _until(lambda: "dans la partie" in _connection(c)), _logs(c)[-8:]
+        assert _has(c, "Planning : début de plage, réouverture du jeu.")
+        assert game.info()["login_attempts"] == 1  # aucune nouvelle connexion avec les identifiants
+        assert bot._context is context
+
+        bot.planning.replace({"enabled": True, "days": {}, "offset_min": 0, "offset_max": 0})
+        assert _until(lambda: _page_url(c) == "about:blank")
+        game.logout()  # pendant la pause, le jeu expire la session
+        bot.planning.replace({"enabled": False, "days": {}, "offset_min": 0, "offset_max": 0})
+        assert _until(lambda: game.info()["login_attempts"] == 2 and "dans la partie" in _connection(c)), _logs(c)[-8:]
+    finally:
+        bot.scheduler._on = False
+
+
 def test_manual_control_pauses_the_supervisor(world_client, game):
     c = world_client
     bot = c.app.state.bot

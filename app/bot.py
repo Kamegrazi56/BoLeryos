@@ -230,7 +230,7 @@ class BotSession:
         return self.feature_hours.pause_reason(feature_id)
 
     def planning_pause(self) -> str | None:
-        """Bot sur ON hors d'une plage du planning : rien ne tourne et le bot se déconnecte (None : il peut agir).
+        """Bot sur ON hors d'une plage du planning : rien ne tourne et la page du jeu est fermée (None : il peut agir).
         Sur OFF, en contrôle manuel ou pendant une campagne d'espionnage (manuelle), le planning ne s'applique pas."""
         if not self.scheduler.on or self._manual or self.spy.running:
             return None
@@ -259,22 +259,33 @@ class BotSession:
         return nxt is None or nxt.date() > datetime.now(planning.TIMEZONE).date()
 
     async def pause_session(self, reason: str) -> None:
-        """Hors planning : le passage en cours se termine, puis la session de jeu est effacée (déconnexion).
-        Les identifiants restent en mémoire : la reconnexion se fait seule au début de la plage suivante.
+        """Hors planning : comme un joueur qui ferme l'onglet. Le passage en cours se termine, la session (cookies) est
+        enregistrée, puis la page du jeu est fermée (page vide) SANS effacer les cookies : au début de la plage suivante,
+        le jeu est rouvert avec la même session (connexion avec les identifiants seulement si le jeu l'a expirée).
         (B) Fin de la dernière plage de la journée : les récompenses des missions sont récupérées juste avant."""
         async with self.work:
             if self._last_slot_of_day() and not self.supervisor.game_blocker():
                 await self.missions.claim_daily("la fin de la dernière plage du planning")
-            self._session_store.clear()
+            await self._persist_session()  # avant de quitter l'état « connecté » : n'enregistre que connecté
             async with self._lock:
-                if self._page is not None:
+                if self._page is not None and not self._page.is_closed():
                     try:
-                        await self._reset_context()
+                        await self._page.goto("about:blank")  # onglet du jeu fermé, cookies gardés
                     except Exception as exc:  # noqa: BLE001
-                        self.log(f"Erreur pendant la déconnexion ({type(exc).__name__}).", "error")
-                self._dirty = False
-                self._set(State.IDLE, f"Déconnecté : {reason}.")
-        self.log(f"Planning : {reason} ; déconnexion du jeu.", event=True)
+                        self.log(f"Erreur pendant la fermeture du jeu ({type(exc).__name__}).", "error")
+                self._set(State.IDLE, f"Jeu fermé : {reason}.")
+        self.log(f"Planning : {reason} ; page du jeu fermée (session gardée).", event=True)
+
+    async def resume_session(self) -> None:
+        """Début de plage : le jeu est rouvert avec la session gardée (la supervision reconnaît ensuite la partie, le
+        choix de l'univers, ou la page de connexion si le jeu a expiré la session)."""
+        async with self._lock:
+            if self._page is None or self._page.is_closed():
+                return  # navigateur arrêté : son démarrage ouvrira la page d'accueil
+            try:
+                await self._open_home()
+            except Exception as exc:  # noqa: BLE001 - la supervision réessaie (écran non reconnu → page de départ)
+                self.log(f"Réouverture du jeu impossible ({type(exc).__name__}).", "warn")
 
     async def claim_bonus(self) -> str | None:
         """Récupère le bonus d'activité s'il est disponible (appelé au début de chaque action du bot)."""
