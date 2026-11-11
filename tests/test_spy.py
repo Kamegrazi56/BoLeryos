@@ -53,7 +53,7 @@ def test_the_campaign_spies_every_errant_and_sorts_the_reports(game_client, game
     assert started["status"]["running"] is True and started["bot_on"] is False  # les autres automatismes s'arrêtent
     status = _wait_end(game_client)
     assert status["message"] == "terminé", status
-    # 4 Errants [AI] : Kairo (gardé), Bryn (piliers fermés), Lyra (supprimé), Torek (Drone grisé, hors de portée)
+    # 4 Errants [AI] : Kairo (gardé), Bryn (piliers fermés), Lyra (supprimé), Torek (Drone grisé : Drone indisponible, ratio ×2)
     assert (status["total"], status["spied"], status["kept"], status["deleted"], status["out_of_range"]) == (4, 2, 1, 1, 1)
     assert status["closed"] == ["Bryn-Socle-176 3 (M69 37 24)"]
     assert [a["planet"] for a in _of(game, "drone")] == ["Kairo-Vigie-378 7", "Bryn-Socle-176 3", "Lyra-Voile-12 1"]

@@ -230,7 +230,7 @@ class SpyCampaign(ConstructionPass):
             s = self._status
             s["running"], s["finished"] = False, _now()
             self.bot.log(f"Espionnage : {s['message']} — {s['kept']} cible(s) retenue(s), {s['deleted']} rapport(s) supprimé(s), "
-                         f"{len(self.closed)} Errant(s) aux piliers fermés, {s['out_of_range']} hors de portée"
+                         f"{len(self.closed)} Errant(s) aux piliers fermés, {s['out_of_range']} Drone indisponible (ratio ×2)"
                          f"{skipped_text(s)}.", event=True)
 
     async def _campaign(self, settings: dict) -> None:
