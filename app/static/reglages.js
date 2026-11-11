@@ -139,7 +139,7 @@ setInterval(refreshScan, 5000);
 
 // ------------------------------------------------------------------------------------ onglets
 // Ordre du menu latéral (familles Bot, Économie, Opérations, Alliance).
-const TABS = ["account", "features", "planning", "constructions", "researches", "populations", "ships", "components", "explorations", "excavations", "hackings", "minings", "pillars", "spying", "alliance"];
+const TABS = ["account", "features", "planning", "constructions", "researches", "populations", "ships", "components", "slots", "explorations", "excavations", "hackings", "minings", "pillars", "spying", "alliance"];
 function setTab(id) {
   if (!TABS.includes(id)) id = "account";
   TABS.forEach((t) => {

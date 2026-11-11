@@ -75,6 +75,28 @@ def test_describe_names_the_day():
     assert describe(None) == "aucune plage prévue"
 
 
+def test_log_times_and_daily_keys_are_in_french_time_even_in_a_utc_container(client, monkeypatch):
+    import time as _time
+
+    from app import excavations, explorations, hackings
+    from app.hacker import _clock
+
+    monkeypatch.setenv("TZ", "UTC")
+    _time.tzset()  # conteneur Docker sans réglage : UTC
+    try:
+        bot = client.app.state.bot
+        before = datetime.now(TIMEZONE)
+        bot.log("test de l'heure")
+        after = datetime.now(TIMEZONE)
+        assert bot._logs[-1]["ts"] in {before.strftime("%H:%M:%S"), after.strftime("%H:%M:%S")}
+        assert {explorations.today(), excavations.today(), hackings.today()} <= {before.strftime("%Y-%m-%d"), after.strftime("%Y-%m-%d")}
+        noon_paris = datetime(2026, 11, 11, 12, 0, tzinfo=TIMEZONE).timestamp()
+        assert _clock(noon_paris) == "12:00"  # 11:00 UTC
+    finally:
+        monkeypatch.undo()
+        _time.tzset()
+
+
 def test_the_api_saves_the_planning_and_shows_the_state(client):
     body = client.get("/api/planning").json()
     assert body["settings"]["enabled"] is False and "désactivé" in body["message"] and body["days"]["mon"] == "lundi"

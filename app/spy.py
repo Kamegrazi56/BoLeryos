@@ -16,12 +16,13 @@ import asyncio
 import math
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 
 from . import human
 from .builder import ConstructionPass
 from .numbers import parse_amount
 from .planets import GameUiError, Interrupted
+from .planning import TIMEZONE
 from .spying import RESOURCES, report_matches
 
 ZOOM = 17.5
@@ -122,7 +123,7 @@ CLEAR_JS = "(attribute) => document.querySelectorAll('[' + attribute + ']').forE
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%H:%M:%S")
+    return datetime.now(TIMEZONE).strftime("%H:%M:%S")  # heure française, pas UTC
 
 
 def read_amount(raw: str | None) -> float | None:

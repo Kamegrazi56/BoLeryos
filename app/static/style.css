@@ -458,6 +458,8 @@ dialog.modal ul.missing li { margin: 8px 0; }
 .pill.err { color: var(--warn); border-color: rgba(251, 191, 36, 0.55); background: rgba(251, 191, 36, 0.08); }
 .timing { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--muted); font-size: 13px; }
 .timing input[type=number] { width: 72px; padding: 5px 8px; }
+.timing .t-dur { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.timing .t-dur input[type=number] { width: 54px; padding: 5px 6px; }
 .timing.auto { padding: 3px 10px; border-radius: 3px; border: 1px dashed var(--border-strong); color: var(--accent); cursor: help; }
 
 /* Explications repliables */
@@ -528,6 +530,9 @@ details.help-box p { margin: 6px 0 0; color: var(--muted); font-size: 13px; max-
   padding: 5px 11px; font-size: 13px; color: var(--text); background: rgba(79, 216, 255, 0.07); clip-path: none; border-radius: 3px; border: 1px solid var(--border-strong);
 }
 .plan-day .plan-slot button { color: var(--err); background: transparent; border-color: rgba(251, 113, 133, 0.45); }
+.plan-day .hint { margin: 4px 0; font-size: 12px; }
+/* Horaires propres à une fonctionnalité (Piratage, Exploration), en bas de leur onglet */
+.feature-hours { margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--border); }
 
 /* --------------------------------------------------------------- liste « Fonctionnalités » */
 .features { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }

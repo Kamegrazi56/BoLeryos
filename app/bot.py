@@ -19,7 +19,7 @@ import re
 import time
 from collections import deque
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import Enum
 from urllib.parse import urlsplit
 
@@ -55,6 +55,8 @@ from .hacker import HackingPass
 from .hackings import HackingStore
 from .pillar_pass import PillarPass
 from .pillars import PillarStore
+from .slots import SlotSettings
+from .feature_hours import FeatureHoursStore
 from .scheduler import Scheduler
 from .spy import SpyCampaign
 from .spying import SpySettings
@@ -172,6 +174,7 @@ class BotSession:
         self.shipper = ShipPass(self, self.ships)  # construction de vaisseaux avec des ressources (mode Construction, bouton « Lancer »)
         self.components = LineSettings(settings.data_dir, components.SPEC)  # Composants : composant + mode + quantité + planètes
         self.producer = ComponentPass(self, self.components)  # production de composants (bouton « Produire »)
+        self.slots = SlotSettings(settings.data_dir)  # places de mission : places gardées libres, priorités entre fonctionnalités
         self.explorations = ExplorationStore(settings.data_dir)  # réglages d'exploration + relevé du jour (brèches, modèles)
         self.explorer = ExplorationPass(self, self.explorations)  # explorations vers la brèche la plus proche de chaque planète
         self.excavations = ExcavationStore(settings.data_dir)  # Fouilles : lignes, délai, relevé du jour, Fouilles suivies
@@ -188,6 +191,7 @@ class BotSession:
         self.missions = MissionClaimer(self, self.mission_state)  # « Récupérer » de l'onglet Missions, 1 fois par jour
         self._missions_task: asyncio.Task | None = None
         self.planning = PlanningStore(settings.data_dir)  # plages horaires actives par jour (heure française)
+        self.feature_hours = FeatureHoursStore(settings.data_dir)  # horaires propres au Piratage et à l'Exploration
         self.spying = SpySettings(settings.data_dir)  # espionnage des Errants : planète, minimums, nombre de ressources
         self.spy = SpyCampaign(self, self.spying)  # campagne manuelle : un drone par Errant visible, rapports gardés ou supprimés
         # Ordonnanceur des fonctionnalités (réglages enregistrés ; l'interrupteur général repasse toujours à OFF au démarrage)
@@ -220,6 +224,10 @@ class BotSession:
                   "ships": self.shipper, "components": self.producer, "explorations": self.explorer, "excavations": self.excavator, "hackings": self.hacker, "minings": self.miner}
         if feature_id in passes:
             passes[feature_id]._unconfirmed = 0
+
+    def feature_pause(self, feature_id: str) -> str | None:
+        """Horaires propres d'une fonctionnalité (Piratage, Exploration) : raison si elle ne doit rien lancer maintenant."""
+        return self.feature_hours.pause_reason(feature_id)
 
     def planning_pause(self) -> str | None:
         """Bot sur ON hors d'une plage du planning : rien ne tourne et le bot se déconnecte (None : il peut agir).
@@ -285,7 +293,7 @@ class BotSession:
         `kind` : « attention » signale une intervention nécessaire (c'est aussi un fait marquant)."""
         self._logs.append(
             {
-                "ts": datetime.now(timezone.utc).strftime("%H:%M:%S"),
+                "ts": datetime.now(planning.TIMEZONE).strftime("%H:%M:%S"),  # heure française, pas UTC
                 "t": time.time(),
                 "level": level,
                 "msg": message,

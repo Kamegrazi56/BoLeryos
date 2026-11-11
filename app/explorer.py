@@ -23,6 +23,7 @@ import time
 from . import builder, human
 from .builder import UNCONFIRMED_LIMIT, ConstructionPass
 from .explorations import METHODS, plans
+from .slots import MISSIONS_COUNT_JS, allowance
 from .numbers import norm
 from .planets import GameUiError, Interrupted
 
@@ -222,6 +223,7 @@ class ExplorationPass(ConstructionPass):
         self.store = store
         self.scanning = False
         self._target_debug = ""  # ce que montrait le champ Cible au dernier refus
+        self.last_counters: dict | None = None  # derniers compteurs d'exploration lus (quota du jour, places actives)
 
     # ------------------------------------------------------------------ planètes
     def _all_planets(self) -> list[str]:
@@ -396,7 +398,18 @@ class ExplorationPass(ConstructionPass):
         raw = await self._eval(COUNTERS_JS)
         if not raw.get("daily") or not raw.get("active"):
             raise GameUiError("compteurs d'exploration illisibles")
+        self.last_counters = raw  # quota du jour et places d'exploration : servent au calcul des places de mission
         return raw
+
+    async def _mission_room(self) -> tuple[int, str]:
+        """Places de mission que cette fonctionnalité peut prendre maintenant (onglet Places de mission) : compteur
+        « Missions actives » du jeu, moins les places gardées libres et ce qui manque aux priorités au-dessus.
+        Compteur illisible : pas de limite (le jeu refusera de lui-même)."""
+        count = await self.page.evaluate(MISSIONS_COUNT_JS)
+        if not count:
+            return 999, ""
+        self.bot.slots.set_seen(count[0], count[1])
+        return allowance(self.bot, self.feature_id, count[0], count[1])
 
     async def _open_models_dialog(self) -> list[dict]:
         await self._click_named("Modèles")
@@ -445,6 +458,12 @@ class ExplorationPass(ConstructionPass):
                 stop, short = self._room(await self._counters(), plan["copies"])
                 if stop:
                     break
+                room, why = await self._mission_room()  # une copie = une place de mission jusqu'au retour
+                if room <= 0:
+                    stop = f"plus de place de mission ({why})"
+                    break
+                if room < plan["copies"] and not short:
+                    short = f"{plan['copies']} expéditions demandées, {room} place(s) de mission disponible(s) ({why})"
                 if short:  # il reste des places, mais pas assez pour les expéditions de cette planète
                     skipped += 1
                     self._skip(planet, short)

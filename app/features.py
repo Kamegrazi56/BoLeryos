@@ -125,7 +125,7 @@ def validate_entry(entry: dict, floor: float, timed: bool = True) -> dict:
     low, high = out["min_minutes"], out["max_minutes"]
     for name, value in (("minimum", low), ("maximum", high)):
         if value is not None and (not _is_number(value) or not floor <= value <= MAX_MINUTES):
-            errors.append(f"Minuteur : le {name} doit être entre {floor:g} et {MAX_MINUTES:g} minutes.")
+            errors.append(f"Minuteur : le {name} doit être entre {floor:g} min et {MAX_MINUTES / 60:g} h.")
     if not errors and low is not None and high is not None and low > high:
         errors.append("Minuteur : le minimum dépasse le maximum.")
     if not errors and timed and out["enabled"] is True and (low is None or high is None):

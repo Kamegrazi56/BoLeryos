@@ -32,6 +32,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from .planning import local_date
+
 FILE_NAME = "excavations.json"
 # Le jeu accepte aussi Rempart de Fer, Spectre du Rift, Surchargeur Plasmique et Faucheur Cinétique : retirés à la demande du
 # joueur, qui ne les envoie jamais en Fouille.
@@ -62,7 +64,7 @@ class ExcavationError(Exception):
 
 
 def today() -> str:
-    return time.strftime("%Y-%m-%d")
+    return local_date()  # date française, pas celle du conteneur
 
 
 def _int_in(value, low: int, high: int) -> bool:

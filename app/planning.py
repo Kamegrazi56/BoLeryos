@@ -21,6 +21,12 @@ from zoneinfo import ZoneInfo
 
 FILE_NAME = "planning.json"
 TIMEZONE = ZoneInfo("Europe/Paris")
+
+
+def local_date() -> str:
+    """Date du jour en France (AAAA-MM-JJ), quel que soit le fuseau du conteneur : clé des relevés quotidiens."""
+    return datetime.now(TIMEZONE).strftime("%Y-%m-%d")
+
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")  # même ordre que date.weekday()
 DAY_LABELS = {"mon": "lundi", "tue": "mardi", "wed": "mercredi", "thu": "jeudi", "fri": "vendredi", "sat": "samedi", "sun": "dimanche"}
 MAX_SLOTS_PER_DAY = 10

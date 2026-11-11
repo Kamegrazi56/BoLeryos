@@ -24,8 +24,10 @@ RUN mkdir -p /data && chown pwuser:pwuser /data
 
 # Aucune donnée du joueur dans l'image ni dans l'environnement :
 # l'identifiant et le mot de passe sont saisis dans l'interface web.
+# TZ : heure française pour tout le conteneur (navigateur du jeu, heures affichées, changement de jour).
 ENV CHROMIUM_NO_SANDBOX=true \
     VNC=true \
+    TZ=Europe/Paris \
     PYTHONUNBUFFERED=1
 
 USER pwuser

@@ -115,12 +115,17 @@ class Scheduler:
         return self.store.set_order(order)
 
     # ------------------------------------------------------------------ passages
+    def _paused(self, fid: str) -> str | None:
+        """Horaires propres à la fonctionnalité (Piratage, Exploration) : raison si elle est hors de ses plages."""
+        check = getattr(self.bot, "feature_pause", None)
+        return check(fid) if check is not None else None
+
     def _due(self) -> Feature | None:
         now = self._clock()
         for fid in self.store.order:  # l'ordre de la liste est l'ordre de priorité
             rt = self._runtime[fid]
-            if self.store.get(fid)["enabled"] and rt.next_at is not None and rt.next_at <= now:
-                return self._features[fid]
+            if self.store.get(fid)["enabled"] and rt.next_at is not None and rt.next_at <= now and not self._paused(fid):
+                return self._features[fid]  # hors de ses horaires : reste due, et passe dès le début de sa plage
         return None
 
     def _draw_delay(self, fid: str) -> float:
@@ -235,6 +240,7 @@ class Scheduler:
                 "last_at": rt.last_at,
                 "last_result": rt.last_result,
                 "last_ok": rt.last_ok,
+                "paused": self._paused(fid) if entry["enabled"] else None,  # hors de ses horaires propres
             })
         return {
             "bot_on": self._on,

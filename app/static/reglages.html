@@ -37,6 +37,7 @@
         <button role="tab" id="tab-ships" data-tab="ships" aria-controls="panel-ships">Assemblages<span class="dot" data-dot="ships" aria-hidden="true"></span></button>
         <button role="tab" id="tab-components" data-tab="components" aria-controls="panel-components">Composants<span class="dot" data-dot="components" aria-hidden="true"></span></button>
         <p class="side-group" aria-hidden="true">Opérations</p>
+        <button role="tab" id="tab-slots" data-tab="slots" aria-controls="panel-slots">Places de mission</button>
         <button role="tab" id="tab-explorations" data-tab="explorations" aria-controls="panel-explorations">Exploration<span class="dot" data-dot="explorations" aria-hidden="true"></span></button>
         <button role="tab" id="tab-excavations" data-tab="excavations" aria-controls="panel-excavations">Fouilles<span class="dot" data-dot="excavations" aria-hidden="true"></span></button>
         <button role="tab" id="tab-hackings" data-tab="hackings" aria-controls="panel-hackings">Piratage<span class="dot" data-dot="hackings" aria-hidden="true"></span></button>
@@ -217,6 +218,24 @@
       <p id="cmp-msg" class="msg" role="status" aria-live="polite"></p>
     </section>
 
+    <section class="tabpanel card" id="panel-slots" role="tabpanel" aria-labelledby="tab-slots" hidden>
+      <header class="panel-head">
+        <div><p class="eyebrow">Opérations</p><h2 id="slots-title">Places de mission</h2><p class="lede">Partager les places de mission du compte entre Fouilles, Explorations, Forages et Piratage.</p></div>
+      </header>
+      <details class="help-box">
+        <summary>Comment ça marche ?</summary>
+        <p>Le compteur « Missions actives » du jeu est commun à tout le compte : une Exploration (une place par copie), une Fouille, un Piratage ou un Forage occupe une place jusqu'à son retour. Avant chaque lancement, le bot lit ce compteur et ne prend que les places restantes, moins les <strong>places à garder libres</strong> (pour vos actions à la main), moins ce qui <strong>manque encore aux fonctionnalités placées au-dessus</strong> dans la liste de priorité : Fouilles réglées qui ne sont pas en cours, places de forage libres, Piratage si Naël n'est pas en mission, copies du prochain passage d'Exploration (rien si le quota du jour est épuisé). Une fonctionnalité désactivée ne réserve rien. Sans place, rien n'est lancé et le journal le dit ; la fonctionnalité réessaie à son prochain passage.</p>
+      </details>
+      <p id="slots-seen" class="status-line" role="status" aria-live="polite">Compteur pas encore lu.</p>
+      <div class="row">
+        <label>Places à toujours garder libres <input id="slots-reserve" type="number" min="0" max="50" step="1" value="0"></label>
+      </div>
+      <h3>Priorité (la 1 se sert en premier)</h3>
+      <ol id="slots-order" class="cons-queue"></ol>
+      <p id="slots-summary" class="status-line exp-summary" role="status" aria-live="polite"></p>
+      <p id="slots-msg" class="msg" role="status" aria-live="polite"></p>
+    </section>
+
     <section class="tabpanel card" id="panel-explorations" role="tabpanel" aria-labelledby="tab-explorations" hidden>
       <header class="panel-head">
         <div><p class="eyebrow">Opérations</p><h2 id="exp-title">Exploration</h2><p class="lede">Envoyer des explorations vers la brèche la plus proche de chaque planète.</p></div>
@@ -255,6 +274,7 @@
       </div>
       <p id="exp-daily" class="status-line" role="status" aria-live="polite">Aucun relevé pour l'instant.</p>
       <ul id="exp-breaches" class="hint"></ul>
+      <div class="feature-hours" data-feature-hours="explorations"></div>
     </section>
 
     <section class="tabpanel card" id="panel-excavations" role="tabpanel" aria-labelledby="tab-excavations" hidden>
@@ -318,6 +338,7 @@
       <h3>Errants les plus proches</h3>
       <p id="hack-status" class="status-line" role="status" aria-live="polite">Aucun relevé pour l'instant.</p>
       <ul id="hack-targets" class="tracked"></ul>
+      <div class="feature-hours" data-feature-hours="hackings"></div>
     </section>
 
     <section class="tabpanel card" id="panel-minings" role="tabpanel" aria-labelledby="tab-minings" hidden>
@@ -455,5 +476,7 @@
   <script src="/static/alliance.js"></script>
   <script src="/static/mining.js"></script>
   <script src="/static/pillars.js"></script>
+  <script src="/static/slots.js"></script>
+  <script src="/static/hours.js"></script>
 </body>
 </html>

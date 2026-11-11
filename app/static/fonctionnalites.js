@@ -1,4 +1,4 @@
-// Fonctionnalités : interrupteur, minuteur (minimum / maximum en minutes) et priorité de chaque fonctionnalité.
+// Fonctionnalités : interrupteur, minuteur (minimum / maximum en heures + minutes) et priorité de chaque fonctionnalité.
 // Rendu à trois endroits : la liste « Fonctionnalités » (vue d'ensemble), l'en-tête de la page de chaque fonctionnalité
 // (même interrupteur, même minuteur) et la pastille d'état du menu latéral.
 (() => {
@@ -62,7 +62,8 @@
     if (f.running) return "Passage en cours…";
     const parts = [];
     if (f.enabled) {
-      if (f.next_in_s === null) parts.push("Prochain passage : au démarrage du bot (ON)");
+      if (f.paused) parts.push(`En pause : ${f.paused}`);  // hors de ses horaires propres (Piratage, Exploration)
+      else if (f.next_in_s === null) parts.push("Prochain passage : au démarrage du bot (ON)");
       else if (waiting && f.next_in_s === 0) parts.push(`En attente : ${waiting}`);
       else parts.push(f.next_in_s === 0 ? "Prochain passage : maintenant" : `Prochain passage dans ${dur(f.next_in_s)}`);
     } else parts.push("Désactivée");
@@ -70,20 +71,30 @@
     return parts.join(" · ");
   }
 
+  /** Une borne du minuteur en heures + minutes (enregistrée en minutes par le bot). */
+  function duration(total, which, f, suffix) {
+    const known = total !== null && total !== undefined;
+    const h = known ? Math.floor(total / 60) : "";
+    const m = known ? +(total - h * 60).toFixed(2) : "";
+    const hours = el("input", { type: "number", min: "0", max: "24", step: "1", value: h, className: "t-h", ariaLabel: `Minuteur ${which}, heures, de ${f.label}${suffix}` });
+    const minutes = el("input", { type: "number", min: "0", step: "0.5", value: m, className: "t-m", ariaLabel: `Minuteur ${which}, minutes, de ${f.label}${suffix}` });
+    const read = () => (hours.value === "" && minutes.value === "" ? undefined : Number(hours.value || 0) * 60 + Number(minutes.value || 0));
+    return { node: el("span", { className: "t-dur" }, hours, " h ", minutes, " min"), read, inputs: [hours, minutes] };
+  }
+
   /** Interrupteur + minuteur d'une fonctionnalité ; `suffix` distingue les libellés de l'en-tête de page. */
   function controls(f, suffix = "") {
-    const min = el("input", { type: "number", min: "0", step: "0.5", value: f.min_minutes ?? "", ariaLabel: `Minuteur minimum (minutes) de ${f.label}${suffix}` });
-    const max = el("input", { type: "number", min: "0", step: "0.5", value: f.max_minutes ?? "", ariaLabel: `Minuteur maximum (minutes) de ${f.label}${suffix}` });
-    const timer = () => ({ min_minutes: min.value === "" ? undefined : Number(min.value), max_minutes: max.value === "" ? undefined : Number(max.value) });
-    min.addEventListener("input", () => schedulePush(f.id, timer));
-    max.addEventListener("input", () => schedulePush(f.id, timer));
+    const min = duration(f.min_minutes, "minimum", f, suffix);
+    const max = duration(f.max_minutes, "maximum", f, suffix);
+    const timer = () => ({ min_minutes: min.read(), max_minutes: max.read() });
+    [...min.inputs, ...max.inputs].forEach((input) => input.addEventListener("input", () => schedulePush(f.id, timer)));
     const toggle = el("input", { type: "checkbox", checked: f.enabled, ariaLabel: `Activer ${f.label}${suffix}` });
     toggle.addEventListener("change", () => push(f.id, f.self_timed ? { enabled: toggle.checked } : { enabled: toggle.checked, ...timer() }));
     const switchBox = el("label", { className: "toggle" }, toggle, el("span", { textContent: "Activée" }));
     // Relance automatique (Fouilles, Piratage, Forages) : pas de minuteur, le bot repasse à la fin de chaque mission + le délai choisi.
     const timing = f.self_timed
       ? el("span", { className: "timing auto", title: "À la fin de chaque mission, plus le délai choisi dans sa page (vérification de secours toutes les 30 minutes).", textContent: "Relance automatique" })
-      : el("span", { className: "timing" }, `${f.timer_label} `, min, " à ", max, " min");
+      : el("span", { className: "timing" }, `${f.timer_label} `, min.node, " à ", max.node);
     return { switchBox, timing };
   }
 

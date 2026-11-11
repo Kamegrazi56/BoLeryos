@@ -28,6 +28,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from .planning import local_date
+
 FILE_NAME = "explorations.json"
 METHODS = {"PILLARS": "Piliers", "FLEET": "Flotte"}
 # Seules ces unités partent en exploration par les Piliers (wiki du jeu) ; en Flotte, ce sont les modèles de vaisseaux.
@@ -59,7 +61,7 @@ class ExplorationError(Exception):
 
 
 def today() -> str:
-    return time.strftime("%Y-%m-%d")
+    return local_date()  # date française, pas celle du conteneur
 
 
 def _int_in(value, low: int, high: int) -> bool:

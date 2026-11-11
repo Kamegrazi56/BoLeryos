@@ -44,6 +44,9 @@ class ConnectionSupervisor:
         self.scanning_models = False
         self._models_done_session = False
         self._models_attempts = 0
+        # État des Piliers (ouverts / fermés / en cours de changement), relevé après les modèles : même principe.
+        self._pillars_done_session = False
+        self._pillars_attempts = 0
         # Connexion automatique
         self.connection = ""  # état affiché dans l'interface
         self._keeper: asyncio.Task | None = None
@@ -215,6 +218,7 @@ class ConnectionSupervisor:
         if screen in ("login", "universes"):  # nouvelle connexion : la liste des planètes est à relire
             self._scan_done_session, self._scan_attempts = False, 0
             self._models_done_session, self._models_attempts = False, 0
+            self._pillars_done_session, self._pillars_attempts = False, 0
         if screen == "game":
             self._universe_attempts = 0
             if not self._in_game:  # arrivée (ou retour) dans la partie
@@ -226,6 +230,12 @@ class ConnectionSupervisor:
             if self._scan_done_session and not self._models_done_session and self._models_attempts < SCAN_AUTO_ATTEMPTS and not b.work.locked():
                 self._models_attempts += 1
                 await self.scan_models("démarrage")  # une fois par connexion, après les planètes
+            pillar = getattr(b, "pillar", None)
+            if (pillar is not None and self._models_done_session and not self._pillars_done_session
+                    and self._pillars_attempts < SCAN_AUTO_ATTEMPTS and not b.work.locked()):
+                self._pillars_attempts += 1
+                result = await pillar.scan("démarrage")  # une fois par connexion, après les modèles (lecture seule)
+                self._pillars_done_session = not result.get("error")
             return None
         if screen == "universes":
             return await self._pick_universe()

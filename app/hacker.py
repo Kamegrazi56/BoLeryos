@@ -13,6 +13,7 @@ import math
 import random
 import re
 import time
+from datetime import datetime
 
 from . import human
 from .builder import UNCONFIRMED_LIMIT
@@ -20,6 +21,7 @@ from .excavator import MISSIONS_JS, READY_SECONDS, stable_read, wait_enabled, wa
 from .explorer import CLEAR_MARK_JS, MARK_TARGET_JS, TARGET_ATTRIBUTE, ExplorationPass
 from .hackings import TARGETS_KEPT
 from .planets import GameUiError, Interrupted
+from .planning import TIMEZONE
 from .spy import TARGETS_JS
 
 HACKING_PATH = "operations?method=PILLARS&mission=HACKING"
@@ -28,6 +30,11 @@ PAGE_WAIT_SECONDS = 10.0
 LAUNCH_NAME = re.compile(r"^Lancer le piratage", re.I)
 REFUSED_RE = re.compile(r"^Impossible", re.I)
 HACK_CONFIRM_SECONDS = 20.0  # vu sur le vrai jeu : un lancement réussi n'a pas été vu en 8 s
+
+
+def _clock(ts: float) -> str:
+    """Heure française (HH:MM) d'un instant, quel que soit le fuseau du conteneur."""
+    return datetime.fromtimestamp(ts, TIMEZONE).strftime("%H:%M")
 
 # Message du jeu après un lancement réussi : « Vortex généré. Mission de Piratage en cours. »
 STARTED_JS = """() => [...document.querySelectorAll('body *')].some((e) => !e.children.length && e.getClientRects().length
@@ -160,6 +167,10 @@ class HackingPass(ExplorationPass):
                 return wait
             if not await self._nael_available():
                 return "Naël Soryn n'est pas disponible"
+            room, why = await self._mission_room()  # places gardées libres et priorités (onglet Places de mission)
+            if room <= 0:
+                self.bot.log(f"Piratage : plus de place de mission ({why}).", event=True)
+                return f"plus de place de mission ({why})"
             return await self._launch_next(s)
         except Interrupted as exc:
             return f"interrompu ({exc})"
@@ -192,12 +203,12 @@ class HackingPass(ExplorationPass):
             end = now + (mission["left"] or 0)
             delay = (state["ready"] - state["end"]) if state["end"] is not None and state["ready"] is not None else draw_delay(s)
             self.store.set_state(end=end, ready=end + delay)
-            return f"piratage en cours vers {mission['site'] or '?'}, fin à {time.strftime('%H:%M', time.localtime(end))}"
+            return f"piratage en cours vers {mission['site'] or '?'}, fin à {_clock(end)}"
         if state["end"] is not None and state["end"] > now:  # absent de la liste : terminé au plus tard maintenant
             delay = state["ready"] - state["end"]
             state = self.store.set_state(end=now, ready=now + delay)
         if state["ready"] is not None and now < state["ready"]:
-            return f"délai avant relance : prochain piratage vers {time.strftime('%H:%M', time.localtime(state['ready']))}"
+            return f"délai avant relance : prochain piratage vers {_clock(state['ready'])}"
         return ""
 
     async def _launch_next(self, s: dict) -> str:

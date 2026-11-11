@@ -154,6 +154,9 @@ def initial_state():
         # Piliers (fenêtre « Gérer les Piliers », vrai jeu 10/11) : planète → {"closed", "pending": {"to", "end"} | None} ;
         # absente = Piliers actifs. no_effect : le clic de confirmation ne fait rien.
         "pillars": {}, "pillar_no_effect": False,
+        # Missions actives (commun au compte, en-tête d'Opérations) : Fouilles + Piratage + Forages + explorations actives
+        # + autres missions ; maximum du compte.
+        "missions_max": 29,
         # Capteurs interstellaires : un déploiement du joueur, comme dans l'export (aucune attaque au départ)
         "movements": [_movement("Déploiement", ("6-79-Egide", "M69 38 06", "KameGrazi"), ("8-50-Concorde", "Z25 95 16", "KameGrazi"))],
         # Liste de la Galaxie autour de la planète active (structure de l'export du 2026-11-03)
@@ -351,10 +354,10 @@ function excCards() {
 }
 function excForm(p) {
   const exc = state.exc, units = p.units.EXCAVATION, f = ui.form;
-  const missions = exc.active.length + exc.other_missions;
+  const missions = missionsCount();
   const total = Object.values(f.units).reduce((s, q) => s + (+q || 0), 0);
   const valid = /^[A-Z]\\d{2} \\d{2} \\d{2}$/.test(f.target);
-  const ok = valid && total >= 1 && total <= 5000 && exc.active.length < exc.max && missions < 29
+  const ok = valid && total >= 1 && total <= 5000 && exc.active.length < exc.max && missions < state.missions_max
     && Object.entries(f.units).every(([n, q]) => (+q || 0) <= (units[n] || 0));
   const rows = Object.entries(units).map(([n, c]) => `<div><span>${n}</span><span>Stock : ${int(c)}</span><input type="number" placeholder="0" class="unit" data-u="${n}" aria-label="Quantité ${n}" value="${f.units[n] || ''}"></div>`).join('');
   const hero = '<div><span>Héros de mission</span>'
@@ -364,7 +367,7 @@ function excForm(p) {
   return `<div class="cible"><label>Cible</label><button type="button">Favoris</button><input type="text" id="target" placeholder="G46 50 50" value="${f.target}">${valid ? `<span class="font-mono">${f.target}</span>` : ''}</div>`
     + hero + `<div><h3>2. Composition de mission</h3><button type="button">Modèles</button>${rows}</div><button type="button">Mobilisation générale</button>`
     + `<div><h3>Durée et lancement</h3>${hours}<div><span>Fouilles actives</span><span>${exc.active.length} / ${exc.max}</span></div>`
-    + `<div><span>Missions actives</span><span>${missions} / 29</span></div>`
+    + `<div><span>Missions actives</span><span>${missions} / ${state.missions_max}</span></div>`
     + `<button type="button" id="elaunch" ${ok ? '' : 'disabled'}>Lancer la fouille</button></div>`
     + `<section><h3>Missions en cours</h3>${excCards() || '<p>Aucune mission disponible</p>'}</section>`;
 }
@@ -467,6 +470,8 @@ function pillarsDialog() {
     + `<h2>Gérer les Piliers</h2><ul>${rows}</ul><button type="button" class="pclose">Fermer</button></div>` + confirm
     + (ui.toasts.length ? `<div role="alert" class="pillar-toasts">${ui.toasts.map((t) => `<div>${t.text}</div>`).join('')}</div>` : '');
 }
+const missionsCount = () => state.exc.active.length + state.exc.other_missions + (state.hack.active ? 1 : 0)
+  + state.mining.active.length + state.exp.active;
 function opsMain() {
   const ex = state.exp;
   const ways = ['Piliers', 'Flotte'].map((w) => `<button type="button" class="way" data-way="${w}">${w.toUpperCase()}</button>`).join('');
@@ -478,7 +483,7 @@ function opsMain() {
   if (ui.mission === 'EXCAVATION') body = excForm(state.planets[state.active]);
   if (ui.mission === 'HACKING') body = hackForm();
   if (ui.mission === 'MINING') body = mineForm(state.planets[state.active]);
-  return '<h2>Opérations</h2><button type="button" id="gpil">Gérer les Piliers</button><div><span>Moyen de lancement</span>' + ways + '</div><div><span>Mission</span>' + missions + '</div>' + body + pillarsDialog();
+  return `<h2>Opérations</h2><button type="button" id="gpil">Gérer les Piliers</button><div class="ops-count"><span>Missions actives : ${missionsCount()} / ${state.missions_max}</span></div><div><span>Moyen de lancement</span>` + ways + '</div><div><span>Mission</span>' + missions + '</div>' + body + pillarsDialog();
 }
 function sensors() {
   const side = (s) => `<div><span>${s.planet}</span><button type="button">${s.coords}</button><span>${s.player}</span></div>`;
@@ -1078,6 +1083,8 @@ def create_mock_game() -> FastAPI:
         for key in ("max", "mira_busy", "other_missions", "no_effect"):
             if key in body:
                 exc[key] = body[key]
+        if "missions_max" in body:  # places de mission du compte (en-tête d'Opérations)
+            app.state.game["missions_max"] = body["missions_max"]
         if "active" in body:
             exc["active"] = [{"name": f"Site {a['site']}", **a, "end": time.time() + a.pop("end_in", 3600)} for a in body["active"]]
         return {"ok": True}

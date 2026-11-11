@@ -407,6 +407,9 @@ class ExcavationPass(ExplorationPass):
         stop = self._full(await self._counters())
         if stop:
             return stop, None
+        room, why = await self._mission_room()  # places gardées libres et priorités (onglet Places de mission)
+        if room <= 0:
+            return f"plus de place de mission ({why})", None
         planet = slot["planet"]
         site = next((x["address"] for x in self.store.daily()["sites"].get(planet, []) if x["address"] not in busy), None)
         if site is None:

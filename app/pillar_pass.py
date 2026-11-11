@@ -153,8 +153,9 @@ class PillarPass(ConstructionPass):
             self.store.set_status(planets)
         return planets
 
-    async def scan(self) -> dict:
-        """Relève l'état des Piliers à la demande. Ne lève jamais : renvoie {"error": raison} en cas d'échec."""
+    async def scan(self, source: str = "manuel") -> dict:
+        """Relève l'état des Piliers (au démarrage, après les planètes et les modèles, ou à la demande). Lecture seule.
+        Ne lève jamais : renvoie {"error": raison} en cas d'échec."""
         if self.scanning:
             return {"error": "relevé déjà en cours"}
         busy = "une fonctionnalité est en cours, réessayez dans un instant" if self.bot.work.locked() else None
@@ -168,6 +169,11 @@ class PillarPass(ConstructionPass):
                 await self._open_manager()
                 planets = await self._save_status()
                 await self._close_manager()
+                closed = sorted(n for n, p in planets.items() if p["closed"] and p["pending_to"] != "open")
+                changing = sorted(f"{n} ({'ouverture' if p['pending_to'] == 'open' else 'fermeture'} en cours)"
+                                  for n, p in planets.items() if p["pending_to"])
+                self.bot.log(f"Piliers ({source}) : état relevé sur {len(planets)} planète(s) — fermés : {', '.join(closed) or 'aucune'}"
+                             + (f" ; {', '.join(changing)}" if changing else "") + ".", event=True)
                 return {"error": "", "planets": len(planets)}
         except (Interrupted, GameUiError) as exc:
             self.bot.log(f"Piliers : relevé impossible ({exc}).", "warn", event=True)

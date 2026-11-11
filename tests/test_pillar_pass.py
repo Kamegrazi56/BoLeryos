@@ -57,6 +57,23 @@ def test_the_status_of_each_planet_is_read_from_the_manager_window(game_client, 
     assert game.actions() == [] and _forbidden(game) == []  # le relevé ne clique sur rien
 
 
+def test_the_bot_reads_the_pillars_by_itself_once_after_the_planets_and_models(game_client, game):
+    game.set_pillars(planets={STRATE: {"closed": True}})
+    runner = _bot(game_client).supervisor
+    assert game_client.portal.call(runner.ensure_ready) is None
+    status = _bot(game_client).pillars.status()
+    assert status["planets"][STRATE]["closed"] is True and status["planets"][EGIDE]["closed"] is False
+    assert runner.scan_summary()["source"] == "démarrage" and runner.models_summary()["source"] == "démarrage"
+    assert any("Piliers (démarrage) : état relevé sur 3 planète(s) — fermés : 9-169-Strate" in e["msg"] for e in _bot(game_client).events(20))
+    read_at = status["read_at"]
+    game_client.portal.call(runner.ensure_ready)
+    assert _bot(game_client).pillars.status()["read_at"] == read_at  # pas de second relevé pour la même connexion
+    runner._pillars_done_session, runner._pillars_attempts = False, 0  # nouvelle connexion
+    game_client.portal.call(runner.ensure_ready)
+    assert _bot(game_client).pillars.status()["read_at"] > read_at
+    assert game.actions() == []  # lecture seule : aucun clic sur les Piliers ni le champ de force
+
+
 def test_a_due_change_is_clicked_and_confirmed_then_the_countdown_is_seen(game_client, game):
     _scan(game_client)
     change = _program(game_client, EGIDE, "close", click_in_minutes=-1)

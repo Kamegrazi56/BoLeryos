@@ -179,6 +179,10 @@ class MiningPass(ExplorationPass):
             busy |= {c["destination"]["address"] if c["kind"] == "Forage" else c["origin"]["address"] for c in cards}
             preferred = [f["site"] for f in finished]  # relancer sur la même planète minière si elle existe encore
             for _ in range(max(0, s["slots"] - len(tracked))):
+                room, why = await self._mission_room()  # places gardées libres et priorités (onglet Places de mission)
+                if room <= 0:
+                    self.bot.log(f"Forages : plus de place de mission ({why}).", event=True)
+                    return self._summary(launched, f"plus de place de mission ({why})")
                 planet = min(s["planets"], key=lambda p: sum(1 for t in tracked if t["planet"] == p))
                 site = await self._find_site(planet, s, busy, preferred)
                 if site is None:

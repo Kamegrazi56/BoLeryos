@@ -36,11 +36,16 @@ from .pillars import ACTIONS as PILLAR_ACTIONS
 from .pillars import PillarError
 from .pillars import click_time as pillar_click_time
 from .pillars import when as pillar_when
+from .slots import LABELS as SLOT_LABELS
+from .slots import SlotError
+from .slots import need as slot_need
 from .alliance import AllianceError
 from .minings import MAX_MINERS as MINING_MAX_MINERS
 from .minings import RESOURCES as MINING_RESOURCES
 from .minings import MiningError
 from .hackings import HackingError
+from .feature_hours import FEATURES as FEATURE_HOURS
+from .feature_hours import FeatureHoursError
 from .planning import DAY_LABELS as PLANNING_DAY_LABELS
 from .planning import PlanningError
 from .planning import describe as planning_describe
@@ -168,6 +173,11 @@ class ExcavationRequest(ExcavationSend):  # durée + équipe : l'envoi commun
     mira: str = Field(default="", max_length=200)
     delay_min: int | None = Field(default=None, ge=0, le=100_000)
     delay_max: int | None = Field(default=None, ge=0, le=100_000)
+
+
+class SlotsRequest(BaseModel):
+    reserve: int = Field(default=0, ge=0, le=1000)  # places de mission à toujours garder libres
+    order: list[str] = Field(default_factory=list, max_length=10)  # priorité des fonctionnalités qui envoient des missions
 
 
 class PillarChangeRequest(BaseModel):
@@ -685,6 +695,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await bot.hacker.scan("manuel")
         return JSONResponse(_hackings_payload(), headers=NO_STORE)
 
+    # --- Places de mission : places gardées libres et priorités entre Fouilles, Explorations, Forages, Piratage -----------
+    def _slots_payload() -> dict:
+        order = bot.slots.get()["order"]
+        needs = {f: slot_need(bot, f) for f in order}
+        enabled = {f: bot.scheduler.store.get(f)["enabled"] for f in order}
+        return {"settings": bot.slots.get(), "seen": bot.slots.seen(), "labels": SLOT_LABELS, "needs": needs, "enabled": enabled,
+                "persistent": bot.slots.persistent}
+
+    @app.get("/api/slots")
+    async def api_slots():
+        return JSONResponse(_slots_payload(), headers=NO_STORE)
+
+    @app.put("/api/slots")
+    async def api_slots_put(body: SlotsRequest, request: Request):
+        _check_origin(request)
+        try:
+            bot.slots.replace(body.model_dump())
+        except SlotError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        return JSONResponse(_slots_payload(), headers=NO_STORE)
+
     # --- Piliers programmés : ouverture / fermeture à une date et une heure précises -----------
     def _pillars_payload(error: str = "") -> dict:
         store = bot.pillars
@@ -719,7 +750,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def api_pillars_scan(request: Request):
         """Relève tout de suite l'état des Piliers de chaque planète (fenêtre « Gérer les Piliers »)."""
         _check_origin(request)
-        result = await bot.pillar.scan()
+        result = await bot.pillar.scan("manuel")
         return JSONResponse(_pillars_payload(result.get("error", "")), headers=NO_STORE)
 
     # --- Planning : plages horaires actives par jour (heure française) -----------
@@ -748,6 +779,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(422, detail=exc.errors) from exc
         bot.log("Planning enregistré.", event=True)
         return JSONResponse(_planning_payload(), headers=NO_STORE)
+
+    # --- Horaires propres au Piratage et à l'Exploration (dans le planning du bot) -----------
+    def _feature_hours_payload(fid: str) -> dict:
+        if fid not in FEATURE_HOURS:
+            raise HTTPException(404, detail=["Fonctionnalité sans horaires propres."])
+        return {"settings": bot.feature_hours.get(fid), "message": bot.feature_hours.message(fid), "days": PLANNING_DAY_LABELS,
+                "global": bot.planning.get(), "persistent": bot.feature_hours.persistent}
+
+    @app.get("/api/feature-hours/{fid}")
+    async def api_feature_hours(fid: str):
+        return JSONResponse(_feature_hours_payload(fid), headers=NO_STORE)
+
+    @app.put("/api/feature-hours/{fid}")
+    async def api_feature_hours_put(fid: str, body: PlanningRequest, request: Request):
+        _check_origin(request)
+        if fid not in FEATURE_HOURS:
+            raise HTTPException(404, detail=["Fonctionnalité sans horaires propres."])
+        try:
+            bot.feature_hours.replace(fid, body.model_dump(), bot.planning.get())
+        except FeatureHoursError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        bot.log(f"Horaires du {FEATURE_HOURS[fid]} enregistrés.", event=True)
+        return JSONResponse(_feature_hours_payload(fid), headers=NO_STORE)
 
     # --- Forages de planètes minières : réglages et forages suivis -----------
     def _minings_payload() -> dict:

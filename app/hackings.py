@@ -19,6 +19,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from .planning import local_date
+
 FILE_NAME = "hackings.json"
 MAX_DELAY_MINUTES = 24 * 60
 TARGETS_KEPT = 8  # Errants les plus proches gardés au relevé du jour (le suivant sert si le jeu refuse le premier)
@@ -34,7 +36,7 @@ class HackingError(Exception):
 
 
 def today() -> str:
-    return time.strftime("%Y-%m-%d")
+    return local_date()  # date française, pas celle du conteneur
 
 
 def _int_in(value, low: int, high: int) -> bool:

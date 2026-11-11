@@ -105,7 +105,7 @@ def test_the_removed_features_have_no_settings_and_no_routes(ui):
     page, _, _ = ui
     page.goto(page.base + "/reglages")
     tabs = [t.strip().lower() for t in page.locator("[role=tab]").all_inner_texts()]
-    assert tabs == ["compte et univers", "fonctionnalités", "planning", "constructions", "recherches", "population", "assemblages", "composants", "exploration", "fouilles", "piratage", "forages", "piliers", "espionnage", "jetons d'alliance"]
+    assert tabs == ["compte et univers", "fonctionnalités", "planning", "constructions", "recherches", "population", "assemblages", "composants", "places de mission", "exploration", "fouilles", "piratage", "forages", "piliers", "espionnage", "jetons d'alliance"]
     for tab in tabs:  # aucune section supprimée ne réapparaît, quel que soit l'onglet
         page.click(f'[role=tab]:has-text("{tab}")', strict=False)
         # titres seulement : « Expéditions simultanées » (Exploration) est un réglage, pas l'ancienne section Expéditions
@@ -217,12 +217,16 @@ def test_home_shows_connection_scanned_planets_and_events(ui):
 
 
 def test_follow_up_page_is_only_the_journal(ui):
-    page, _, _ = ui
+    page, _, app = ui
     page.click("#scan-run")
     page.wait_for_function("document.querySelectorAll('#scan-list tr').length === 4", timeout=10000)
     page.goto(page.base + "/suivi")
     assert page.locator("[role=tab]").count() == 0 and page.locator("#read-state").count() == 0
     page.wait_for_function("document.querySelector('#log').textContent.includes('Scan des planètes')", timeout=10000)
+    # le plus récent en haut : la dernière ligne écrite par le bot est la première affichée
+    app.state.bot.log("Ligne d'essai la plus récente.", event=True)
+    page.wait_for_function("document.querySelector('#log div').textContent.includes('Ligne d\\'essai la plus récente.')", timeout=5000)
+    assert page.evaluate("document.getElementById('log').scrollTop") == 0
     page.check("#log-details")
     page.select_option("#log-level", "error")
     assert "Journal vide" in page.inner_text("#log") or page.locator("#log div.error").count() == page.locator("#log div").count()
@@ -251,8 +255,8 @@ def test_features_page_sets_the_timer_enables_reorders_and_the_switch_starts_the
     page.wait_for_function("document.querySelector('#feat-msg').className.includes('error')", timeout=5000)
     assert "minuteur" in page.inner_text("#feat-msg").lower()
     page.wait_for_function("!document.querySelector('[data-feature=test] input[type=checkbox]').checked", timeout=5000)
-    page.fill("[data-feature=test] input[aria-label^='Minuteur minimum']", "0.5")
-    page.fill("[data-feature=test] input[aria-label^='Minuteur maximum']", "1")
+    page.fill("[data-feature=test] input[aria-label^='Minuteur minimum, minutes']", "0.5")  # heures laissées vides : 0
+    page.fill("[data-feature=test] input[aria-label^='Minuteur maximum, minutes']", "1")
     page.wait_for_function("document.querySelector('#feat-msg').textContent.includes('Enregistré')", timeout=5000)
     page.locator("[data-feature=test]").get_by_label("Activer Test (ne fait rien)").check()
     page.wait_for_function("document.querySelector('[data-feature=test]').classList.contains('enabled')", timeout=5000)
@@ -410,12 +414,27 @@ def test_pillars_panel_programs_a_change_and_explains_a_refusal(ui):
     assert errors == []
 
 
-def test_settings_page_has_fifteen_tabs_and_only_one_panel_shows_at_a_time(ui):
+def test_slots_panel_saves_the_places_kept_free_and_the_priority(ui):
+    page, errors, app = ui
+    page.goto(page.base + "/reglages#slots")
+    page.wait_for_function("document.querySelectorAll('#slots-order li[data-feature]').length === 4", timeout=10000)
+    assert page.locator("#slots-order li[data-feature]").evaluate_all("l => l.map(x => x.dataset.feature)") == ["excavations", "explorations", "minings", "hackings"]
+    assert "désactivée : ne réserve rien" in page.text_content("#slots-order")
+    page.fill("#slots-reserve", "2")
+    page.wait_for_function("document.getElementById('slots-msg').textContent === 'Enregistré.'", timeout=5000)
+    page.click("button[aria-label='Plus prioritaire : Piratage']")
+    page.wait_for_function("document.querySelector('#slots-order li[data-feature]:nth-child(3)').dataset.feature === 'hackings'", timeout=5000)
+    assert app.state.bot.slots.get() == {"reserve": 2, "order": ["excavations", "explorations", "hackings", "minings"]}
+    assert "2 place(s) libre(s)" in page.text_content("#slots-summary")
+    assert errors == []
+
+
+def test_settings_page_has_sixteen_tabs_and_only_one_panel_shows_at_a_time(ui):
     page, errors, _ = ui
     page.goto(page.base + "/reglages")
     # ordre du menu latéral : Bot, Économie, Opérations, Alliance
-    ids = ["account", "features", "planning", "constructions", "researches", "populations", "ships", "components", "explorations", "excavations", "hackings", "minings", "pillars", "spying", "alliance"]
-    assert page.locator("[role=tab]").count() == 15
+    ids = ["account", "features", "planning", "constructions", "researches", "populations", "ships", "components", "slots", "explorations", "excavations", "hackings", "minings", "pillars", "spying", "alliance"]
+    assert page.locator("[role=tab]").count() == 16
     for tab in ids:
         page.click(f"#tab-{tab}")
         assert page.get_attribute(f"#tab-{tab}", "aria-selected") == "true"
@@ -435,13 +454,19 @@ def test_each_feature_page_has_its_switch_and_the_menu_shows_its_state(ui):
     page, errors, app = ui
     page.goto(page.base + "/reglages#alliance")
     head = page.locator("[data-feature-head=alliance_tokens]")
-    head.get_by_label("Minuteur minimum (minutes) de Dons de jetons d'alliance (page)").fill("120")
-    head.get_by_label("Minuteur maximum (minutes) de Dons de jetons d'alliance (page)").fill("240")
+    # minuteur en heures + minutes : 2 h à 4 h 30 min, enregistré en minutes par le bot
+    head.get_by_label("Minuteur minimum, heures, de Dons de jetons d'alliance (page)").fill("2")
+    head.get_by_label("Minuteur maximum, heures, de Dons de jetons d'alliance (page)").fill("4")
+    head.get_by_label("Minuteur maximum, minutes, de Dons de jetons d'alliance (page)").fill("30")
     page.wait_for_function("document.querySelector('#feat-msg').textContent.includes('Enregistré')", timeout=5000)
     head.get_by_label("Activer Dons de jetons d'alliance (page)").check()
     page.wait_for_selector("[data-dot=alliance].on", timeout=5000)  # pastille verte dans le menu
     saved = app.state.bot.scheduler.store.get("alliance_tokens")
-    assert (saved["enabled"], saved["min_minutes"], saved["max_minutes"]) == (True, 120.0, 240.0)
+    assert (saved["enabled"], saved["min_minutes"], saved["max_minutes"]) == (True, 120.0, 270.0)
+    # relu : 270 minutes s'affichent « 4 h 30 min », dans la liste comme dans l'en-tête
+    card = page.locator("[data-feature=alliance_tokens]")
+    assert card.get_by_label("Minuteur maximum, heures, de Dons de jetons d'alliance").input_value() == "4"
+    assert card.get_by_label("Minuteur maximum, minutes, de Dons de jetons d'alliance").input_value() == "30"
     page.click("#tab-features")
     assert page.locator("[data-feature=alliance_tokens] input[type=checkbox]").is_checked()  # même réglage dans la liste
     assert page.locator("[data-feature=test]").count() == 0  # « Test » est masquée
@@ -511,6 +536,31 @@ def test_planning_panel_saves_slots_and_the_random_offset(ui):
     assert saved["enabled"] is True and saved["offset_min"] == 2 and saved["offset_max"] == 9
     assert saved["days"]["mon"] == [{"start": "07:30", "end": "11:45"}] and saved["days"]["tue"] == [{"start": "08:00", "end": "12:00"}]
     assert page.text_content("#plan-status").startswith(("Dans une plage", "Hors plage"))
+    assert errors == []
+
+
+def test_hacking_hours_save_inside_the_bot_planning_and_refuse_outside(ui):
+    page, errors, app = ui
+    bot = app.state.bot
+    bot.planning.replace({"enabled": True, "days": {"mon": [{"start": "08:00", "end": "22:00"}]}, "offset_min": 0, "offset_max": 0})
+    page.goto(page.base + "/reglages#hackings")
+    page.reload()  # la page était déjà chargée par la fixture : relue avec le planning du bot ci-dessus
+    box = "#panel-hackings [data-feature-hours=hackings]"
+    page.wait_for_selector(f"{box} input[aria-label='Limiter le piratage à des horaires']")
+    page.check(f"{box} input[aria-label='Limiter le piratage à des horaires']")
+    assert "Planning du bot : 08:00 → 22:00." in page.text_content(f"{box} fieldset:first-child")
+    page.click(f"{box} button[aria-label='Ajouter une plage le lundi (horaires du piratage)']")
+    page.click(f"{box} button[aria-label='Ajouter une plage le lundi (horaires du piratage)']")
+    page.fill(f"{box} input[aria-label='Horaires du piratage, Lundi, plage 2, début']", "16:00")
+    page.fill(f"{box} input[aria-label='Horaires du piratage, Lundi, plage 2, fin']", "20:00")
+    page.click(f"{box} button:has-text('Enregistrer les horaires')")
+    page.wait_for_function(f"document.querySelector(\"{box} .msg\").textContent === 'Enregistré.'", timeout=5000)
+    assert bot.feature_hours.get("hackings")["days"]["mon"] == [{"start": "08:00", "end": "10:00"}, {"start": "16:00", "end": "20:00"}]
+    page.fill(f"{box} input[aria-label='Horaires du piratage, Lundi, plage 2, fin']", "23:00")
+    page.click(f"{box} button:has-text('Enregistrer les horaires')")
+    page.wait_for_function(f"document.querySelector(\"{box} .msg\").textContent.includes('sort du planning du bot')", timeout=5000)
+    assert bot.feature_hours.get("hackings")["days"]["mon"][1]["end"] == "20:00"  # refusé : rien n'a changé
+    assert page.locator("#panel-explorations [data-feature-hours=explorations]").count() == 1
     assert errors == []
 
 
