@@ -301,7 +301,10 @@ function galaxyMain() {
       : `<button type="button" aria-label="${a}"></button>`).join('');
     if (r.mining) return `<div class="continuous-inspector__list-row"><button type="button">${r.planet} ${r.coords}</button>${actions}</div>`;
     const who = r.tag ? `${r.player} [${r.tag}]` : r.player;
-    return `<div class="continuous-inspector__list-row"><button type="button"></button><button type="button">${who}</button><button type="button">${r.planet} · ${r.coords}</button>${actions}</div>`;
+    // avatar comme sur le vrai jeu : la faction d'un Errant est au début du nom de l'image (Noctes par défaut, null = pas d'image)
+    const faction = r.faction === undefined ? (r.tag === 'AI' ? 'noctes' : null) : r.faction;
+    const avatar = faction ? `<img class="player-avatar__portrait" src="/assets/thumbs/${faction}-01-executeur-48.webp?v=1" alt="Avatar de ${r.player}">` : '';
+    return `<div class="continuous-inspector__list-row"><button type="button">${avatar}</button><button type="button">${who}</button><button type="button">${r.planet} · ${r.coords}</button>${actions}</div>`;
   }).join('');
   const breaches = ui.windowRows.map((a) => `<div class="continuous-inspector__list-row"><button type="button">Brèches${a}</button><button type="button" aria-label="Flotte"></button><button type="button" aria-label="Piliers"></button></div>`).join('');
   const zoom = '<div><button type="button" class="zoom" data-z="-1" aria-label="Zoomer">+</button><button type="button" class="zoom" data-z="1" aria-label="Dézoomer">-</button>'

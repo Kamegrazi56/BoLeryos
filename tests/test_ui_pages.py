@@ -619,12 +619,21 @@ def test_spying_panel_saves_the_minimums_and_refuses_a_launch_without_planet(ui)
     page.fill("#spy-minimums input[aria-label='Minimum Fer']", "1000000")
     page.fill("#spy-minimums input[aria-label='Minimum Éther']", "250000")
     page.select_option("#spy-required", "2")
+    assert page.is_checked("#spy-factions input[aria-label='Espionner les Veyrs']")  # toutes cochées par défaut
+    page.uncheck("#spy-factions input[aria-label='Espionner les Veyrs']")
     page.click("#spy-save")
     page.wait_for_function("document.getElementById('spy-msg').textContent === 'Enregistré.'")
-    assert app.state.bot.spying.get() == {"planet": "", "minimums": {"Fer": 1000000, "Cristal": 0, "Éther": 250000}, "required": 2}
+    assert app.state.bot.spying.get() == {"planet": "", "minimums": {"Fer": 1000000, "Cristal": 0, "Éther": 250000}, "required": 2,
+                                          "factions": ["noctes", "haldens"]}
+    for label in ("Noctes", "Haldens"):
+        page.uncheck(f"#spy-factions input[aria-label='Espionner les {label}']")
+    page.click("#spy-save")  # aucune faction : refusé
+    page.wait_for_function("document.getElementById('spy-msg').textContent.includes('au moins une faction')")
+    assert app.state.bot.spying.get()["factions"] == ["noctes", "haldens"]
+    page.check("#spy-factions input[aria-label='Espionner les Noctes']")
     page.click("#spy-start")  # aucune planète choisie : refusé avec un message en français
-    page.wait_for_function("document.getElementById('spy-msg').classList.contains('error')")
-    assert "planète" in page.text_content("#spy-msg")
+    page.wait_for_function("document.getElementById('spy-msg').textContent.includes('planète')")
+    assert "error" in page.get_attribute("#spy-msg", "class")
     assert page.text_content("#spy-status") == "Aucun espionnage lancé." and page.text_content("#spy-closed-title") == "Piliers fermés (0)"
     assert errors == []
 

@@ -9,11 +9,19 @@
   const say = (text, kind) => { $("spy-msg").textContent = text; $("spy-msg").className = "msg " + (kind || ""); };
   const errorText = (body) => (Array.isArray(body.detail) ? body.detail.join(" · ") : body.detail || "Refusé.");
 
+  /** « Écartés : 4 Veyrs, 2 Haldens. » ; vide si aucun. */
+  function skippedText(s) {
+    const parts = Object.entries(s.skipped || {}).filter(([, n]) => n).map(([f, n]) => `${n} ${data.factions[f] || f}`);
+    if (s.unknown_faction) parts.push(`${s.unknown_faction} de faction illisible`);
+    return parts.length ? ` Écartés : ${parts.join(", ")}.` : "";
+  }
+
   function renderStatus() {
     const s = data.status;
     let line = "Aucun espionnage lancé.";
     if (s.running) line = `Espionnage en cours autour de ${s.planet} — ${s.message} : ${s.kept} cible(s) retenue(s) sur ${s.total} Errant(s) trouvé(s).`;
     else if (s.started) line = `Dernier espionnage (${s.planet}, ${s.started} → ${s.finished}) : ${s.kept} cible(s) retenue(s) sur ${s.total} Errant(s) trouvé(s) — ${s.message}.`;
+    if (s.started) line += skippedText(s);
     $("spy-status").textContent = line;
     $("spy-start").disabled = s.running;
     $("spy-stop").hidden = !s.running;
@@ -28,6 +36,11 @@
     $("spy-planet").replaceChildren(...items.map(([value, text]) => el("option", { value, textContent: text })));
     $("spy-planet").value = s.planet;
     $("spy-required").value = String(s.required);
+    $("spy-factions").replaceChildren(el("legend", { textContent: "Factions à espionner" }), ...Object.entries(data.factions).map(([id, label]) => {
+      const box = el("input", { type: "checkbox", checked: s.factions.includes(id), ariaLabel: `Espionner les ${label}` });
+      box.dataset.faction = id;
+      return el("label", { className: "switch" }, box, ` ${label}`);
+    }));
     $("spy-minimums").replaceChildren(...data.resources.map((r) => {
       const input = el("input", { type: "number", min: "0", step: "1", value: String(s.minimums[r] || 0), ariaLabel: `Minimum ${r}` });
       input.dataset.resource = r;
@@ -39,7 +52,8 @@
   function formValue() {
     const minimums = {};
     document.querySelectorAll("#spy-minimums input[data-resource]").forEach((i) => { minimums[i.dataset.resource] = Number(i.value) || 0; });
-    return { planet: $("spy-planet").value, minimums, required: Number($("spy-required").value) };
+    const factions = [...document.querySelectorAll("#spy-factions input[data-faction]:checked")].map((i) => i.dataset.faction);
+    return { planet: $("spy-planet").value, minimums, required: Number($("spy-required").value), factions };
   }
 
   async function send(url, options) {
@@ -50,6 +64,7 @@
 
   ["spy-planet", "spy-required"].forEach((id) => $(id).addEventListener("change", () => { dirty = true; }));
   $("spy-minimums").addEventListener("input", () => { dirty = true; });
+  $("spy-factions").addEventListener("change", () => { dirty = true; });
 
   async function save() {
     const { ok, body } = await send(api, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(formValue()) });

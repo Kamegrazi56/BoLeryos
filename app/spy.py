@@ -23,7 +23,7 @@ from .builder import ConstructionPass
 from .numbers import parse_amount
 from .planets import GameUiError, Interrupted
 from .planning import TIMEZONE
-from .spying import RESOURCES, report_matches
+from .spying import FACTIONS, RESOURCES, report_matches
 
 ZOOM = 17.5
 ZOOM_LEVEL = round(math.log2(ZOOM), 2)  # valeur du curseur « Niveau de zoom » (échelle log2)
@@ -57,7 +57,11 @@ TARGETS_JS = (
     const label = [...row.querySelectorAll('button')].map(text).find((t) => t.includes(address)) || '';
     const name = label.replace(address, '').replace(/[·\\s]+$/, '').trim();
     const button = drone(row);
-    out.push({ address, name, drone: !!button && !button.disabled && button.getAttribute('aria-disabled') !== 'true' });
+    // faction : début du nom de l'image d'avatar (vu sur le vrai jeu, 2026-11-11 : « thumbs/noctes-01-executeur-48.webp »)
+    const avatar = row.querySelector('img');
+    const file = avatar ? (avatar.getAttribute('src') || '').split('?')[0].split('/').pop().toLowerCase() : '';
+    const faction = (/^(noctes|veyrs|haldens)-/.exec(file) || [])[1] || '';
+    out.push({ address, name, faction, drone: !!button && !button.disabled && button.getAttribute('aria-disabled') !== 'true' });
   }
   return out;
 }"""
@@ -137,7 +141,16 @@ def read_amount(raw: str | None) -> float | None:
 
 def idle_status() -> dict:
     return {"running": False, "planet": "", "started": "", "finished": "", "total": 0, "spied": 0, "kept": 0,
-            "deleted": 0, "out_of_range": 0, "errors": 0, "message": ""}
+            "deleted": 0, "out_of_range": 0, "errors": 0, "message": "",
+            "skipped": {f: 0 for f in FACTIONS}, "unknown_faction": 0}  # Errants écartés : faction non cochée / illisible
+
+
+def skipped_text(status: dict) -> str:
+    """« , écartés : 4 Veyrs, 2 Haldens, 1 de faction illisible » (vide si aucun Errant écarté)."""
+    parts = [f"{n} {FACTIONS[f]}" for f, n in status["skipped"].items() if n]
+    if status["unknown_faction"]:
+        parts.append(f"{status['unknown_faction']} de faction illisible")
+    return f", écartés : {', '.join(parts)}" if parts else ""
 
 
 class SpyCampaign(ConstructionPass):
@@ -217,18 +230,33 @@ class SpyCampaign(ConstructionPass):
             s = self._status
             s["running"], s["finished"] = False, _now()
             self.bot.log(f"Espionnage : {s['message']} — {s['kept']} cible(s) retenue(s), {s['deleted']} rapport(s) supprimé(s), "
-                         f"{len(self.closed)} Errant(s) aux piliers fermés, {s['out_of_range']} hors de portée.", event=True)
+                         f"{len(self.closed)} Errant(s) aux piliers fermés, {s['out_of_range']} hors de portée"
+                         f"{skipped_text(s)}.", event=True)
 
     async def _campaign(self, settings: dict) -> None:
         targets = await self._collect(settings["planet"])
         self._status["total"] = len(targets)
         self._status["message"] = "espionnage en cours"
         for target in targets:
+            if not self._faction_wanted(target, settings):
+                continue  # aucun clic sur un Errant d'une faction non cochée
             if not target["drone"]:
                 self._status["out_of_range"] += 1
                 continue
             await self._spy(target, settings)
             await human.think(self.settings)
+
+    def _faction_wanted(self, target: dict, settings: dict) -> bool:
+        faction = target.get("faction") or ""
+        if faction not in FACTIONS:  # avatar absent ou inattendu : on ne l'espionne pas par erreur
+            self._status["unknown_faction"] += 1
+            label = target["name"] or target["address"]
+            self.bot.log(f"Espionnage : faction de {label} ({target['address']}) illisible, Errant passé.", "warn", event=True)
+            return False
+        if faction not in settings["factions"]:
+            self._status["skipped"][faction] += 1
+            return False
+        return True
 
     async def _collect(self, planet: str) -> list[dict]:
         """Galaxie centrée sur la planète, zoom ×17,5, liste entièrement chargée : les Errants visibles."""

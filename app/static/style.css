@@ -550,6 +550,9 @@ details.help-box p { margin: 6px 0 0; color: var(--muted); font-size: 13px; max-
   .wg-side { grid-column: 1 / -1; }
   .wg-hours > span:last-child { display: none; }
 }
+/* Espionnage : cases des factions d'Errants sur une ligne */
+.spy-factions { border: 0; padding: 0; margin: 6px 0; gap: 18px; align-items: center; }
+.spy-factions legend { float: left; padding: 0; margin-right: 6px; color: var(--muted); font-size: 14px; }
 /* Horaires propres à une fonctionnalité (Piratage, Exploration), en bas de leur onglet */
 .feature-hours { margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--border); }
 

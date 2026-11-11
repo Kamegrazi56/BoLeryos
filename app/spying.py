@@ -1,7 +1,8 @@
 """Espionnage des Errants par drone (Piliers) : réglages et tri des rapports.
 
 Réglages (`<data_dir>/spying.json`) : la planète autour de laquelle espionner, un minimum pour chaque ressource et le nombre
-de ressources (1, 2 ou 3) qui doivent atteindre leur minimum pour que le rapport soit GARDÉ ; sinon il est supprimé dans le jeu.
+de ressources (1, 2 ou 3) qui doivent atteindre leur minimum pour que le rapport soit GARDÉ ; sinon il est supprimé dans le jeu,
+et les factions d'Errants à espionner (wiki : Noctes, Veyrs, Haldens ; au moins une ; toutes si le fichier n'en dit rien).
 """
 
 from __future__ import annotations
@@ -15,7 +16,9 @@ from pathlib import Path
 FILE_NAME = "spying.json"
 RESOURCES = ("Fer", "Cristal", "Éther")
 MAX_AMOUNT = 10**15
-DEFAULT_SETTINGS: dict = {"planet": "", "minimums": {r: 0 for r in RESOURCES}, "required": 1}
+# Factions des Errants (wiki) ; dans la Galaxie, l'image d'avatar de l'Errant commence par l'identifiant (« noctes-01-… »).
+FACTIONS = {"noctes": "Noctes", "veyrs": "Veyrs", "haldens": "Haldens"}
+DEFAULT_SETTINGS: dict = {"planet": "", "minimums": {r: 0 for r in RESOURCES}, "required": 1, "factions": list(FACTIONS)}
 
 
 class SpyingError(Exception):
@@ -51,6 +54,13 @@ def validate(data, known_planets: list[str] | None = None) -> dict:
         errors.append("Nombre de ressources à atteindre : 1, 2 ou 3.")
     else:
         out["required"] = required
+    factions = data.get("factions", list(FACTIONS))
+    if not isinstance(factions, list) or any(f not in FACTIONS for f in factions):
+        errors.append(f"Factions : parmi {', '.join(FACTIONS.values())}.")
+    elif not factions:
+        errors.append("Factions : cochez au moins une faction à espionner.")
+    else:
+        out["factions"] = [f for f in FACTIONS if f in factions]  # ordre fixe, sans doublon
     if errors:
         raise SpyingError(errors)
     return out

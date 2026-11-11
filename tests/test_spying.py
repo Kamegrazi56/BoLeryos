@@ -7,11 +7,22 @@ import pytest
 from app.spying import SpySettings, SpyingError, report_matches, validate
 
 EGIDE = "6-79-Egide"
-SETTINGS = {"planet": EGIDE, "minimums": {"Fer": 1_000_000, "Cristal": 500_000, "Éther": 1_000_000}, "required": 2}
+SETTINGS = {"planet": EGIDE, "minimums": {"Fer": 1_000_000, "Cristal": 500_000, "Éther": 1_000_000}, "required": 2,
+            "factions": ["noctes", "haldens"]}
+ALL_FACTIONS = ["noctes", "veyrs", "haldens"]
 
 
-def test_defaults_have_no_planet_and_zero_minimums():
-    assert validate({}) == {"planet": "", "minimums": {"Fer": 0, "Cristal": 0, "Éther": 0}, "required": 1}
+def test_defaults_have_no_planet_and_zero_minimums_and_every_faction():
+    assert validate({}) == {"planet": "", "minimums": {"Fer": 0, "Cristal": 0, "Éther": 0}, "required": 1, "factions": ALL_FACTIONS}
+
+
+def test_an_old_file_without_factions_spies_every_faction(tmp_path):
+    (tmp_path / "spying.json").write_text(json.dumps({"planet": EGIDE, "minimums": {}, "required": 1}), encoding="utf8")
+    assert SpySettings(str(tmp_path)).get()["factions"] == ALL_FACTIONS
+
+
+def test_factions_are_kept_in_a_fixed_order_without_duplicates():
+    assert validate({**SETTINGS, "factions": ["haldens", "noctes", "haldens"]})["factions"] == ["noctes", "haldens"]
 
 
 @pytest.mark.parametrize(
@@ -24,6 +35,9 @@ def test_defaults_have_no_planet_and_zero_minimums():
         ({"minimums": {"Cristal": 1.5}}, "Minimum de Cristal"),
         ({"minimums": "beaucoup"}, "Minimums"),
         ({"planet": 3}, "Planète"),
+        ({"factions": []}, "au moins une faction"),
+        ({"factions": ["pirates"]}, "parmi Noctes, Veyrs, Haldens"),
+        ({"factions": "noctes"}, "parmi Noctes"),
     ],
 )
 def test_invalid_settings_are_refused(patch, message):
@@ -68,11 +82,17 @@ def test_an_unreadable_file_gives_the_defaults(tmp_path):
 def test_the_api_saves_and_refuses_invalid_settings(client):
     body = client.get("/api/spying").json()
     assert body["settings"]["planet"] == "" and body["resources"] == ["Fer", "Cristal", "Éther"]
+    assert body["factions"] == {"noctes": "Noctes", "veyrs": "Veyrs", "haldens": "Haldens"}
+    assert body["settings"]["factions"] == ALL_FACTIONS
     assert body["status"]["running"] is False and body["status"]["closed"] == []
     saved = client.put("/api/spying", json=SETTINGS)
     assert saved.status_code == 200 and saved.json()["settings"] == SETTINGS
     refused = client.put("/api/spying", json={**SETTINGS, "required": 5})
     assert refused.status_code == 422 and "1, 2 ou 3" in " ".join(refused.json()["detail"])
+    none = client.put("/api/spying", json={**SETTINGS, "factions": []})
+    assert none.status_code == 422 and "au moins une faction" in " ".join(none.json()["detail"])
+    old_client = {k: v for k, v in SETTINGS.items() if k != "factions"}  # page pas encore rechargée : toutes les factions
+    assert client.put("/api/spying", json=old_client).json()["settings"]["factions"] == ALL_FACTIONS
 
 
 def test_the_campaign_needs_a_planet(client):

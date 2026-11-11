@@ -89,6 +89,20 @@ def test_the_whole_list_is_loaded_page_after_page(game_client, game):
     assert status["total"] == 30 and status["kept"] == 30 and _of(game, "spy_delete") == []
 
 
+def test_only_the_checked_factions_are_spied(game_client, game):
+    _scan(game_client)
+    game.set_galaxy([_errant(1, faction="noctes"), _errant(2, faction="veyrs"), _errant(3, faction="haldens"),
+                     _errant(4, faction="veyrs"), _errant(5, faction=None)])  # 5 : avatar absent
+    _start(game_client, required=1, minimums={"Fer": 0, "Cristal": 0, "Éther": 0}, factions=["noctes", "haldens"])
+    status = _wait_end(game_client)
+    assert status["message"] == "terminé", status
+    assert [a["planet"] for a in _of(game, "drone")] == ["Errant-1 1", "Errant-3 1"]  # aucun clic sur les Veyrs ni l'inconnu
+    assert status["skipped"] == {"noctes": 0, "veyrs": 2, "haldens": 0} and status["unknown_faction"] == 1
+    logs = [e["msg"] for e in game_client.get("/api/status?limit=200").json()["logs"]]
+    assert any("faction de Errant-5 1 (M69 05 10) illisible, Errant passé" in m for m in logs)
+    assert any("écartés : 2 Veyrs, 1 de faction illisible" in m for m in logs)
+
+
 def test_repeated_refusals_stop_the_campaign(game_client, game):
     _scan(game_client)
     game.set_galaxy([_errant(n, refuse="Impossible d'envoyer le drone : drones insuffisants.") for n in range(5)])

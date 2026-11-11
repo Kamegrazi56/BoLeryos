@@ -50,6 +50,7 @@ from .planning import DAY_LABELS as PLANNING_DAY_LABELS
 from .planning import PlanningError
 from .planning import describe as planning_describe
 from .planning import state as planning_state
+from .spying import FACTIONS as SPY_FACTIONS
 from .spying import RESOURCES as SPY_RESOURCES
 from .spying import SpyingError
 
@@ -221,6 +222,7 @@ class SpyingRequest(BaseModel):
     planet: str = Field(default="", max_length=200)
     minimums: dict[str, int] = Field(default_factory=dict, max_length=3)
     required: int = Field(default=1, ge=0, le=10)
+    factions: list[str] = Field(default_factory=lambda: list(SPY_FACTIONS), max_length=10)
 
 
 class OrderRequest(BaseModel):
@@ -838,7 +840,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # --- Espionnage des Errants : réglages et campagne manuelle (le bot passe sur OFF) -----------
     def _spying_payload() -> dict:
         return {"settings": bot.spying.get(), "status": bot.spy.status(), "planets": _known_planets(),
-                "resources": list(SPY_RESOURCES), "persistent": bot.spying.persistent, "bot_on": bot.scheduler.on}
+                "resources": list(SPY_RESOURCES), "factions": SPY_FACTIONS, "persistent": bot.spying.persistent, "bot_on": bot.scheduler.on}
 
     @app.get("/api/spying")
     async def api_spying():
