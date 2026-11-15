@@ -142,6 +142,21 @@ MARK_MODEL_JS = (
 }"""
 )
 
+# Ce que la page dit du lancement : libellés des gros boutons d'action (« AUCUNE UNITÉ SÉLECTIONNÉE. », « LANCER… »…) et
+# lignes « Énergie requise », « RT requis », « Réserves de Trame » avec leur valeur (relevé du 03/11 : valeur après le libellé).
+LAUNCH_STATE_JS = """() => {
+  const text = (el) => (el.textContent || '').replace(/\\s+/g, ' ').trim();
+  const shown = (el) => el.getClientRects().length > 0;
+  const buttons = [...document.querySelectorAll('main button')].filter(shown).map(text)
+    .filter((t) => /lanc|unit|insuffis|requis|bloqu|manque|trame|énergie/i.test(t) && t.length < 80);
+  const leaves = [...document.querySelectorAll('main *')].filter((e) => e.children.length === 0 && shown(e) && text(e));
+  const facts = [];
+  leaves.forEach((e, i) => {
+    if (/^(Énergie requise|RT requis|Réserves de Trame|Équipage requis|Coût estimé)$/i.test(text(e)) && leaves[i + 1]) facts.push(text(e) + ' ' + text(leaves[i + 1]));
+  });
+  return { buttons: [...new Set(buttons)].slice(0, 4), facts: facts.slice(0, 4) };
+}"""
+
 UNITS_SUM_JS = "() => [...document.querySelectorAll('main input[aria-label^=\"Quantité \"]')].reduce((s, i) => s + (Number(i.value) || 0), 0)"
 
 # Secours : lignes « Brèches <adresse> » de l'onglet Ensemble de la Galaxie.
@@ -543,8 +558,14 @@ class ExplorationPass(ConstructionPass):
             self._skip(planet, f"durée de {s['duration']} h indisponible")
             return None
         go = page.get_by_role("button", name=LAUNCH_NAME)
+        end = time.monotonic() + 4  # le bouton peut mettre un instant à s'activer après le choix des listes
+        while time.monotonic() < end and not (await go.count() and await go.first.is_enabled()):
+            await asyncio.sleep(0.3)
         if not await go.count() or not await go.first.is_enabled():
-            self._skip(planet, "pas assez d'unités, d'énergie ou de Trame")
+            state = await page.evaluate(LAUNCH_STATE_JS)
+            seen = " ; ".join(state["buttons"] + state["facts"]) or "rien de lisible"
+            why = "bouton « Lancer l'exploration » inactif" if await go.count() else "bouton « Lancer l'exploration » introuvable"
+            self._skip(planet, f"{why} ; la page affiche : {seen}")
             return None
         before = await self._counters()
         await self._guard()
