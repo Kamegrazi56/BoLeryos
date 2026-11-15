@@ -7,7 +7,7 @@ Relevé sur le vrai jeu (2026-11-07) :
     aucune requête de plus. En secours seulement, la brèche est choisie par une formule tirée des adresses (même zone A–Z).
   - Opérations › Piliers|Flotte › Exploration : champ « Cible » (la saisie « M795037 » s'affiche « M79 50 37 » et l'adresse validée
     apparaît dessous), champs « Quantité <unité> », listes « Copies » et « Durée nominale », bouton « Lancer l'exploration »
-    (sinon « Aucune unité sélectionnée. », désactivé) ; fenêtre « Modèles de Piliers|Flotte » avec « Appliquer le modèle ».
+    (« Lancer N explorations » pour N copies ; sinon « Aucune unité sélectionnée. », désactivé) ; fenêtre « Modèles de Piliers|Flotte » avec « Appliquer le modèle ».
   - Compteurs « Explorations quotidiennes » et « Explorations actives » communs au compte (+1 environ 3 s après le lancement).
 Le bot ne touche JAMAIS à « Supprimer » (modèle), « Préparer le retour de la flotte », « Mobilisation générale »,
 « Activer le champ de force » ni « Désactiver les piliers ».
@@ -37,7 +37,8 @@ TARGET_RETRY_PAUSE_SECONDS = 1.5
 # Secours : unités de carte par pas d'adresse (X, Y), mesurées sur le vrai jeu (5,16 à 5,30 et 4,35 à 4,69 selon la région).
 FORMULA_SCALE = (5.2, 4.5)
 ADDRESS_RE = re.compile(r"^([A-Z])(\d)(\d) (\d{2}) (\d{2})$")
-LAUNCH_NAME = re.compile(r"^Lancer l.exploration", re.I)
+# Le bouton s'appelle « Lancer l'exploration » pour 1 copie et « Lancer 5 explorations » pour 5 (vu sur le vrai jeu le 2026-11-15).
+LAUNCH_NAME = re.compile(r"^Lancer (l.exploration|\d+ explorations?)", re.I)
 
 _PRELUDE_JS = """
 const text = (el) => (el.textContent || '').replace(/\\s+/g, ' ').trim();

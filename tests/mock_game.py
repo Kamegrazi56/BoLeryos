@@ -341,7 +341,7 @@ function expForm(p) {
     + `<div class="cible"><label>Cible</label><button type="button">Favoris</button><input type="text" id="target" placeholder="G46 50 50" value="${f.target}">${valid ? `<span class="font-mono">${f.target}</span>` : ''}</div>`
     + `<div><h3>Force d’exploration (${ui.way})</h3><button type="button" id="models-btn">Modèles</button>${rows}</div>`
     + `<select aria-label="Copies" id="copies">${opts(Math.max(1, free), f.copies, '')}</select><select aria-label="Durée nominale" id="duration">${opts(6, f.duration, ' h')}</select>`
-    + `<button type="button">Mobilisation générale</button><button type="button" id="launch" ${ok ? '' : 'disabled'}>${ok ? 'Lancer l’exploration' : 'Aucune unité sélectionnée.'}</button>`
+    + `<button type="button">Mobilisation générale</button><button type="button" id="launch" ${ok ? '' : 'disabled'}>${ok ? (copies > 1 ? `Lancer ${copies} explorations` : 'Lancer l’exploration') : 'Aucune unité sélectionnée.'}</button>`
     + `<button type="button" id="recall" aria-label="Préparer le retour de la flotte">r</button>` + dialog;
 }
 // Opérations › Fouille : cible, héros, équipe (1 à 5 000), durée en boutons, compteurs, « Missions en cours » (vrai jeu, 07/11).
