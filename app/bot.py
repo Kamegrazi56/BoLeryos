@@ -328,7 +328,7 @@ class BotSession:
             "display": "vnc" if self.display is not None else "images",
             "explore": {"recording": self._recorder.enabled, **self._recorder.counts()},
             "supervisor": self.supervisor.summary(),
-            "scheduler": {"on": self.scheduler.on, "waiting": self.scheduler.waiting},
+            "scheduler": {"on": self.scheduler.on, "waiting": self.scheduler.waiting, "activity": self.scheduler.activity()},
         }
 
     def _page_label(self) -> str:

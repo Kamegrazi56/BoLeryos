@@ -61,6 +61,40 @@
       ? (waiting ? `En attente : ${waiting}` : "Les fonctionnalités activées tournent. Cliquer pour arrêter (le passage en cours se termine).")
       : "Le bot est sur OFF : aucune fonctionnalité ne tourne. Cliquer pour démarrer.";
   }
+  // ---------------------------------------------- activité du bot (à côté du bouton ON/OFF)
+  let activity = { state: "off" };
+  let nextAt = null; // heure (s, horloge du navigateur) du prochain passage : le compte à rebours avance entre deux sondages
+  /** Texte et style de l'activité. */
+  function describe(act, now) {
+    switch (act.state) {
+      case "running": return { cls: "running", text: `En cours : ${act.feature.label}` };
+      case "stopping": return { cls: "running", text: `Termine : ${act.feature.label}` };
+      case "blocked": return { cls: "blocked", text: `En attente : ${act.reason}` };
+      case "idle": {
+        if (!act.next) return { cls: "idle", text: "Au repos · aucun passage prévu" };
+        const left = Math.max(0, nextAt - now);
+        if (act.next.paused) return { cls: "idle", text: `Au repos · ${act.next.label} : ${act.next.paused}` };
+        const when = left < 1 ? "imminent" : `dans ${window.ui.dur(left)}`;
+        return { cls: "idle", text: `Au repos · prochain : ${act.next.label} (${when})` };
+      }
+      default: return { cls: "off", text: "À l'arrêt" };
+    }
+  }
+  function paintActivity() {
+    const node = document.getElementById("activity");
+    if (!node) return;
+    const d = describe(activity, Date.now() / 1000);
+    node.className = `activity ${d.cls}`;
+    node.textContent = d.text;
+    node.title = d.text;
+  }
+  function setActivity(act) {
+    activity = act || { state: "off" };
+    nextAt = activity.state === "idle" && activity.next ? Date.now() / 1000 + activity.next.in_s : null;
+    paintActivity();
+  }
+  setInterval(paintActivity, 1000);
+
   document.addEventListener("click", async (event) => {
     if (!event.target.closest("#power") || toggling) return;
     toggling = true;
@@ -76,6 +110,7 @@
   });
   function paint(status) {
     if (status.scheduler && !toggling) paintPower(status.scheduler.on, status.scheduler.waiting);
+    if (status.scheduler) setActivity(status.scheduler.activity);
     const badge = document.getElementById("badge");
     if (badge && !document.getElementById("screen")) { // la page Écran met le badge à jour en direct
       badge.className = "badge " + status.state;

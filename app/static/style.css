@@ -95,6 +95,16 @@ button.power {
 button.power.on { color: #03130c; background: linear-gradient(180deg, #5ef0b0, var(--ok)); border-color: var(--ok); box-shadow: 0 0 22px rgba(52, 211, 153, 0.55); }
 button.power.off:hover { color: var(--text); border-color: var(--accent); box-shadow: var(--glow); }
 button.power:disabled { opacity: 0.6; }
+
+/* Activité du bot, à côté du bouton ON/OFF : passage en cours, attente d'un minuteur, bloqué, à l'arrêt */
+.activity {
+  max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+  border: 1px solid var(--border); color: var(--muted); background: rgba(255, 255, 255, 0.03);
+}
+.activity.running { color: var(--accent); border-color: var(--accent); background: rgba(79, 216, 255, 0.1); }
+.activity.blocked { color: var(--warn); border-color: rgba(251, 191, 36, 0.55); background: rgba(251, 191, 36, 0.08); }
+.activity.idle { color: var(--ok); border-color: rgba(52, 211, 153, 0.4); }
 button.power.big { margin: 0; padding: 20px 42px; font-size: 22px; border-width: 2px; }
 
 /* Bandeau de mode (Simulation / Réel) */

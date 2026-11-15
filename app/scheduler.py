@@ -223,6 +223,42 @@ class Scheduler:
                 await asyncio.sleep(self._tick)
 
     # ------------------------------------------------------------------ état affiché
+    def activity(self) -> dict:
+        """Ce que fait le bot à cet instant (affiché à côté du bouton ON/OFF) :
+        - « running » : un passage est en cours (`feature`) ;
+        - « stopping » : bot sur OFF, mais le passage en cours se termine ;
+        - « blocked » : un passage est dû mais ne peut pas démarrer (`reason`) ;
+        - « idle » : rien en cours, en attente du minuteur de la prochaine fonctionnalité (`next`, ou None) ;
+        - « off » : bot sur OFF, rien ne tourne."""
+        running = next((fid for fid in self.store.order if self._runtime[fid].running), None)
+        if running is not None:
+            f = self._features[running]
+            return {"state": "running" if self._on else "stopping", "feature": {"id": f.id, "label": f.label}}
+        if not self._on:
+            return {"state": "off"}
+        if self.waiting:
+            return {"state": "blocked", "reason": self.waiting}
+        return {"state": "idle", "next": self._next_timer()}
+
+    def _next_timer(self) -> dict | None:
+        """Fonctionnalité activée dont le minuteur arrive à échéance le premier (None : aucun passage prévu)."""
+        now = self._clock()
+        best: tuple[float, str] | None = None
+        for fid in self.store.order:  # à égalité, l'ordre de priorité départage
+            rt = self._runtime[fid]
+            if not self.store.get(fid)["enabled"] or rt.next_at is None:
+                continue
+            if best is None or rt.next_at < best[0]:
+                best = (rt.next_at, fid)
+        if best is None:
+            return None
+        at, fid = best
+        nxt = {"id": fid, "label": self._features[fid].label, "in_s": max(0.0, at - now)}
+        paused = self._paused(fid)
+        if paused:
+            nxt["paused"] = paused  # hors de ses horaires propres : reste due, passe au début de sa plage
+        return nxt
+
     def summary(self) -> dict:
         now = self._clock()
         items = []
@@ -246,6 +282,7 @@ class Scheduler:
             "bot_on": self._on,
             "stopping": not self._on and any(r.running for r in self._runtime.values()),
             "waiting": self.waiting,
+            "activity": self.activity(),
             "persistent": self.store.persistent,
             "features": items,
         }
