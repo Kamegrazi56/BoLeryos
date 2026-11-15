@@ -119,7 +119,10 @@
     window.dispatchEvent(new CustomEvent("boleryos:status", { detail: status }));
   }
   async function poll() {
-    try { paint(await (await fetch("/api/status?limit=1")).json()); } catch { /* le bot redémarre */ }
+    try {
+      const res = await fetch("/api/status?limit=1");
+      if (res.ok) paint(await res.json()); // instance arrêtée (409) : la bannière de instance.js l'indique, rien à afficher
+    } catch { /* le bot redémarre */ }
   }
   poll();
   setInterval(poll, 2000);

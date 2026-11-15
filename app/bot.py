@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import os
 import re
 import time
 from collections import deque
@@ -23,12 +22,12 @@ from datetime import datetime
 from enum import Enum
 from urllib.parse import urlsplit
 
-from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
+from playwright.async_api import BrowserContext, Page
 
 from . import human, interruptions
 from .config import Settings
-from .session_store import SessionStore
-from .display import VirtualDisplay
+from .account import Account
+from .browser_host import BrowserHost
 from .explore import MAX_SNAPSHOTS, SNAPSHOT_JS, Recorder, should_skip_host
 from .preferences import Preferences
 from .builder import ConstructionPass
@@ -63,7 +62,6 @@ from .scheduler import Scheduler
 from .spy import SpyCampaign
 from .spying import SpySettings
 from .supervisor import ConnectionSupervisor
-from .vault import CredentialVault
 
 TURNSTILE_SELECTOR = 'iframe[src*="challenges.cloudflare.com"]'
 COOKIE_REFUSE_NAME = "tout refuser"
@@ -121,14 +119,17 @@ def _mask(identifier: str) -> str:
 
 
 class BotSession:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, host: BrowserHost | None = None, account: Account | None = None) -> None:
         self._settings = settings
+        # Compte du joueur (identifiants, cookies de connexion) : partagé entre sessions, ou propre à celle-ci
+        self.account = account if account is not None else Account(settings.data_dir)
+        # Chromium : partagé (hôte fourni, plusieurs sessions) ou à soi (hôte créé ici, fermé avec la session)
+        self._owns_host = host is None
+        self.host = host if host is not None else BrowserHost(settings)
         self._lock = asyncio.Lock()  # connexion / déconnexion
         self._start_lock = asyncio.Lock()  # démarrage du navigateur
         self.work = asyncio.Lock()  # un seul travail dans le jeu à la fois : passage d'une fonctionnalité ou scan des planètes
         self._boot: asyncio.Future | None = None  # démarrage du navigateur en cours
-        self._pw: Playwright | None = None
-        self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._page: Page | None = None
         self._state = State.IDLE
@@ -136,8 +137,6 @@ class BotSession:
         self._logs: deque[dict[str, str]] = deque(maxlen=1000)
         self._dirty = False  # une tentative de connexion a déjà eu lieu dans ce contexte
         self._manual = False  # contrôle manuel (clics/clavier de l'utilisateur) activé
-        # Identifiants gardés EN MÉMOIRE seulement (jamais sur disque ni dans le journal), pour se reconnecter tout seul.
-        self._creds: tuple[str, str] | None = None
         self.last_login_kind = ""
         self._viewport = {"width": VIEWPORT_WIDTH, "height": 900}
         self._last_typing_log = 0.0
@@ -154,14 +153,12 @@ class BotSession:
         self._capture_task: asyncio.Task | None = None
         self._start_task: asyncio.Task | None = None
         self._viewers = 0
+        self.after_new_page = None  # rappel du gestionnaire d'instances : une nouvelle fenêtre vient d'apparaître sur l'écran commun
         self._frame_id = 0
         self._frame_jpeg: bytes | None = None
         self._last_frame_time = 0.0
         self._frame_event = asyncio.Event()
         self._cdp = None  # session CDP de la page courante (flux d'images poussé par Chrome)
-        # Navigateur complet : vraie fenêtre Chromium sur un écran virtuel affiché par noVNC (image Docker)
-        self.display = (VirtualDisplay(settings.vnc_display, settings.vnc_width, settings.vnc_height, settings.vnc_port)
-                        if settings.vnc and VirtualDisplay.available() else None)
         self._screencasting = False
         self._tasks: set[asyncio.Task] = set()
         # Préférences non secrètes (univers, délai de connexion) et supervision : connexion automatique et scan des planètes
@@ -208,12 +205,9 @@ class BotSession:
             gap=(settings.feature_gap_min, settings.feature_gap_max),
             tick=settings.scheduler_tick,
         )
-        # Identifiants enregistrés (chiffrés) : relus en mémoire au démarrage, SANS se connecter tant que
-        # l'utilisateur ne le demande pas (« Relancer la connexion »).
-        self.vault = CredentialVault(settings.data_dir)
-        self.restore_credentials()
-        # Cookies du navigateur : rechargés au démarrage pour rester connecté après un redémarrage du conteneur.
-        self._session_store = SessionStore(settings.data_dir)
+        # Identifiants enregistrés (chiffrés) et cookies du navigateur : gardés par le compte, relus au démarrage SANS se
+        # connecter tant que l'utilisateur ne le demande pas (« Relancer la connexion »), cookies rechargés pour rester
+        # connecté après un redémarrage du conteneur.
         self._last_state_save = 0.0
         self._session_restored = False  # les cookies de la session précédente ont été rechargés au démarrage du navigateur
         if self.vault.problem:
@@ -355,8 +349,22 @@ class BotSession:
 
     def viewer_joined(self) -> None:
         self._viewers += 1
+        if self.display is not None:
+            self._spawn(self.bring_to_front())  # plusieurs instances partagent l'écran virtuel : celle qu'on regarde passe devant
         if self._viewers == 1:
             self._spawn(self._start_screencast())
+
+    async def bring_to_front(self, delay: float = 0.0) -> None:
+        """Remonte la fenêtre Chromium de cette instance au-dessus de celles des autres instances (écran virtuel commun)."""
+        if delay:
+            await asyncio.sleep(delay)
+        page = self._page
+        if page is None or page.is_closed():
+            return
+        try:
+            await page.bring_to_front()
+        except Exception:  # noqa: BLE001 - page en cours de fermeture ou de création
+            pass
 
     def viewer_left(self) -> None:
         self._viewers = max(0, self._viewers - 1)
@@ -457,6 +465,11 @@ class BotSession:
             await asyncio.sleep(self._settings.screenshot_interval)
 
     # ------------------------------------------------------------- navigateur
+    @property
+    def display(self):
+        """Écran virtuel du navigateur complet (noVNC), ou None en mode images."""
+        return self.host.display
+
     def start_in_background(self) -> None:
         """Démarre le navigateur sans bloquer l'appelant (ouverture d'un écran de l'interface)."""
         if self._start_task is None or self._start_task.done():
@@ -487,21 +500,7 @@ class BotSession:
             await self._teardown()
 
     async def _start_browser(self) -> None:
-        s = self._settings
-        self._pw = await async_playwright().start()
-        args = ["--no-sandbox"] if s.no_sandbox else []
-        if self.display is not None:
-            # Vraie fenêtre (barre d'adresse, onglets) sur l'écran virtuel, à sa taille exacte
-            await self.display.ensure()
-            args += ["--window-position=0,0", f"--window-size={self.display.width},{self.display.height}",
-                     "--no-first-run", "--no-default-browser-check", "--lang=fr-FR"]
-            self._browser = await self._pw.chromium.launch(
-                headless=False, executable_path=s.chromium_path, args=args,
-                # langue de l'interface de Chromium = celle du jeu : pas de proposition de traduction
-                env={**os.environ, "DISPLAY": self.display.name, "LANGUAGE": "fr", "LANG": "fr_FR.UTF-8"},
-            )
-        else:
-            self._browser = await self._pw.chromium.launch(headless=s.headless, executable_path=s.chromium_path, args=args)
+        await self.host.ensure()
         await self._new_page(restore=True)
 
     async def _new_page(self, *, restore: bool = False) -> None:
@@ -509,7 +508,6 @@ class BotSession:
 
         `restore=True` (démarrage du navigateur seulement) repart des cookies enregistrés lors de la dernière
         connexion, pour rester connecté après un redémarrage du conteneur."""
-        assert self._browser is not None
         if self._context is not None:
             try:
                 await self._context.close()
@@ -523,7 +521,7 @@ class BotSession:
         if restore:
             self._session_restored = False
         try:
-            self._context = await self._browser.new_context(**options, **({"storage_state": saved} if saved else {}))
+            self._context = await self.host.new_context(**options, **({"storage_state": saved} if saved else {}))
             if saved:
                 self._session_restored = True
                 self.log("Session précédente rechargée : le site devrait rester connecté.", event=True)
@@ -532,7 +530,7 @@ class BotSession:
                 raise
             self.log(f"Session précédente illisible ({type(exc).__name__}) : session vierge.", "warn")
             self._session_store.clear()
-            self._context = await self._browser.new_context(**options)
+            self._context = await self.host.new_context(**options)
         if self._settings.show_cursor and self.display is None:
             await self._context.add_init_script(CURSOR_SCRIPT)
         self._page = await self._context.new_page()
@@ -547,6 +545,8 @@ class BotSession:
             await self._attach_screencast()
         elif self._window_size:
             await self._fit_window(*self._window_size)
+        if self.display is not None and self.after_new_page is not None:
+            self.after_new_page()
 
     async def _open_home(self) -> None:
         page = self._page
@@ -576,28 +576,43 @@ class BotSession:
 
     # ------------------------------------------------------------- connexion
     # ----------------------------------------------------- identifiants (mémoire)
+    # Les identifiants et les cookies appartiennent au compte (voir account.py) ; ces accès gardent les noms d'origine.
+    @property
+    def _creds(self) -> tuple[str, str] | None:
+        return self.account.creds
+
+    @_creds.setter
+    def _creds(self, value: tuple[str, str] | None) -> None:
+        self.account.creds = value
+
+    @property
+    def vault(self):
+        return self.account.vault
+
+    @property
+    def _session_store(self):
+        return self.account.session_store
+
     def has_credentials(self) -> bool:
-        return self._creds is not None
+        return self.account.has_credentials()
 
     def credentials_hint(self) -> str:
         return _mask(self._creds[0]) if self._creds else ""
 
     def credentials_identifier(self) -> str:
         """Identifiant (adresse e-mail) mémorisé ou enregistré, pour pré-remplir la page. Jamais le mot de passe."""
-        return self._creds[0] if self._creds else self.vault.saved_identifier()
+        return self.account.identifier()
 
     def credentials_password_known(self) -> bool:
         """Un mot de passe est disponible (en mémoire ou enregistré) : le champ peut rester vide."""
-        return self._creds is not None
+        return self.account.has_credentials()
 
     def set_credentials(self, identifier: str, password: str | None = None) -> bool:
         """Mémorise l'identifiant. Sans nouveau mot de passe, garde celui déjà connu. Retourne False si aucun n'existe."""
-        if password is None:
-            if self._creds is None:
-                return False
-            password = self._creds[1]
-        self._creds = (identifier, password)
-        if self.vault.save(identifier, password):
+        saved = self.account.remember(identifier, password)
+        if saved is None:
+            return False
+        if saved:
             self.log(f"Identifiants enregistrés pour la reconnexion automatique ({_mask(identifier)}) : mot de passe chiffré sur le disque du bot.", event=True)
         else:
             self.log(f"Identifiants mémorisés pour la reconnexion automatique ({_mask(identifier)}) : en mémoire seulement (pas de dossier /data).", event=True)
@@ -605,16 +620,11 @@ class BotSession:
 
     def restore_credentials(self) -> bool:
         """Recharge en mémoire les identifiants enregistrés (démarrage, ou après une déconnexion)."""
-        saved = self.vault.load()
-        if saved:
-            self._creds = saved
-        return saved is not None
+        return self.account.restore()
 
     def forget_credentials(self) -> None:
-        if self._creds or self.vault.saved_identifier():
+        if self.account.forget():
             self.log("Identifiants oubliés (y compris ceux enregistrés).", event=True)
-        self._creds = None
-        self.vault.clear()
 
     # ----------------------------------------------------- écran courant du site
     async def detect_screen(self) -> str:
@@ -649,7 +659,7 @@ class BotSession:
             return {**self.status(), "message": "Une connexion est déjà en cours."}
         if self._manual:
             return {**self.status(), "message": "Désactivez le contrôle manuel pour lancer la connexion automatique."}
-        async with self._lock:
+        async with self._lock, self.account.login_lock:  # une connexion au compte à la fois, toutes instances confondues
             self._set(State.LOGGING_IN, "Connexion en cours…")
             self.log(f"Connexion demandée pour {_mask(identifier)}{' (automatique)' if supervised else ''}.", event=True)
             try:
@@ -681,8 +691,8 @@ class BotSession:
             return self.status()
 
     async def logout(self) -> dict[str, str]:
-        self._creds = None  # se déconnecter : plus de reconnexion automatique (les identifiants enregistrés restent sur disque)
-        self._session_store.clear()  # les cookies enregistrés partent avec la session
+        self.account.drop_credentials_from_memory()  # se déconnecter : plus de reconnexion automatique (les identifiants enregistrés restent sur disque)
+        self.account.clear_session()  # les cookies enregistrés partent avec la session
         await self.supervisor.stop_keeper()
         async with self._lock:
             if self._page is not None:
@@ -1105,24 +1115,22 @@ class BotSession:
         if self._capture_task is not None:
             self._capture_task.cancel()
             self._capture_task = None
-        for closer in (
-            self._context.close if self._context else None,
-            self._browser.close if self._browser else None,
-            self._pw.stop if self._pw else None,
-        ):
-            if closer is not None:
-                try:
-                    await closer()
-                except Exception:  # noqa: BLE001
-                    pass
-        self._page = self._context = self._browser = self._pw = None
+        context, self._context = self._context, None
+        self._page = None
+        if context is not None:
+            try:
+                await context.close()
+            except Exception:  # noqa: BLE001
+                pass
+        if self._owns_host:  # Chromium partagé : il reste, seul le contexte de cette session est fermé
+            await self.host.close()
 
     async def shutdown(self) -> None:
         try:
             await self._shutdown()
         finally:
-            if self.display is not None:
-                await self.display.stop()
+            if self._owns_host:
+                await self.host.shutdown()
 
     async def _shutdown(self) -> None:
         await self.scheduler.shutdown()

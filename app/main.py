@@ -18,7 +18,10 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, SecretStr
 
-from .bot import BotSession
+from .account import Account
+from .browser_host import BrowserHost
+from .instance_manager import InstanceError, InstanceManager
+from .instance_routing import BotProxy, InstanceScopeMiddleware
 from .config import Settings, load_settings
 from .components import COMPONENTS
 from .constructions import BUILDINGS, ConstructionError
@@ -244,6 +247,11 @@ class UniverseRequest(BaseModel):
     index: int = Field(ge=0, le=50)
 
 
+class InstanceCreateRequest(BaseModel):
+    universe: str = Field(min_length=1, max_length=MAX_UNIVERSE_LENGTH)
+    name: str | None = Field(default=None, max_length=40)
+
+
 class BasicAuthMiddleware:
     """Protège toute l'interface (HTTP et WebSocket) si UI_USER / UI_PASSWORD sont définis."""
 
@@ -287,15 +295,32 @@ def _same_origin(headers, host: str | None) -> bool:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
-    bot = BotSession(settings)
+    host = BrowserHost(settings)  # Chromium partagé : appartient à l'application, pas à une session de bot
+    account = Account(settings.data_dir)  # identifiants et cookies du joueur, communs aux sessions de bot
+    # Une instance de jeu = un bot sur un serveur, avec son dossier de données ; le compte reste à la racine de /data.
+    # Les routes ci-dessous parlent à `bot`, un mandataire vers l'instance visée par la requête (voir instance_routing.py).
+    manager = InstanceManager(settings, host, account)
+    bot = BotProxy(manager)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        await manager.startup()
         yield
-        await bot.shutdown()
+        try:
+            await manager.shutdown()
+        finally:
+            await host.shutdown()
 
     app = FastAPI(title="BoLeryos", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.bot = bot
+    app.state.host = host
+    app.state.account = account
+    app.state.manager = manager
+    app.state.instance_id = manager.default_id
+
+    @app.exception_handler(InstanceError)
+    async def instance_error(_: Request, exc: InstanceError):
+        return JSONResponse({"detail": exc.message}, status_code=exc.status, headers=NO_STORE)
 
     # --- API -----------------------------------------------------------------
     @app.post("/api/login")
@@ -309,7 +334,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def api_logout(request: Request):
         if not _same_origin(request.headers, request.headers.get("host")):
             raise HTTPException(403, "Origine refusée.")
-        return JSONResponse(await bot.logout(), headers=NO_STORE)
+        current = bot.target()
+        status = await current.logout()
+        await manager.logout_others(current)  # le compte est commun : les autres instances se déconnectent aussi
+        return JSONResponse(status, headers=NO_STORE)
+
+    # --- Instances de jeu (un bot par serveur) ------------------------------------
+    @app.get("/api/instances")
+    async def api_instances():
+        return JSONResponse(manager.summary(), headers=NO_STORE)
+
+    @app.post("/api/instances/scan")
+    async def api_instances_scan(request: Request):
+        """Lit la liste des serveurs du compte avec la session de connexion."""
+        _check_origin(request)
+        return JSONResponse(await manager.scan_universes(), headers=NO_STORE)
+
+    @app.post("/api/instances")
+    async def api_instances_create(body: InstanceCreateRequest, request: Request):
+        _check_origin(request)
+        manager.create(body.universe, body.name)
+        return JSONResponse(manager.summary(), headers=NO_STORE)
+
+    @app.post("/api/instances/{instance_id}/start")
+    async def api_instances_start(instance_id: str, request: Request):
+        _check_origin(request)
+        await manager.start(instance_id)
+        return JSONResponse(manager.summary(), headers=NO_STORE)
+
+    @app.post("/api/instances/{instance_id}/stop")
+    async def api_instances_stop(instance_id: str, request: Request):
+        _check_origin(request)
+        await manager.stop(instance_id)
+        return JSONResponse(manager.summary(), headers=NO_STORE)
+
+    @app.delete("/api/instances/{instance_id}")
+    async def api_instances_delete(instance_id: str, request: Request):
+        _check_origin(request)
+        await manager.delete(instance_id)
+        return JSONResponse(manager.summary(), headers=NO_STORE)
 
     # --- Exploration de la structure du site ------------------------------------
     def _check_origin(request: Request) -> None:
@@ -383,15 +446,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not bot.set_credentials(body.identifier.strip(), password):
             raise HTTPException(422, "Saisissez le mot de passe.")
         # Comme TBot : une fois les identifiants saisis, le bot se connecte et choisit l'univers tout seul.
-        bot.supervisor.reset_connection()
-        bot.supervisor.ensure_keeper()
+        manager.credentials_changed(bot.target())  # les instances démarrées se reconnectent avec les nouveaux identifiants
         return JSONResponse({"has_credentials": True, "hint": bot.credentials_hint()}, headers=NO_STORE)
 
     @app.delete("/api/account/credentials")
     async def api_account_forget(request: Request):
         _check_origin(request)
         bot.forget_credentials()
-        await bot.supervisor.stop_keeper()
+        await manager.stop_keepers()  # le compte est commun : plus aucune instance ne se reconnecte seule
         return JSONResponse({"has_credentials": False, "hint": ""}, headers=NO_STORE)
 
     @app.post("/api/account/login")
@@ -934,17 +996,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.websocket("/ws/vnc")
     async def ws_vnc(ws: WebSocket):
         """Relais WebSocket ↔ serveur VNC local (127.0.0.1) : aucun port VNC n'est exposé hors du conteneur."""
-        if not _same_origin(ws.headers, ws.headers.get("host")) or bot.display is None:
+        try:
+            session = bot.target()  # l'instance visée est fixée une fois pour toute la connexion
+        except InstanceError:
+            await ws.close(code=1008)
+            return
+        if not _same_origin(ws.headers, ws.headers.get("host")) or session.display is None:
             await ws.close(code=1008)
             return
         protocols = ws.scope.get("subprotocols") or []
         await ws.accept(subprotocol="binary" if "binary" in protocols else None)
-        bot.viewer_joined()
-        bot.start_in_background()
+        session.viewer_joined()
+        session.start_in_background()
         writer = None
         try:
-            await bot.display.ensure()
-            reader, writer = await asyncio.open_connection("127.0.0.1", bot.display.port)
+            await session.display.ensure()
+            reader, writer = await asyncio.open_connection("127.0.0.1", session.display.port)
 
             async def upstream() -> None:  # clavier, souris, presse-papiers de l'utilisateur → VNC
                 while True:
@@ -972,7 +1039,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             if writer is not None:
                 writer.close()
-            bot.viewer_left()
+            session.viewer_left()
             try:
                 await ws.close()
             except (RuntimeError, WebSocketDisconnect):
@@ -983,9 +1050,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not _same_origin(ws.headers, ws.headers.get("host")):
             await ws.close(code=1008)
             return
+        try:
+            session = bot.target()  # l'instance visée est fixée une fois pour toute la connexion
+        except InstanceError:
+            await ws.close(code=1008)
+            return
         await ws.accept()
-        bot.viewer_joined()
-        bot.start_in_background()  # le navigateur affiche le site même sans connexion
+        session.viewer_joined()
+        session.start_in_background()  # le navigateur affiche le site même sans connexion
 
         async def reader() -> None:
             """Reçoit les ordres de l'interface (contrôle manuel, taille d'affichage, souris, clavier)."""
@@ -998,7 +1070,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 except ValueError:
                     continue
                 if isinstance(msg, dict):
-                    await bot.handle_input(msg)
+                    await session.handle_input(msg)
 
         reader_task = asyncio.create_task(reader())
         last_frame = -1
@@ -1006,23 +1078,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         last_status_time = 0.0
         try:
             while not reader_task.done():  # la tâche se termine quand le client part
-                frame_id, image = bot.frame()
+                frame_id, image = session.frame()
                 if image is not None and frame_id != last_frame:
                     await ws.send_bytes(image)  # image JPEG brute, sans conversion en texte
                     last_frame = frame_id
                     await asyncio.sleep(MIN_FRAME_INTERVAL)  # plafonne le débit (~25 images/s)
-                status = {**bot.status(), "logs": bot.logs()}
+                status = {**session.status(), "logs": session.logs()}
                 now = time.monotonic()
                 if status != last_status or now - last_status_time > 2:
                     await ws.send_json(status)
                     last_status, last_status_time = status, now
-                await bot.wait_frame(WS_TICK)
+                await session.wait_frame(WS_TICK)
         except (WebSocketDisconnect, RuntimeError):
             pass
         finally:
             reader_task.cancel()
             await asyncio.gather(reader_task, return_exceptions=True)
-            bot.viewer_left()
+            session.viewer_left()
 
     # --- Pages ---------------------------------------------------------------
     def page(name: str):
@@ -1050,6 +1122,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if NOVNC_DIR.is_dir():  # client noVNC (paquet « novnc » de l'image Docker)
         app.mount("/novnc", NoStoreStaticFiles(directory=NOVNC_DIR), name="novnc")
 
+    app.add_middleware(InstanceScopeMiddleware)  # `/api/i/<instance>/…` → `/api/…` pour l'instance nommée
     if settings.ui_user and settings.ui_password:
         app.add_middleware(BasicAuthMiddleware, user=settings.ui_user, password=settings.ui_password)
     return app

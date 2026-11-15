@@ -12,7 +12,7 @@ Interface au style inspiré d'Aleryos (espace profond, panneaux translucides, ac
 
 | Page | Rôle |
 |---|---|
-| `/` **Accueil** | État de la connexion, univers, **planètes scannées** (nom, coordonnées, stocks) et derniers événements. |
+| `/` **Accueil** | **Compte** (identifiant et mot de passe), **serveurs** du compte, **instances** (un bot par serveur : créer, démarrer, arrêter, supprimer), puis, pour l'instance affichée : état de la connexion, univers, **planètes scannées** (nom, coordonnées, stocks) et derniers événements. |
 | `/ecran` **Écran** | Vue en direct du navigateur du bot, contrôle manuel (jouer soi-même dans la même vue), choix d'univers et exploration de la structure du site. |
 | `/reglages` **Réglages** | 7 onglets : **Compte et univers** (identifiants, univers, délai de connexion, scan des planètes), **Fonctionnalités** (interrupteur, **minuteur entre X et Y minutes**, prochain passage en direct et ordre de **priorité** de chaque fonctionnalité) **Constructions** (liste ordonnée « bâtiment + niveau cible », toutes les planètes ou une seule, et tableau **Niveaux actuels** de chaque bâtiment sur chaque planète) et **Recherches** (liste ordonnée « recherche + niveau cible » des 23 recherches du Laboratoire, et **planète chargée des recherches** : une seule recherche à la fois, payée par cette planète ; lancement non vérifié sur le vrai jeu) et **Population** (tableau **Effectifs actuels** de chaque population sur chaque planète, avec, au-dessus, le choix Max / Quantité définie / Nombre à atteindre et l'interrupteur une fois / à chaque passage, appliqués par un bouton sur chaque case et en début de ligne ; une ligne par population recrutable : quantité fixe ou MAX, **à chaque passage ou une seule fois** (une fois par planète ; modifier la ligne la remet à zéro), ou effectif à atteindre ; planète au choix ou toutes, chacune traitée séparément ; liste ordonnée = priorité ; recrutement non vérifié sur le vrai jeu), **Assemblages** (bouton **Scanner les modèles** + une ligne par modèle de vaisseau : quantité fixe ou MAX, à chaque passage ou une seule fois, ou effectif à atteindre ; planètes : toutes, une seule ou plusieurs ; construit **uniquement avec des ressources**, mode Construction ; non vérifié sur le vrai jeu) et **Composants** (même principe que Population : tableau **Effectifs actuels** des 37 composants, en 6 catégories repliables, sur chaque planète, avec Max / Quantité définie / Nombre à atteindre, interrupteur une fois / à chaque passage et un bouton par case et en début de ligne ; une ligne par composant et par planète ; non vérifié sur le vrai jeu). Enregistrement automatique. |
 | `/suivi` **Suivi** | **Journal** lisible (événements importants ; détails techniques en option). |
@@ -47,6 +47,22 @@ Le panneau « Exploration de la structure du site » (désactivé par défaut) e
 - Jamais conservés : valeurs de cookies, d'en-têtes et de stockage, valeurs de paramètres d'URL, mots de passe et saisies, e-mails, jetons, identifiants. Des tests le vérifient.
 - Les textes visibles à l'écran (titres, boutons, pseudo) et les courts libellés peuvent contenir des informations de jeu : relisez le fichier avant de le partager. Ne le commitez pas dans un dépôt public.
 
+## Instances : plusieurs serveurs en même temps
+
+Une **instance** est un bot sur un serveur du jeu : elle a son univers, ses réglages, ses relevés et son planning, et se démarre, s'arrête, se crée et se supprime sans toucher aux autres. Le **compte** (identifiant, mot de passe, cookies de connexion) est commun à toutes les instances.
+
+1. Sur l'**Accueil**, saisir l'identifiant et le mot de passe (**Se connecter**).
+2. **Lire mes serveurs** : le bot se connecte et relève la liste des serveurs proposés au compte.
+3. **Créer une instance** sur un serveur, puis **Démarrer**. Le jeu n'accepte qu'une session par compte et par serveur : une seule instance par serveur. Le nombre d'instances est limité (`MAX_INSTANCES`, 5 par défaut).
+
+- **Sélecteur d'instance** dans l'en-tête (dès qu'il y en a plusieurs) : Écran, Réglages et Suivi montrent l'instance choisie, **dans cet onglet** (deux onglets peuvent donc montrer deux instances). Une instance arrêtée est signalée par une bannière avec un bouton **Démarrer**.
+- **Un seul Chromium** pour tout le monde, avec **un contexte par instance** (session de jeu indépendante) : environ 410 Mo pour le navigateur puis environ 105 Mo par instance supplémentaire (mesuré sur une page de test ; la mémoire réelle est affichée sur l'Accueil).
+- **Écran** : toutes les fenêtres partagent le même écran virtuel ; celle de l'instance qu'on regarde est remontée devant. Deux onglets Écran sur deux instances différentes montrent donc la même fenêtre, la dernière remontée.
+- **Redémarrage du conteneur** : les instances qui tournaient reprennent leur connexion (une après l'autre, à quelques secondes d'écart), avec le bot sur **OFF** : rien ne se lance tant qu'on ne l'a pas remis sur ON (`AUTOSTART=0` pour désactiver la reprise).
+- **Suppression** : le dossier de l'instance est déplacé dans `/data/instances/.corbeille/`, jamais effacé.
+- Adresses : `/api/i/<instance>/…` et `/ws/i/<instance>/…` visent une instance ; sans préfixe, c'est la première. `compte` désigne la session de connexion (identifiants et liste des serveurs, sans instance). La gestion est sous `/api/instances`.
+- Disposition de `/data` : `account.json`, `account.key`, `browser-state.json` et `instances.json` à la racine ; `instances/<id>/` pour tout ce qui est propre à un serveur.
+
 ## Connexion automatique et scan des planètes
 
 Le bot ne lance **aucune action de jeu** : constructions, recherches, production, expéditions, espionnage, attaques, priorités, horaires, sauvegarde des réglages d'automatisation et alertes ont été supprimés pour repartir de zéro. Il se connecte, entre dans l'univers, reste connecté et lit la liste des planètes.
@@ -68,7 +84,9 @@ Dans **Réglages › Compte et univers**, saisissez l'identifiant, le mot de pas
 **Identifiants :** enregistrés par le bot dans le volume `/data` (décision D1 « B », demandée le 05/11/2026) : l'identifiant dans `account.json`, le mot de passe **chiffré** (Fernet) avec une clé aléatoire gardée à côté dans `account.key` (droits 0600). La clé protège contre une lecture du seul fichier, pas contre une copie de tout le dossier : utilisez un compte de test et protégez l'interface (`UI_USER` / `UI_PASSWORD`). Jamais dans le journal, ni dans les réglages exportés ; le mot de passe n'est jamais renvoyé par l'API (le champ reste vide et indique « enregistré »). Au redémarrage ils sont relus mais le bot **ne se connecte pas seul** : « Relancer la connexion ». « Oublier le compte » efface les deux fichiers. Sans volume `/data`, ils restent en mémoire seulement.
 
 
-**Préférences :** univers choisi et délai de connexion sont enregistrés dans le volume Docker `boleryos-data` (`/data/preferences.json`, non secret ; l'ancien `automation.json` est repris au premier démarrage).
+**Préférences :** univers choisi et délai de connexion sont enregistrés dans le volume Docker `boleryos-data` (`preferences.json` de l'instance, non secret ; l'ancien `automation.json` est repris au premier démarrage).
+
+**Organisation de `/data` :** le **compte** du joueur (`account.json`, `account.key`, `browser-state.json`) reste à la racine ; tout ce qui est propre à un serveur de jeu (réglages, objectifs, relevés, planning, univers choisi) est dans le dossier de son **instance**, `/data/instances/<identifiant>/` (l'identifiant vient de l'univers déjà choisi, par exemple `asterion`, sinon `principale`). Au premier démarrage après la mise à jour, les anciens fichiers à plat sont **copiés** dans ce dossier (jamais par-dessus des fichiers déjà présents) ; les originaux restent à la racine, inutilisés, et on peut les supprimer à la main une fois la mise à jour validée. Les chemins `/data/<fichier>.json` cités plus bas sont à lire dans le dossier de l'instance.
 
 ## Fonctionnalités et interrupteur général (Réglages › Fonctionnalités)
 
@@ -128,6 +146,8 @@ Ils se modifient directement dans `app/config.py` (aucune donnée de joueur) :
 | `show_cursor` | Point rouge à l'endroit de la souris dans la vue en direct | `True` |
 | `screenshot_interval` | Intervalle entre deux images de la vue en direct (secondes) | `0.4` |
 | `login_timeout` | Attente maximale du résultat de la connexion, en secondes | `30` |
+| `max_instances` (`MAX_INSTANCES`) | Nombre maximal d'instances de jeu | `5` |
+| `autostart` (`AUTOSTART`) | Les instances qui tournaient reprennent au démarrage de l'application (`AUTOSTART=0` pour l'éviter) | `True` au lancement ; `False` dans les tests |
 | `email_selector`, `password_selector`, `submit_selector` | Sélecteurs du formulaire | relevés sur le site |
 
 Les mêmes réglages peuvent aussi être surchargés par variables d'environnement (`DATA_DIR`, `LOGIN_URL`, `UI_USER`, `UI_PASSWORD`, `LOGIN_TIMEOUT`, `EMAIL_SELECTOR`, `PASSWORD_SELECTOR`, `SUBMIT_SELECTOR`), mais ce n'est pas nécessaire.

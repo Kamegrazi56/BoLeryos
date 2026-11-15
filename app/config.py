@@ -70,6 +70,10 @@ class Settings:
     # un identifiant du jeu.
     ui_user: str | None = None
     ui_password: str | None = None
+    # Instances de jeu (un bot par serveur) : nombre maximal, et redémarrage automatique de celles qui tournaient au
+    # dernier arrêt (activé au lancement de l'application par `load_settings`, variable AUTOSTART ; désactivé par défaut ici, pour les tests).
+    max_instances: int = 5
+    autostart: bool = False
 
 
 def load_settings() -> Settings:
@@ -95,4 +99,6 @@ def load_settings() -> Settings:
         poll_seconds=_env_float("POLL_SECONDS", defaults.poll_seconds),
         ui_user=os.environ.get("UI_USER") or None,
         ui_password=os.environ.get("UI_PASSWORD") or None,
+        max_instances=max(1, int(_env_float("MAX_INSTANCES", defaults.max_instances))),
+        autostart=_env_bool("AUTOSTART", True),
     )

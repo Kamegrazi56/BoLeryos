@@ -263,6 +263,13 @@ input.inline { width: 90px; display: inline-block; margin: 0 6px; }
 .fields-account label { white-space: nowrap; min-width: 0; }
 .fields-account label input { display: block; width: 100%; min-width: 0; margin-top: 4px; }
 @media (max-width: 1100px) { .fields-account { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); } }
+/* Accueil : connexion au compte, et instances de jeu (un bot par serveur). */
+.fields-login { margin-top: 10px; grid-template-columns: minmax(200px, 2fr) minmax(170px, 1.5fr) auto auto; align-items: end; }
+.fields-login label input { display: block; width: 100%; min-width: 0; margin-top: 4px; }
+.inst-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.instance-select { width: auto; max-width: 240px; padding: 6px 10px; }
+.banner { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 18px 0; padding: 10px 14px; border: 1px solid rgba(251, 191, 36, 0.55); border-radius: 8px; background: rgba(251, 191, 36, 0.08); color: var(--warn); }
+#instance-view[hidden] { display: none; }
 .switch { display: inline-flex; align-items: center; gap: 8px; margin: 6px 0; color: var(--text); cursor: pointer; user-select: none; font-size: 14px; }
 .switch input { width: 16px; height: 16px; accent-color: var(--accent); }
 

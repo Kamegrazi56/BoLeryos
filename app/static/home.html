@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body data-page="home">
   <header class="top">
     <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span><strong>BOLERYOS</strong></a>
     <nav>
@@ -24,6 +24,33 @@
   </header>
 
   <main class="page">
+    <section class="card" aria-labelledby="account-title">
+      <h2 id="account-title">1. Compte</h2>
+      <div class="fields fields-login">
+        <label>Identifiant <input id="login-id" type="text" autocomplete="username"></label>
+        <label>Mot de passe <input id="login-pw" type="password" autocomplete="off"></label>
+        <button id="login-save" class="button" type="button">Se connecter</button>
+        <button id="login-forget" type="button">Oublier</button>
+      </div>
+      <p id="login-msg" class="hint" role="status"></p>
+    </section>
+
+    <section class="card" id="servers-card" aria-labelledby="servers-title">
+      <h2 id="servers-title">2. Serveurs du compte</h2>
+      <div class="row">
+        <button id="scan-servers" type="button">Lire mes serveurs</button>
+        <span id="scan-msg" class="hint" role="status"></span>
+      </div>
+      <div id="server-list"></div>
+    </section>
+
+    <section class="card" aria-labelledby="instances-title">
+      <h2 id="instances-title">3. Instances (un bot par serveur)</h2>
+      <div id="instance-table"></div>
+      <p id="instance-hint" class="hint" role="status"></p>
+    </section>
+
+    <div id="instance-view">
     <section class="card hero" aria-labelledby="hero-title">
       <div style="flex:1; min-width:260px">
         <h1 id="hero-title">Connexion</h1>
@@ -45,7 +72,9 @@
         <p><a href="/suivi">Voir tout le journal</a></p>
       </section>
     </div>
+    </div>
   </main>
+  <script src="/static/instance.js"></script>
   <script src="/static/shell.js"></script>
   <script src="/static/home.js"></script>
 </body>
