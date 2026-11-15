@@ -145,6 +145,7 @@ class ResearchPass(ConstructionPass):
         if remaining > 0:
             return f"une recherche est en cours (encore environ {int(remaining // 60) + 1} min), rien à lancer"
         try:
+            await self._refresh_inventory()  # niveaux de recherche à jour pour l'onglet (un échec n'empêche pas le lancement)
             launched = await self._attempt(planet, settings["queue"])
         except Interrupted as exc:
             return f"interrompu ({exc})"

@@ -111,6 +111,77 @@ def test_with_all_planets_a_line_leaves_the_list_only_when_reached_everywhere(ga
     assert [ln["building"] for ln in game_client.get("/api/constructions").json()["settings"]["queue"]] == [CASERNE["building"]]
 
 
+# ------------------------------------------------------------------------------ objectifs propres à une planète
+CONCORDE, EGIDE = "8-50-Concorde", "6-79-Egide"
+MINE_40 = {"building": "mine-de-fer", "level": 40}  # la Mine de Fer est niveau 40 sur toutes les planètes du faux jeu
+
+
+def _own(line, planet):
+    return {**line, "planet": planet}
+
+
+def _queue(client):
+    return client.get("/api/constructions").json()["settings"]["queue"]
+
+
+def test_a_line_for_one_planet_touches_only_that_planet(game_client, game):
+    _scan(game_client)
+    _set(game_client, [_own(CENTRALE, CONCORDE)])  # « toutes les planètes » choisies, mais la ligne ne vaut que pour Concorde
+    summary = _run(game_client)
+    assert _launched(game) == [(CONCORDE, "Centrale Énergétique", 28)]  # Egide, qui aurait pu payer la Centrale, n'est pas visitée
+    assert "arrêté" not in summary
+
+
+def test_a_line_for_a_planet_outside_the_chosen_planets_is_still_applied(game_client, game):
+    _scan(game_client)
+    assert game_client.put("/api/constructions", json={"planets": [EGIDE], "queue": [CASERNE, _own(CENTRALE, CONCORDE)]}).status_code == 200
+    _run(game_client)
+    assert sorted(_launched(game)) == sorted([(EGIDE, "Caserne", 19), (CONCORDE, "Centrale Énergétique", 28)])
+
+
+def test_the_line_of_a_planet_wins_over_the_all_planets_line_of_the_same_building(game_client, game):
+    _scan(game_client)
+    _set(game_client, [CENTRALE, _own({"building": "centrale-energetique", "level": 1}, CONCORDE)])  # Concorde : déjà au-dessus de 1
+    _run(game_client)
+    assert all(planet != CONCORDE for planet, _, _ in _launched(game))  # la Centrale de Concorde n'est pas montée (objectif propre atteint)
+    assert any(planet == EGIDE for planet, _, _ in _launched(game))  # les autres planètes suivent la ligne commune
+
+
+def test_a_per_planet_line_leaves_the_list_when_reached_on_its_planet_only(game_client, game):
+    game.reset(levels={"0": {"Mine de Fer": 30}})  # Concorde est en dessous de 40, Egide est à 40
+    _scan(game_client)
+    _set(game_client, [_own(MINE_40, EGIDE), _own(MINE_40, CONCORDE)])
+    _run(game_client)
+    assert _queue(game_client) == [_own(MINE_40, CONCORDE)]  # la ligne atteinte sur Egide part, celle de Concorde reste
+
+
+def test_a_planet_line_below_the_all_planets_line_stays_as_a_cap(game_client, game):
+    _scan(game_client)
+    common = {"building": "mine-de-fer", "level": 500}
+    _set(game_client, [common, _own(MINE_40, EGIDE)])  # Egide plafonnée à 40 (déjà atteint) ; la ligne commune vise 500
+    _run(game_client)
+    assert _own(MINE_40, EGIDE) in _queue(game_client) and common in _queue(game_client)  # la retirer ferait remonter Egide jusqu'à 500
+    assert all(planet != EGIDE for planet, _, _ in _launched(game))
+
+
+def test_a_line_for_a_planet_the_game_no_longer_knows_does_not_stop_the_pass(game_client, game):
+    _scan(game_client)
+    game_client.app.state.bot.constructions.replace({"queue": [_own(CENTRALE, "Nulle-Part"), _own(CENTRALE, CONCORDE)]})  # chargé sans contrôle
+    summary = _run(game_client)
+    assert _launched(game) == [(CONCORDE, "Centrale Énergétique", 28)] and "arrêté" not in summary
+    assert _own(CENTRALE, "Nulle-Part") in _queue(game_client)  # la ligne reste (à supprimer par l'utilisateur), simplement ignorée
+
+
+def test_an_all_planets_line_ignores_the_planets_that_have_their_own_line(game_client, game):
+    game.reset(levels={"0": {"Mine de Fer": 30}})  # Concorde est en dessous de 40 ; Egide et Strate sont à 40
+    _scan(game_client)
+    own = _own({**MINE_40, "level": 500}, CONCORDE)  # Concorde a sa propre ligne, loin d'être atteinte
+    _set(game_client, [MINE_40, own])
+    _run(game_client)
+    assert MINE_40 not in _queue(game_client)  # la ligne commune est atteinte sur les planètes qui la suivent : Concorde ne compte plus pour elle
+    assert own in _queue(game_client)  # la ligne de Concorde reste
+
+
 def test_a_single_chosen_planet_is_the_only_one_touched(game_client, game):
     _scan(game_client)
     _set(game_client, [CENTRALE], scope="one", planet="8-50-Concorde")

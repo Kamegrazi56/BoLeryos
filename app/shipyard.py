@@ -18,9 +18,10 @@ import time
 
 from . import human
 from .builder import ConstructionPass
+from .component_counts import ComponentCounts, counts_from_cards
 from .components import COMPONENT_LABELS
 from .numbers import norm
-from .planets import GameUiError
+from .planets import GameUiError, Interrupted
 from .quantity_pass import CLEAR_MARK_JS, TARGET_ATTRIBUTE, QuantityPass
 from .recruiter import TAB_SWITCH_SECONDS, parse_count
 
@@ -166,8 +167,69 @@ class ComponentPass(QuantityPass):
     mark_js = MARK_COMPONENT_JS
     go_name = re.compile(r"^Produire$", re.I)
 
-    def __init__(self, bot, store) -> None:
+    def __init__(self, bot, store, counts: ComponentCounts | None = None) -> None:
         super().__init__(bot, store, COMPONENT_LABELS)
+        self.counts = counts  # effectif de chaque composant sur chaque planète, pour le tableau de l'onglet Composants
+        self.reading = False  # relevé de toutes les planètes en cours
+
+    async def _observe(self, planet: str) -> None:
+        """Note l'effectif des composants de la planète visitée (page à jour, avant la production du passage)."""
+        if self.counts is None:
+            return
+        counts = counts_from_cards(await self._read_pop_cards())
+        if counts:
+            self.counts.set_planet(planet, counts, "passage")
+
+    async def survey(self, source: str) -> dict:
+        """Relevé à la demande : visite chaque planète du scan, lit l'onglet Composants et note les effectifs, sans rien produire.
+        Ne lève jamais : un échec est gardé dans `error` (les effectifs déjà connus restent)."""
+        if self.counts is None or self.reading:
+            return self.counts.get() if self.counts is not None else {}
+        busy = "une fonctionnalité est en cours, réessayez dans un instant" if self.bot.work.locked() else None
+        reason = self.bot.supervisor.game_blocker() or busy
+        if reason:
+            self.counts.set_error(reason[0].upper() + reason[1:])
+            return self.counts.get()
+        self.reading = True
+        try:
+            async with self.bot.work:  # jamais en même temps qu'un passage de fonctionnalité
+                await self._survey(source)
+        except Interrupted as exc:
+            self.counts.set_error(f"Relevé impossible : {exc}")
+        finally:
+            self.reading = False
+        return self.counts.get()
+
+    async def _survey(self, source: str) -> None:
+        planets = self._planets()
+        if not planets:
+            self.counts.set_error("Aucune planète connue : lancez un scan des planètes (Réglages › Compte et univers)")
+            return
+        read = 0
+        failures: list[str] = []
+        for planet in planets:
+            try:
+                await self._open_yard()
+                await self._select_planet(planet)
+                await self._settle(planet, self._cards_signature)
+                counts = counts_from_cards(await self._read_pop_cards())
+                if counts:
+                    self.counts.set_planet(planet, counts, source)
+                    read += 1
+                await self._remember(planet, self._cards_signature)
+            except Interrupted:
+                raise
+            except Exception as exc:  # GameUiError, mais aussi erreur Playwright (navigation lente, page rechargée…) : jamais fatal
+                failures.append(f"{planet} : {str(exc) or type(exc).__name__}")  # on passe à la planète suivante
+        if failures:
+            reason = " ; ".join(failures[:3]) + (f" (et {len(failures) - 3} autre(s))" if len(failures) > 3 else "")
+            self.counts.set_error(f"Relevé incomplet ({read} planète(s) sur {len(planets)}) : {reason}")
+            self.bot.log(f"Composants : relevé incomplet ({reason}).", "warn", event=True)
+        elif not read:
+            self.counts.set_error("Aucun effectif lisible dans l'onglet Composants")
+            self.bot.log("Composants : aucun effectif lisible dans l'onglet Composants.", "warn", event=True)
+            return
+        self.bot.log(f"Effectifs de composants relevés ({source}) : {read} planète(s) sur {len(planets)}.", event=source == "manuel")
 
 
 class ModelScanner(ConstructionPass):

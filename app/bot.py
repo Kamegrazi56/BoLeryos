@@ -33,12 +33,14 @@ from .explore import MAX_SNAPSHOTS, SNAPSHOT_JS, Recorder, should_skip_host
 from .preferences import Preferences
 from .builder import ConstructionPass
 from .constructions import ConstructionSettings
+from .inventory import InventoryReader, InventoryStore
 from . import components
 from .populations import PopulationSettings
 from .quantities import LineSettings, LineSpec
 from .recruiter import PopulationPass
 from .researcher import ResearchPass
 from .researches import ResearchSettings
+from .component_counts import ComponentCounts
 from .shipyard import ComponentPass, ShipPass
 from .explorations import ExplorationStore
 from .explorer import ExplorationPass
@@ -166,6 +168,8 @@ class BotSession:
         self.supervisor = ConnectionSupervisor(self, Preferences(settings.data_dir))
         self.constructions = ConstructionSettings(settings.data_dir)  # liste d'objectifs de construction
         self.builder = ConstructionPass(self)  # lancement des constructions (clic sur « Améliorer »)
+        self.inventory = InventoryStore(settings.data_dir)  # niveaux des bâtiments de chaque planète (Empire › Inventaire)
+        self.inventory_reader = InventoryReader(self, self.inventory)  # relevé de l'inventaire (lecture seule)
         self.researches = ResearchSettings(settings.data_dir)  # liste d'objectifs de recherche + planète chargée des recherches
         self.researcher = ResearchPass(self)  # lancement des recherches (clic sur « Rechercher »)
         self.populations = PopulationSettings(settings.data_dir)  # lignes de recrutement de population (mode, quantité, planète)
@@ -173,7 +177,8 @@ class BotSession:
         self.ships = LineSettings(settings.data_dir, LineSpec("ships.json", "modèle"))  # Assemblages : modèle + mode + quantité + planètes
         self.shipper = ShipPass(self, self.ships)  # construction de vaisseaux avec des ressources (mode Construction, bouton « Lancer »)
         self.components = LineSettings(settings.data_dir, components.SPEC)  # Composants : composant + mode + quantité + planètes
-        self.producer = ComponentPass(self, self.components)  # production de composants (bouton « Produire »)
+        self.component_counts = ComponentCounts(settings.data_dir)  # effectif de chaque composant sur chaque planète (tableau de l'onglet Composants)
+        self.producer = ComponentPass(self, self.components, self.component_counts)  # production de composants (bouton « Produire »)
         self.slots = SlotSettings(settings.data_dir)  # places de mission : places gardées libres, priorités entre fonctionnalités
         self.explorations = ExplorationStore(settings.data_dir)  # réglages d'exploration + relevé du jour (brèches, modèles)
         self.explorer = ExplorationPass(self, self.explorations)  # explorations vers la brèche la plus proche de chaque planète
@@ -980,7 +985,7 @@ class BotSession:
 
     def _on_websocket(self, ws) -> None:
         rec = self._recorder
-        if not rec.enabled or should_skip_host(urlsplit(ws.url).hostname):
+        if should_skip_host(urlsplit(ws.url).hostname):  # écoute attachée même si l'enregistrement est éteint : on peut l'allumer plus tard
             return
         ws.on("framesent", lambda payload: rec.enabled and rec.add_ws_frame(ws.url, "sent", payload))
         ws.on("framereceived", lambda payload: rec.enabled and rec.add_ws_frame(ws.url, "received", payload))

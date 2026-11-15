@@ -175,6 +175,7 @@ def initial_state():
              "spy": {"Fer": 9e9, "Cristal": 9e9, "Éther": 9e9}, "drone_off": True},
             {"mining": True, "planet": "Planete miniere", "coords": "M69 40 68", "actions": ["Miner", "Sonde"]},
         ],
+        "empire_reversed": False,  # Empire › Inventaire : colonnes des planètes dans l'ordre inverse (le joueur peut les réordonner)
         "ship_mode": "assemblages",  # mode de production affiché sur les cartes de vaisseaux (« Construction » à choisir)
         "planets": [
             {"name": n, "coords": c, "energy": e, "stocks": copy.deepcopy(s), "busy": False, "buildings": _buildings(), "prod": _prod_items(),
@@ -245,7 +246,7 @@ function card(p, it, kind, busy) {
 const kfmt = (v) => v >= 1e9 ? (v / 1e9).toFixed(3).replace('.', ',') + ' G' : v >= 1e6 ? (v / 1e6).toFixed(3).replace('.', ',') + ' M' : v >= 1000 ? (v / 1000).toFixed(3).replace('.', ',') + ' K' : String(Math.round(v));
 const ui = {tab: 'Assaut', ship: 'Assemblages', way: 'Piliers', mission: 'ATTAQUE', techTab: 'Civil', zoom: 1, windowRows: [], modelsOpen: false,
             zoomLevel: 4.64, listShown: 25, toasts: [], report: null, freeRows: [], allyTab: 'vue', allyMsg: null, missionTab: 'missions', missionMsg: null,
-            form: {target: '', units: {}, copies: '1', duration: '1', hours: 6, mira: false, foreuse: '1', mineur: ''}};
+            empireTab: 'dash', form: {target: '', units: {}, copies: '1', duration: '1', hours: 6, mira: false, foreuse: '1', mineur: ''}};
 (() => { const q = new URLSearchParams(location.search); if (q.get('mission')) ui.mission = q.get('mission'); if (q.get('method')) ui.way = q.get('method') === 'FLEET' ? 'Flotte' : 'Piliers'; })();
 const CK = {Fer: 'F', Cristal: 'C', 'Éther': 'E'};
 const costLeaves = (c) => Object.entries(c).map(([k, v]) => `<span>${CK[k]}: ${kfmt(v)}</span>`).join('');
@@ -451,6 +452,42 @@ function missionsMain() {
   return '<h2>Missions</h2><div role="tablist">' + tabs + '<button type="button">Actualiser</button></div>'
     + `<section><h3>Quotidiennes</h3>${rows}</section>` + (ui.missionMsg ? `<div role="status">${ui.missionMsg}</div>` : '');
 }
+// Empire › Inventaire (vrai jeu, 15/11) : un vrai <table>, une colonne par planète puis « Total » ; en-tête sur deux lignes (nom +
+// coordonnées, puis « Ordre d'affichage » avec des champs à NE PAS toucher) ; une ligne de section = une seule cellule (colspan 100) ;
+// « Tour à résonance » s'écrit avec une minuscule ; niveaux de technologies « — » par planète (une seule valeur dans le total).
+const EMPIRE_GROUPS = [
+  ['Installations minières', ['Mine de Fer', 'Extracteur de Cristal', "Synthétiseur d'Éther"]],
+  ['Installations énergétiques', ['Centrale Énergétique', 'Centrale à Impulsion']],
+  ['Installations de stockage', ['Hangar de Fer', 'Hangar de Cristal', "Cuve d'Éther"]],
+  ['Installations techniques', ['Usine Robot', 'Chantier Spatial', 'Centre de Recherche', 'Caserne', 'Institut de Formation', 'Tour à Résonance',
+                                'Matrice de Coalescence', 'Terraformeur']],
+];
+function empireMain() {
+  const tabs = [['dash', 'Tableau de bord'], ['inv', 'Inventaire']].map(([k, n]) =>
+    `<button type="button" role="tab" class="etab" data-k="${k}" aria-selected="${ui.empireTab === k}">${n}</button>`).join('');
+  if (ui.empireTab !== 'inv') return '<h2>Empire</h2><div role="tablist">' + tabs + '</div><section><h3>Production</h3></section>';
+  const cols = state.empire_reversed ? [...state.planets].reverse() : state.planets;
+  const num = (v) => String(v).replace(/\\B(?=(\\d{3})+(?!\\d))/g, String.fromCharCode(8239));
+  const section = (name) => `<tr><td colspan="100">${name}</td></tr>`;
+  const row = (label, cells, total) => `<tr class="hover"><td>${label}</td>${cells.map((c) => `<td>${c}</td>`).join('')}<td>${total}</td></tr>`;
+  const level = (pl, name) => (pl.buildings.find((b) => b.name === name) || {level: 0}).level;
+  let body = section('Caractéristiques') + row('Cases', cols.map((pl, i) => `${100 + i * 15} / 240`), '558 / 901');
+  body += section('Ressources en stock') + ['Fer', 'Cristal', 'Éther'].map((r) => row(r, cols.map((pl) => num(Math.round(pl.stocks[r] / 1e3))),
+    num(Math.round(cols.reduce((a, pl) => a + pl.stocks[r], 0) / 1e3)))).join('');
+  EMPIRE_GROUPS.forEach(([title, names]) => {
+    body += section(title) + names.map((n) => row(n === 'Tour à Résonance' ? 'Tour à résonance' : n, cols.map((pl) => level(pl, n)),
+      cols.reduce((a, pl) => a + level(pl, n), 0))).join('');
+  });
+  const unit = (pl, name) => (pl.prod.find((i) => i.section === 'population' && i.name === name) || {owned: 0}).owned;
+  const unitNames = ['Soldat', ...state.planets[0].prod.filter((i) => i.section === 'population').map((i) => i.name)];
+  body += section('Unités terrestres') + unitNames.map((n) => row(n, cols.map((pl) => n === 'Soldat' ? 1000 : unit(pl, n)),
+    cols.reduce((a, pl) => a + (n === 'Soldat' ? 1000 : unit(pl, n)), 0))).join('');
+  body += section('Technologies civiles') + state.tech.filter((t) => t.tab === 'Civil').map((t) => row(t.name, cols.map(() => '—'), t.level)).join('');
+  body += section('Technologies militaires') + state.tech.filter((t) => t.tab === 'Militaire').map((t) => row(t.name, cols.map(() => '—'), t.level)).join('');
+  const head = '<thead><tr><th>Objet</th>' + cols.map((pl) => `<th><div><span>${pl.name}</span><span>${pl.coords}</span></div></th>`).join('') + '<th>Total</th></tr>'
+    + '<tr><th>Ordre d’affichage</th><th></th>' + cols.slice(1).map((pl, i) => `<th><input type="number" value="${i + 1}" aria-label="Ordre ${pl.name}"></th>`).join('') + '<th></th></tr></thead>';
+  return '<h2>Empire</h2><div role="tablist">' + tabs + `</div><div class="inv"><table>${head}<tbody>${body}</tbody></table></div>`;
+}
 // Opérations › « Gérer les Piliers » : une ligne par planète, colonne Piliers (bouton ou compte à rebours) et Champ de force.
 function pillarsDialog() {
   if (!ui.pillarsOpen) return '';
@@ -498,7 +535,7 @@ function render() {
   if (!state) return;
   const p = state.planets[state.active], s = sec();
   const title = {buildings: 'Industrie', facilities: 'Infrastructures', tech: 'Laboratoire'}[s] || 'Vue';
-  const isProd = ['staff', 'shipyard', 'specialized', 'defense', 'operations', 'galaxy', 'alliance', 'missions'].includes(s);
+  const isProd = ['staff', 'shipyard', 'specialized', 'defense', 'operations', 'galaxy', 'alliance', 'missions', 'empire'].includes(s);
   let cards = '';
   if (isProd) cards = '';
   else if (s === 'tech') cards = state.tech.filter((t) => t.tab === ui.techTab).map((t) => techCard(p, t, state.research_busy)).join('');
@@ -514,7 +551,7 @@ function render() {
     + `<div class="res"><div aria-label="FER : ${big(p.stocks.Fer)}"><span>${big(p.stocks.Fer)}</span><span>FER</span></div><div aria-label="CRISTAL : ${big(p.stocks.Cristal)}"><span>${big(p.stocks.Cristal)}</span><span>CRISTAL</span></div>`
     + `<div aria-label="ÉTHER : ${big(p.stocks['Éther'])}"><span>${big(p.stocks['Éther'])}</span><span>ÉTHER</span></div><div><span>${int(p.energy)}</span><span>ÉNERGIE</span></div>`
     + '<div><span>4 808</span><span>ASTRIUM</span></div><div><span>492</span><span>ÉCHOS</span></div></div>'
-    + (isProd ? `<main>${s === 'operations' ? opsMain() : s === 'galaxy' ? galaxyMain() : s === 'alliance' ? allianceMain() : s === 'missions' ? missionsMain() : prodMain(p, s)}</main>` : `<main><h2>${title}</h2>${(s === 'buildings' || s === 'facilities') ? '<div>' + [['buildings', 'Industrie'], ['facilities', 'Infrastructures']].map(([k, n]) => `<button type="button" role="tab" class="tabnav" aria-selected="${k === s}" data-s="${k}">${n}</button>`).join('') + '</div>' : ''}${s === 'tech' ? '<div>' + ['Civil', 'Militaire'].map((n) => `<button type="button" role="tab" class="techtab" aria-selected="${n === ui.techTab}" data-t="${n}">${n}</button>`).join('') + '</div>' : ''}<div class="grid">${cards}</div></main>`)
+    + (isProd ? `<main>${s === 'operations' ? opsMain() : s === 'galaxy' ? galaxyMain() : s === 'alliance' ? allianceMain() : s === 'missions' ? missionsMain() : s === 'empire' ? empireMain() : prodMain(p, s)}</main>` : `<main><h2>${title}</h2>${(s === 'buildings' || s === 'facilities') ? '<div>' + [['buildings', 'Industrie'], ['facilities', 'Infrastructures']].map(([k, n]) => `<button type="button" role="tab" class="tabnav" aria-selected="${k === s}" data-s="${k}">${n}</button>`).join('') + '</div>' : ''}${s === 'tech' ? '<div>' + ['Civil', 'Militaire'].map((n) => `<button type="button" role="tab" class="techtab" aria-selected="${n === ui.techTab}" data-t="${n}">${n}</button>`).join('') + '</div>' : ''}<div class="grid">${cards}</div></main>`)
     + '<nav><button class="nav" data-s="facilities"><span class="sr-only">Installations</span></button><button class="nav" data-s="tech"><span class="sr-only">Laboratoire</span></button>'
     + '<button class="nav" data-s="staff"><span class="sr-only">Population</span></button><button class="nav" data-s="shipyard"><span class="sr-only">Chantier spatial</span></button>'
     + '<button class="nav" data-s="specialized"><span class="sr-only">Appareils spécialisés</span></button><button class="nav" data-s="defense"><span class="sr-only">Défenses</span></button><button class="nav" data-s="operations"><span class="sr-only">Opérations</span></button><button class="nav" data-s="galaxy"><span class="sr-only">Galaxie</span></button>'
@@ -597,6 +634,7 @@ function render() {
   document.querySelectorAll('.edur').forEach((b) => b.onclick = () => { ui.form.hours = +b.dataset.h; render(); });
   document.querySelectorAll('.hero').forEach((r) => r.onchange = () => { ui.form.mira = r.value === 'mira' && r.checked; render(); });
   document.querySelectorAll('.mtab').forEach((b) => b.onclick = () => { ui.missionTab = b.dataset.k; render(); });
+  document.querySelectorAll('.etab').forEach((b) => b.onclick = () => { ui.empireTab = b.dataset.k; render(); });
   document.querySelectorAll('.claim').forEach((b) => b.onclick = async () => {
     const r = await (await post('/api/claim', {list: b.dataset.list, index: +b.dataset.i})).json();
     ui.missionMsg = r.message;
@@ -1111,9 +1149,16 @@ def create_mock_game() -> FastAPI:
         app.state.game = initial_state()
         patch = await request.json() if (await request.body()) else {}
         g = app.state.game
-        for key in ("close_on_select", "no_debit", "popup_after_click", "require_auth", "slow_build", "slow_tabs", "wipe_target"):
+        for key in ("close_on_select", "no_debit", "popup_after_click", "require_auth", "slow_build", "slow_tabs", "wipe_target", "empire_reversed"):
             if key in patch:
                 g[key] = patch[key]
+        for index, levels in (patch.get("levels") or {}).items():  # niveaux de bâtiments imposés : {index de planète: {nom: niveau}}
+            for building in g["planets"][int(index)]["buildings"]:
+                building["level"] = levels.get(building["name"], building["level"])
+        for index, units in (patch.get("units") or {}).items():  # effectifs de population imposés : {index de planète: {nom: effectif}}
+            for item in g["planets"][int(index)]["prod"]:
+                if item["section"] == "population":
+                    item["owned"] = units.get(item["name"], item["owned"])
         for index in patch.get("hide_upgrade") or []:
             g["planets"][int(index)]["hide_upgrade"] = True
         for index, energy in (patch.get("energy") or {}).items():

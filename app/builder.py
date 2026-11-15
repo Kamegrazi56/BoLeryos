@@ -127,7 +127,7 @@ class ConstructionPass:
         self.bot = bot
         self._cooldown: dict[tuple[str, str], float] = {}  # (planète, bâtiment) → fin présumée de la construction
         self._unconfirmed = 0
-        self._reached: dict[str, set[str]] = {}  # bâtiment → planètes où le niveau cible est atteint (passage en cours)
+        self._reached: dict[tuple[str, str], set[str]] = {}  # (bâtiment, planète de la ligne ou « ») → planètes (norm) où le niveau cible est atteint (passage en cours)
         self._last_planet: str | None = None  # dernière planète traitée et ce que la page affichait à la fin de son traitement
         self._last_sig: tuple | None = None
         self._labels = {b.id: b.label for b in BUILDINGS}
@@ -301,40 +301,119 @@ class ConstructionPass:
 
     async def run_pass(self) -> str:
         settings = self.bot.constructions.get()
-        if not settings["queue"]:
+        queue = settings["queue"]
+        if not queue:
             return "aucune ligne de construction réglée, rien à faire"
-        planets = self._targets(settings)
-        if not planets:
+        targets = self._targets(settings)
+        if not targets:
             return "aucune planète connue : lancez un scan des planètes (Réglages › Compte et univers)"
+        known = {norm(p["name"]) for p in self.bot.supervisor.scanned_planets} or {norm(t) for t in targets}
+        planets = self._with_own_planets(targets, queue, known)  # + les planètes qui n'ont que des lignes à elles
+        ignored = sorted({ln["planet"] for ln in queue if ln.get("planet") and norm(ln["planet"]) not in known and norm(ln["planet"]) not in {norm(t) for t in targets}})
+        if ignored:
+            self.bot.log(f"Constructions : planète(s) inconnue(s) du scan, lignes ignorées : {', '.join(ignored)}.", "warn", event=True)
+        lines = {planet: self._lines_for(planet, queue, targets) for planet in planets}
         launched: list[str] = []
         waiting = 0
+        skipped = 0
         self._reached = {}
         try:
+            satisfied = self._satisfied(lines, await self._refresh_inventory())
             for planet in planets:
-                outcome = await self._planet(planet, settings["queue"])
+                mine = lines[planet]
+                if not mine:  # aucune ligne ne vaut pour cette planète : on ne la visite pas
+                    continue
+                if planet in satisfied:  # tout ce qui est demandé y est déjà au niveau : inutile de la visiter
+                    self._mark_reached(planet, mine)
+                    skipped += 1
+                    continue
+                outcome = await self._planet(planet, mine)
                 await self._remember(planet)
                 if outcome is None:
                     waiting += 1
                 else:
                     launched.append(outcome)
         except Interrupted as exc:
-            return self._summary(launched, waiting, f"interrompu ({exc})")
+            return self._summary(launched, waiting, f"interrompu ({exc})", skipped)
         except GameUiError as exc:
             self.bot.log(f"Constructions : {exc}.", "warn", event=True)
-            return self._summary(launched, waiting, f"arrêté ({exc})")
-        self._drop_reached(settings["queue"], planets)
-        return self._summary(launched, waiting, "")
+            return self._summary(launched, waiting, f"arrêté ({exc})", skipped)
+        self._drop_reached(queue, targets)
+        return self._summary(launched, waiting, "", skipped)
 
-    def _drop_reached(self, queue: list[dict], planets: list[str]) -> None:
-        """Retire de la liste les lignes dont le niveau cible est atteint sur TOUTES les planètes visées (passage complet seulement)."""
-        finished = [(ln["building"], ln["level"]) for ln in queue if set(planets) <= self._reached.get(ln["building"], set())]
-        for building, level in self.bot.constructions.drop(finished):
-            self.bot.log(f"Construction : {self._labels[building]} a atteint le niveau {level} sur toutes les planètes visées, ligne retirée de la liste.", event=True, kind="launch")
+    async def _refresh_inventory(self) -> list[dict] | None:
+        """Relève l'inventaire de l'empire (une seule page) : tableau de l'onglet Constructions, et choix des planètes à visiter.
+        Un échec de ce relevé n'arrête pas les constructions : il est noté dans l'inventaire (None) et toutes les planètes
+        sont visitées comme avant."""
+        reader = getattr(self.bot, "inventory_reader", None)
+        return await reader.update("passage") if reader is not None else None
 
     @staticmethod
-    def _summary(launched: list[str], waiting: int, stop: str) -> str:
+    def _key(line: dict) -> tuple[str, str]:
+        """Identité d'une ligne : bâtiment + planète (« » : toutes les planètes visées)."""
+        return line["building"], line.get("planet", "")
+
+    @staticmethod
+    def _with_own_planets(targets: list[str], queue: list[dict], known: set[str]) -> list[str]:
+        """Planètes à parcourir : les planètes visées, puis celles qui n'apparaissent que dans une ligne à elles ET que le scan
+        connaît (une planète disparue ou renommée ferait échouer le changement de planète et arrêterait tout le passage)."""
+        names = list(targets)
+        seen = {norm(n) for n in names}
+        for line in queue:
+            own = line.get("planet")
+            if own and norm(own) not in seen and norm(own) in known:
+                seen.add(norm(own))
+                names.append(own)
+        return names
+
+    @staticmethod
+    def _lines_for(planet: str, queue: list[dict], targets: list[str]) -> list[dict]:
+        """Lignes de la liste qui valent pour cette planète, dans l'ordre de la liste (= priorité). La ligne propre à une planète
+        l'emporte sur la ligne « toutes les planètes » du même bâtiment ; celle-ci ne vaut que pour les planètes visées."""
+        key = norm(planet)
+        own = {ln["building"] for ln in queue if ln.get("planet") and norm(ln["planet"]) == key}
+        targeted = key in {norm(t) for t in targets}
+        return [ln for ln in queue if (norm(ln["planet"]) == key if ln.get("planet") else targeted and ln["building"] not in own)]
+
+    def _mark_reached(self, planet: str, lines: list[dict]) -> None:
+        for line in lines:
+            self._reached.setdefault(self._key(line), set()).add(norm(planet))
+
+    @staticmethod
+    def _satisfied(lines: dict[str, list[dict]], fresh: list[dict] | None) -> set[str]:
+        """Planètes dont le relevé de CE passage montre, pour chacune de leurs lignes, un niveau lu et déjà au niveau cible.
+        Planète sans ligne, absente du relevé, bâtiment non lu ou relevé échoué : pas de saut (jamais de décision sur de vieilles données)."""
+        levels = {norm(p["name"]): p["levels"] for p in fresh or []}
+        return {
+            planet for planet, mine in lines.items()
+            if mine and levels.get(norm(planet)) and all(levels[norm(planet)].get(ln["building"], -1) >= ln["level"] for ln in mine)
+        }
+
+    def _drop_reached(self, queue: list[dict], targets: list[str]) -> None:
+        """Retire de la liste les lignes dont le niveau cible est atteint (passage complet seulement) : sur sa planète pour une ligne
+        propre à une planète ; sur TOUTES les planètes visées qui n'ont pas leur propre ligne de ce bâtiment pour une ligne commune."""
+        finished = []
+        for line in queue:
+            if line.get("planet"):
+                common = next((o for o in queue if o["building"] == line["building"] and not o.get("planet")), None)
+                if common and common["level"] > line["level"]:
+                    continue  # plafond propre à la planète, sous la ligne commune : le retirer ferait remonter la planète jusqu'à la ligne commune
+                scope = {norm(line["planet"])}
+            else:
+                own = {norm(o["planet"]) for o in queue if o.get("planet") and o["building"] == line["building"]}
+                scope = {norm(t) for t in targets} - own
+            if scope and scope <= self._reached.get(self._key(line), set()):  # une ligne commune sans plus aucune planète n'est pas supprimée
+                finished.append((line["building"], line.get("planet", ""), line["level"]))
+        for building, planet, level in self.bot.constructions.drop(finished):
+            where = planet or "toutes les planètes visées"
+            self.bot.log(f"Construction : {self._labels[building]} a atteint le niveau {level} sur {where}, ligne retirée de la liste.", event=True, kind="launch")
+
+    @staticmethod
+    def _summary(launched: list[str], waiting: int, stop: str, skipped: int = 0) -> str:
         parts = [f"{len(launched)} construction(s) lancée(s)" + (" : " + ", ".join(launched) if launched else "")]
         parts.append(f"{waiting} planète(s) sans rien à lancer")
+        if skipped:
+            parts.append(f"{skipped} planète(s) déjà au niveau (d'après l'inventaire, non visitées)")
         if stop:
             parts.append(stop)
         return " ; ".join(parts)
@@ -357,7 +436,7 @@ class ConstructionPass:
         for line in queue:  # lignes déjà atteintes sur cette planète (retirées en fin de passage si c'est vrai partout)
             seen = cards.get(norm(self._labels[line["building"]]))
             if seen is not None and seen[1].level is not None and seen[1].level >= line["level"]:
-                self._reached.setdefault(line["building"], set()).add(planet)
+                self._mark_reached(planet, [line])
         for line in queue:  # ordre de la liste = priorité
             label = self._labels[line["building"]]
             found = cards.get(norm(label))

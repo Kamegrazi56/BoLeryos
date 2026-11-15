@@ -86,14 +86,21 @@ class QuantityPass(ConstructionPass):
 
     @staticmethod
     def _lines_for(planet: str, queue: list[dict]) -> list[dict]:
-        """Lignes qui s'appliquent à cette planète, dans l'ordre de la liste, la première de chaque élément seulement."""
+        """Lignes qui s'appliquent à cette planète, dans l'ordre de la liste, la première de chaque élément seulement.
+        La ligne la plus précise l'emporte, quel que soit l'ordre : celle d'une seule planète, puis celle de quelques planètes,
+        puis celle de « toutes les planètes »."""
+        applying = [ln for ln in queue if applies_to(ln, planet)]
+        applying.sort(key=lambda ln: (not ln["planets"], len(ln["planets"])))  # tri stable : l'ordre de la liste départage le reste
         seen: set[str] = set()
         out = []
-        for line in queue:
-            if applies_to(line, planet) and line["item"] not in seen:
+        for line in applying:
+            if line["item"] not in seen:
                 seen.add(line["item"])
                 out.append(line)
-        return out
+        return sorted(out, key=queue.index)  # on traite les éléments dans l'ordre de priorité de la liste
+
+    async def _observe(self, planet: str) -> None:
+        """Appelé à chaque planète visitée, page à jour, avant toute production. Rien par défaut (les composants notent leur effectif)."""
 
     async def run_pass(self) -> str:
         queue = self.store.get()["queue"]
@@ -116,6 +123,7 @@ class QuantityPass(ConstructionPass):
                 await self._open_yard()
                 await self._select_planet(planet)
                 await self._settle(planet, self._cards_signature)
+                await self._observe(planet)
                 for line in due:
                     outcome = await self._line(planet, line)
                     if outcome is None:

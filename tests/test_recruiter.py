@@ -1,6 +1,7 @@
 """Recrutement de population : quantité fixe, MAX ou effectif à atteindre, population par population et planète par planète."""
 
 from app import builder
+from app.planets import GameUiError
 
 CONCORDE = "8-50-Concorde"
 EGIDE = "6-79-Egide"
@@ -149,6 +150,78 @@ def test_the_first_matching_line_of_a_population_wins_on_a_planet(game_client, g
     _set(game_client, [_line("mineur", "fixed", 5, EGIDE), _line("mineur", "fixed", 7)])
     _run(game_client)
     assert [(p, q) for p, _, q in _recruited(game)] == [(CONCORDE, 7), (EGIDE, 5), (STRATE, 7)]
+
+
+def test_a_line_for_one_planet_wins_over_a_line_for_all_planets_whatever_their_order(game_client, game):
+    _scan(game_client)
+    _set(game_client, [_line("mineur", "fixed", 7), _line("mineur", "fixed", 5, EGIDE)])  # la ligne commune est en premier
+    _run(game_client)
+    assert [(p, q) for p, _, q in _recruited(game)] == [(CONCORDE, 7), (EGIDE, 5), (STRATE, 7)]
+
+
+def test_the_most_precise_line_wins_even_against_an_older_line_for_several_planets(game_client, game):
+    _scan(game_client)
+    several = {"population": "mineur", "mode": "fixed", "amount": 7, "planets": [EGIDE, STRATE]}
+    _set(game_client, [several, _line("mineur", "fixed", 5, EGIDE)])  # la ligne de plusieurs planètes est en premier
+    _run(game_client)
+    assert [(p, q) for p, _, q in _recruited(game)] == [(EGIDE, 5), (STRATE, 7)]
+
+
+def test_each_pass_reads_the_inventory_of_the_empire(game_client, game):
+    _scan(game_client)
+    _set(game_client, [_line("mineur", "fixed", 1, CONCORDE)])
+    assert game_client.get("/api/populations").json()["inventory"]["read_at"] is None
+    _run(game_client)
+    inventory = game_client.get("/api/populations").json()["inventory"]
+    assert inventory["source"] == "passage" and len(inventory["planets"]) == 3
+    assert _recruited(game) == [(CONCORDE, "Mineur", 1)]  # le recrutement se fait comme avant
+
+
+def test_a_planet_already_at_its_target_is_not_visited_and_its_line_leaves_the_list(game_client, game):
+    _scan(game_client)
+    _set(game_client, [_line("pilote", "target", 10, CONCORDE)])  # 10 Pilotes au départ : objectif atteint
+    summary = _run(game_client)
+    assert "1 planète(s) déjà à l'effectif" in summary and "0 recrutement(s)" in summary
+    assert game.actions() == []
+    assert game_client.get("/api/populations").json()["settings"]["queue"] == []
+
+
+def test_only_the_planets_below_their_target_are_recruited_on(game_client, game):
+    _scan(game_client)
+    _set(game_client, [_line("pilote", "target", 10, CONCORDE), _line("pilote", "target", 15, EGIDE)])
+    summary = _run(game_client)
+    assert _recruited(game) == [(EGIDE, "Pilote", 5)]
+    assert "1 planète(s) déjà à l'effectif" in summary
+    assert game_client.get("/api/populations").json()["settings"]["queue"] == []  # Concorde atteinte, tout ce qui manquait sur Egide est lancé
+
+
+def test_a_common_target_skips_only_the_planets_the_inventory_shows_reached(game_client, game):
+    game.reset(units={"0": {"Pilote": 50}})  # Concorde a déjà 50 Pilotes, les autres 10
+    _scan(game_client)
+    _set(game_client, [_line("pilote", "target", 50)])
+    summary = _run(game_client)
+    assert [(p, q) for p, _, q in _recruited(game)] == [(EGIDE, 40), (STRATE, 40)]
+    assert "1 planète(s) déjà à l'effectif" in summary
+
+
+def test_a_failed_reading_never_skips_a_planet_on_old_data(game_client, game, monkeypatch):
+    _scan(game_client)
+    _set(game_client, [_line("pilote", "target", 12, CONCORDE)])
+    bot = _bot(game_client)
+
+    async def broken(self):
+        raise GameUiError("tableau cassé")
+
+    monkeypatch.setattr(type(bot.inventory_reader), "read", broken)
+    summary = _run(game_client)
+    assert "déjà à l'effectif" not in summary
+    assert _recruited(game) == [(CONCORDE, "Pilote", 2)]  # on retourne voir la planète, comme avant
+
+
+def test_the_list_accepts_a_line_per_planet_and_population(game_client):
+    queue = [_line(p, "target", 5, planet) for p in ("pilote", "mineur") for planet in (CONCORDE, EGIDE, STRATE)]
+    _set(game_client, queue)
+    assert len(game_client.get("/api/populations").json()["settings"]["queue"]) == 6
 
 
 def test_nothing_is_recruited_when_not_even_one_unit_is_payable(game_client, game):

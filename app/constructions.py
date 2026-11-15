@@ -19,7 +19,7 @@ from typing import Callable
 from .quantities import _clean_planets
 
 FILE_NAME = "constructions.json"
-MAX_LINES = 50
+MAX_LINES = 500  # une ligne par bâtiment et par planète : 16 bâtiments × une vingtaine de planètes
 MAX_LEVEL = 500
 MAX_PLANET_LENGTH = 60
 
@@ -89,19 +89,25 @@ def validate(data: dict, known_planets: list[str] | None = None) -> dict:
     if not isinstance(raw_queue, list) or len(raw_queue) > MAX_LINES:
         errors.append(f"Liste : {MAX_LINES} lignes au plus.")
         raw_queue = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
     for i, line in enumerate(raw_queue, start=1):
         building = line.get("building") if isinstance(line, dict) else None
         level = line.get("level") if isinstance(line, dict) else None
+        planet = line.get("planet", "") if isinstance(line, dict) else ""
         if building not in BUILDING_IDS:
             errors.append(f"Ligne {i} : bâtiment inconnu.")
-        elif building in seen:
-            errors.append(f"Ligne {i} : ce bâtiment est déjà dans la liste (une seule ligne par bâtiment).")
+        elif not isinstance(planet, str) or len(planet) > MAX_PLANET_LENGTH:
+            errors.append(f"Ligne {i} : planète invalide.")
+        elif planet.strip() and known_planets and planet.strip() not in known_planets:
+            errors.append(f"Ligne {i} : planète inconnue ({planet.strip()}).")
+        elif (building, planet.strip()) in seen:
+            errors.append(f"Ligne {i} : ce bâtiment est déjà dans la liste" + (" pour cette planète" if planet.strip() else "") + " (une seule ligne par bâtiment et par planète).")
         elif isinstance(level, bool) or not isinstance(level, int) or not 1 <= level <= MAX_LEVEL:
             errors.append(f"Ligne {i} : le niveau cible est un nombre entier entre 1 et {MAX_LEVEL}.")
         else:
-            seen.add(building)
-            queue.append({"building": building, "level": level})
+            seen.add((building, planet.strip()))
+            # « planet » vide ou absent : la ligne vaut pour toutes les planètes visées (la clé n'est alors pas écrite : anciens fichiers inchangés)
+            queue.append({"building": building, "level": level, **({"planet": planet.strip()} if planet.strip() else {})})
     if errors:
         raise ConstructionError(errors)
     return {"planets": planets, "queue": queue}
@@ -132,12 +138,14 @@ class ConstructionSettings:
         self._save()
         return self.get()
 
-    def drop(self, finished: list[tuple[str, int]]) -> list[tuple[str, int]]:
-        """Retire les lignes (id, niveau cible) atteintes ; une ligne modifiée entre-temps reste. Retourne celles retirées."""
+    def drop(self, finished: list[tuple[str, str, int]]) -> list[tuple[str, str, int]]:
+        """Retire les lignes (id, planète — « » pour « toutes les planètes » —, niveau cible) atteintes ; une ligne modifiée
+        entre-temps reste. Retourne celles retirées."""
         wanted = set(finished)
-        gone = [(ln["building"], ln["level"]) for ln in self._data["queue"] if (ln["building"], ln["level"]) in wanted]
+        key = lambda ln: (ln["building"], ln.get("planet", ""), ln["level"])  # noqa: E731
+        gone = [key(ln) for ln in self._data["queue"] if key(ln) in wanted]
         if gone:
-            self._data = {**self._data, "queue": [ln for ln in self._data["queue"] if (ln["building"], ln["level"]) not in wanted]}
+            self._data = {**self._data, "queue": [ln for ln in self._data["queue"] if key(ln) not in wanted]}
             self._save()
         return gone
 
@@ -158,5 +166,5 @@ def describe(settings: dict) -> str:
     labels = {b.id: b.label for b in BUILDINGS}
     if not settings["queue"]:
         return "aucune ligne de construction réglée"
-    lines = ", ".join(f"{labels[line['building']]} niveau {line['level']}" for line in settings["queue"])
+    lines = ", ".join(f"{labels[line['building']]} niveau {line['level']}" + (f" ({line['planet']})" if line.get("planet") else "") for line in settings["queue"])
     return f"{len(settings['queue'])} ligne(s) sur {where(settings['planets'])} : {lines}"

@@ -156,6 +156,7 @@ def parse_card(raw: dict, queued: int) -> PopCard:
 class Report:
     launched: list[str] = field(default_factory=list)
     idle: int = 0  # lignes sans rien à faire (objectif atteint, pas assez de ressources, en cours…)
+    skipped: int = 0  # planètes non visitées : l'inventaire montre leurs effectifs déjà atteints
 
 
 class PopulationPass(ConstructionPass):
@@ -213,14 +214,32 @@ class PopulationPass(ConstructionPass):
 
     @staticmethod
     def _lines_for(planet: str, queue: list[dict]) -> list[dict]:
-        """Lignes qui s'appliquent à cette planète, dans l'ordre de la liste, la première de chaque population seulement."""
+        """Lignes qui s'appliquent à cette planète, dans l'ordre de la liste, la première de chaque population seulement.
+        La ligne la plus précise l'emporte, quel que soit l'ordre : celle d'une seule planète, puis celle de quelques planètes
+        (anciennes lignes), puis celle de « toutes les planètes »."""
+        applying = [ln for ln in queue if not ln["planets"] or planet in ln["planets"]]
+        applying.sort(key=lambda ln: (not ln["planets"], len(ln["planets"])))  # tri stable : l'ordre de la liste départage le reste
         seen: set[str] = set()
         out = []
-        for line in queue:
-            if (not line["planets"] or planet in line["planets"]) and line["population"] not in seen:
+        for line in applying:
+            if line["population"] not in seen:
                 seen.add(line["population"])
                 out.append(line)
-        return out
+        return sorted(out, key=queue.index)  # on traite les populations dans l'ordre de priorité de la liste
+
+    @staticmethod
+    def _at_target(planet: str, lines: list[dict], inventory: list[dict] | None) -> bool:
+        """Vrai si l'inventaire montre que chaque ligne de cette planète est un effectif à atteindre déjà atteint (rien à y faire :
+        inutile de la visiter). Sans relevé, ou avec une ligne d'un autre mode, on la visite comme avant."""
+        known = next((p["units"] for p in inventory or [] if norm(p["name"]) == norm(planet)), None)
+        return bool(known) and bool(lines) and all(
+            ln["mode"] == "target" and known.get(ln["population"]) is not None and known[ln["population"]] >= ln["amount"] for ln in lines
+        )
+
+    async def _refresh_inventory(self) -> list[dict] | None:
+        """Relève l'inventaire de l'empire (une seule page). Un échec n'arrête pas le recrutement : toutes les planètes sont visitées."""
+        reader = getattr(self.bot, "inventory_reader", None)
+        return await reader.update("passage") if reader is not None else None
 
     async def run_pass(self) -> str:
         queue = self.bot.populations.get()["queue"]
@@ -231,11 +250,18 @@ class PopulationPass(ConstructionPass):
             return "aucune planète connue : lancez un scan des planètes (Réglages › Compte et univers)"
         report = Report()
         try:
+            inventory = await self._refresh_inventory()
             for planet in planets:
                 now = time.monotonic()
+                mine = self._lines_for(planet, queue)
+                if self._at_target(planet, mine, inventory):  # objectifs déjà atteints d'après l'inventaire : la planète n'est pas visitée
+                    for ln in mine:
+                        self.bot.populations.mark_done(ln, planet)
+                    report.skipped += 1
+                    continue
                 due = [
                     ln
-                    for ln in self._lines_for(planet, queue)
+                    for ln in mine
                     if self._cooldown.get((planet, ln["population"]), 0.0) <= now and not self.bot.populations.is_done(ln, planet)
                 ]
                 if not due:
@@ -271,6 +297,8 @@ class PopulationPass(ConstructionPass):
     def _report(report: Report, stop: str) -> str:
         parts = [f"{len(report.launched)} recrutement(s) lancé(s)" + (" : " + ", ".join(report.launched) if report.launched else "")]
         parts.append(f"{report.idle} ligne(s) sans rien à faire")
+        if report.skipped:
+            parts.append(f"{report.skipped} planète(s) déjà à l'effectif")
         if stop:
             parts.append(stop)
         return " ; ".join(parts)

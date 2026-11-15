@@ -115,13 +115,21 @@ def mask_url(url: str) -> str:
     return f"{parts.netloc}{mask_path(parts.path)}{query}"
 
 
+NAME_FIELDS = ("action", "type")  # noms de message (« enqueue_research », « ACTION_RESULT ») : jamais sensibles, gardés en entier
+NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_:-]{0,39}$")  # pas de point : un jeton (JWT) n'est jamais pris pour un nom
+
+
+def _is_name_field(key: Any, value: Any) -> bool:
+    return key in NAME_FIELDS and isinstance(value, str) and bool(NAME_RE.match(value)) and not UUID_ANYWHERE_RE.search(value)
+
+
 def shape(value: Any, depth: int = 0) -> Any:
     """Forme d'une valeur JSON : les clés et les types, pas le contenu."""
     if depth >= MAX_DEPTH:
         return "<…>"
     if isinstance(value, dict):
         return {
-            ("<id>" if _looks_like_id(str(k)) else str(k)): shape(v, depth + 1)
+            ("<id>" if _looks_like_id(str(k)) else str(k)): v if _is_name_field(k, v) else shape(v, depth + 1)
             for k, v in list(value.items())[:60]
         }
     if isinstance(value, list):

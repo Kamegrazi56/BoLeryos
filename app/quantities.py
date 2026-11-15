@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-MAX_LINES = 100
+MAX_LINES = 500  # une ligne par élément et par planète au plus (le tableau des composants en crée une par case)
 MAX_AMOUNT = 1_000_000_000
 MAX_PLANET_LENGTH = 60
 MAX_PLANETS_PER_LINE = 50

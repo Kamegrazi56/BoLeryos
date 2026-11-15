@@ -96,6 +96,53 @@ button.power.on { color: #03130c; background: linear-gradient(180deg, #5ef0b0, v
 button.power.off:hover { color: var(--text); border-color: var(--accent); box-shadow: var(--glow); }
 button.power:disabled { opacity: 0.6; }
 
+/* Constructions › Niveaux actuels : tableau bâtiments × planètes (Empire › Inventaire) */
+.inv-bar { align-items: center; justify-content: space-between; gap: 8px 16px; }
+.inv-info { margin: 0; color: var(--muted); font-size: 13px; }
+.inv-info.warn { color: var(--warn); }
+.inv-wrap { overflow: auto; max-height: 62vh; border: 1px solid var(--border); border-radius: 8px; }
+table.inv { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13px; }
+table.inv th, table.inv td { padding: 5px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
+table.inv thead th { position: sticky; top: 0; z-index: 2; background: var(--bg); color: var(--text); font-weight: 600; }
+table.inv th:first-child, table.inv td:first-child { position: sticky; left: 0; z-index: 1; text-align: left; background: var(--bg); }
+table.inv thead th:first-child { z-index: 3; }
+table.inv td.inv-group { position: static; text-align: left; color: var(--accent); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; font-size: 11.5px; background: rgba(255, 255, 255, 0.03); }
+table.inv td.short { color: var(--warn); background: rgba(251, 191, 36, 0.08); }
+table.inv td.reached { color: var(--ok); background: rgba(52, 211, 153, 0.07); }
+table.inv td.none { color: var(--muted); }
+/* Constructions : tableau bâtiments × planètes affiché en entier (ni hauteur maximale ; défilement horizontal seulement si l'écran est trop étroit) */
+.cons-wrap { border: 1px solid var(--border); border-radius: 8px; overflow-x: auto; }
+table.cons-levels th, table.cons-levels td { padding: 4px 3px; text-align: center; white-space: normal; vertical-align: middle; }
+table.cons-levels thead th { position: static; font-size: 11px; overflow-wrap: anywhere; min-width: 46px; }
+table.cons-levels th:first-child, table.cons-levels td:first-child { position: static; text-align: left; }
+table.cons-levels thead th:first-child { min-width: 150px; }
+table.cons-levels th.bname { display: flex; align-items: center; gap: 8px; font-weight: 500; border-bottom: 0; }
+table.cons-levels td .lv { display: block; }
+table.cons-levels button.add-level { padding: 0 6px; min-height: 0; font-size: 11px; line-height: 18px; margin-top: 2px; }
+table.cons-levels button.add-level { white-space: nowrap; }
+table.cons-levels td .tag { display: block; font-size: 10px; color: var(--accent); white-space: nowrap; }
+.pop-tools { align-items: center; gap: 14px; margin-bottom: 8px; }
+.pop-tools .switch { margin: 0; }
+table.cons-levels td.inv-group { padding: 0; cursor: pointer; }
+table.cons-levels td.inv-group:hover { background: rgba(79, 216, 255, 0.08); }
+table.cons-levels .group-toggle { display: block; width: 100%; padding: 6px 10px; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; cursor: pointer; }
+table.cons-levels .group-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cons-queue .where { color: var(--accent); font-size: 12px; }
+.cons-queue .where.common { color: var(--muted); }
+
+/* Recherches : tableau affiché en entier (ni hauteur maximale, ni barre de défilement) ; l'en-tête et la colonne ne sont donc pas collants */
+.res-wrap { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+table.res-levels thead th, table.res-levels th:first-child, table.res-levels td:first-child { position: static; }
+table.res-levels th:first-child, table.res-levels thead th:first-child { width: 55%; }
+table.res-levels th, table.res-levels td { white-space: normal; }
+table.res-levels td.res-goal { color: var(--muted); }
+table.res-levels td.res-goal button { margin-left: 10px; }
+table.res-levels td.inv-group { padding: 0; }
+table.res-levels td.inv-group { cursor: pointer; }
+table.res-levels td.inv-group:hover { background: rgba(79, 216, 255, 0.08); }
+table.res-levels .group-toggle { display: block; width: 100%; padding: 6px 10px; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; cursor: pointer; }
+table.res-levels .group-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
 /* Activité du bot, à côté du bouton ON/OFF : passage en cours, attente d'un minuteur, bloqué, à l'arrêt */
 .activity {
   max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

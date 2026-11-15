@@ -48,6 +48,16 @@ def test_shape_keeps_keys_and_types_but_hides_values():
     assert "3f2b8c1e" not in json.dumps(result)
 
 
+def test_message_names_are_kept_whole_but_other_long_strings_are_not():
+    frame = {"type": "ACTION", "action": "enqueue_building_upgrade_batch", "requestId": "req-1700000000-abcdef", "payload": {"planetId": "3f2b8c1e-1111-2222-3333-444455556666", "buildingId": "mineFer", "note": "un texte assez long pour ne pas être conservé"}}
+    result = shape(frame)
+    assert result["type"] == "ACTION" and result["action"] == "enqueue_building_upgrade_batch"  # > 20 caractères : gardé
+    assert result["requestId"] == "<string>" and result["payload"]["planetId"] == "<string>"
+    assert result["payload"]["buildingId"] == "mineFer" and result["payload"]["note"] == "<string>"
+    assert shape({"action": "eyJhbGciOi.eyJzdWIi.c2lnbmF0dXJl"})["action"] == "<string>"  # ce qui ressemble à un jeton n'est pas un nom
+    assert shape({"type": "3f2b8c1e-1111-2222-3333-444455556666"})["type"] == "<string>"
+
+
 def test_identifiers_inside_storage_and_cookie_names_are_masked():
     user, universe = "6f85f193-7286-4f32-b390-5ec46c6393ab", "a0000000-0000-0000-0000-000000000002"
     rec = Recorder()
@@ -91,6 +101,28 @@ def test_recording_is_off_by_default(client):
     _reload(client)
     data = client.get("/api/explore/export").json()
     assert data["requests"] == [] and data["pages"] == [] and data["websockets"] == []
+
+
+def test_a_websocket_opened_before_recording_is_recorded_once_recording_is_turned_on(client):
+    class FakeSocket:
+        url = "wss://game-api.example.com/ws"
+
+        def __init__(self):
+            self.handlers = {}
+
+        def on(self, event, handler):
+            self.handlers[event] = handler
+
+    bot = client.app.state.bot
+    sock = FakeSocket()
+    bot._on_websocket(sock)  # ouverte alors que l'enregistrement est éteint (cas de la connexion au jeu)
+    assert set(sock.handlers) == {"framesent", "framereceived"}
+    sock.handlers["framesent"]('{"type":"ACTION","action":"before_recording"}')
+    assert bot._recorder.counts()["sockets"] == 0  # éteint : rien n'est gardé
+    bot.set_recording(True)
+    sock.handlers["framesent"]('{"type":"ACTION","action":"enqueue_building_upgrade_batch","payload":{"planetId":"3f2b8c1e-1111-2222-3333-444455556666"}}')
+    frame = next(iter(bot._recorder.sockets.values()))["sent"]
+    assert [f["frame"]["shape"]["action"] for f in frame.values()] == ["enqueue_building_upgrade_batch"]
 
 
 def test_recorded_structure_never_contains_secrets(client):

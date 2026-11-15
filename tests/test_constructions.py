@@ -79,6 +79,55 @@ def test_describe_gives_a_readable_sentence():
     assert "sur toutes les planètes" in describe(validate({"queue": [LINE]}))
 
 
+# ------------------------------------------------------------------------------ objectifs propres à une planète
+CONCORDE = "8-50-Concorde"
+EGIDE = "6-79-Egide"
+
+
+def test_a_line_can_target_one_planet_and_a_legacy_line_stays_as_it_was():
+    queue = validate({"queue": [{**LINE, "planet": CONCORDE}, {"building": "caserne", "level": 25}]})["queue"]
+    assert queue == [{"building": "mine-de-fer", "level": 45, "planet": CONCORDE}, {"building": "caserne", "level": 25}]  # pas de clé « planet » ajoutée
+    assert validate({"queue": [{**LINE, "planet": ""}]})["queue"] == [LINE]  # vide = toutes les planètes visées
+
+
+def test_the_same_building_may_have_a_line_per_planet_but_not_two_for_the_same_planet():
+    lines = [{**LINE, "planet": CONCORDE}, {**LINE, "planet": EGIDE, "level": 50}, LINE]  # + une ligne « toutes les planètes »
+    assert len(validate({"queue": lines})["queue"]) == 3
+    with pytest.raises(ConstructionError, match="déjà dans la liste"):
+        validate({"queue": [{**LINE, "planet": CONCORDE}, {**LINE, "planet": CONCORDE, "level": 50}]})
+
+
+def test_the_planet_of_a_line_must_be_a_known_planet_but_is_accepted_leniently_at_load():
+    with pytest.raises(ConstructionError, match="Ligne 1 : planète inconnue"):
+        validate({"queue": [{**LINE, "planet": "Nulle-Part"}]}, known_planets=[CONCORDE, EGIDE])
+    assert validate({"queue": [{**LINE, "planet": CONCORDE}]}, known_planets=[CONCORDE])["queue"][0]["planet"] == CONCORDE
+    assert validate({"queue": [{**LINE, "planet": "Nulle-Part"}]})["queue"][0]["planet"] == "Nulle-Part"  # chargement : sans scan
+    for bad in (12, ["x"], True):
+        with pytest.raises(ConstructionError, match="Ligne 1"):
+            validate({"queue": [{**LINE, "planet": bad}]})
+
+
+def test_a_line_per_building_and_planet_fits_in_the_list():
+    planets = [f"{i}-Planete" for i in range(15)]
+    lines = [{"building": b.id, "level": 40, "planet": p} for b in BUILDINGS for p in planets]  # 16 × 15 = 240
+    assert len(validate({"queue": lines})["queue"]) == 240
+
+
+def test_dropping_a_reached_line_only_removes_the_line_of_that_planet(tmp_path):
+    store = ConstructionSettings(str(tmp_path))
+    store.replace({"queue": [{"building": "caserne", "level": 25, "planet": EGIDE}, {"building": "caserne", "level": 25, "planet": CONCORDE}, LINE]})
+    assert store.drop([("caserne", EGIDE, 25)]) == [("caserne", EGIDE, 25)]
+    assert store.get()["queue"] == [{"building": "caserne", "level": 25, "planet": CONCORDE}, LINE]
+    assert store.drop([("caserne", "", 25)]) == []  # la ligne « toutes les planètes » est une autre ligne
+    assert store.drop([("mine-de-fer", "", 45)]) == [("mine-de-fer", "", 45)]
+    assert ConstructionSettings(str(tmp_path)).get()["queue"] == [{"building": "caserne", "level": 25, "planet": CONCORDE}]
+
+
+def test_describe_says_which_planet_a_line_is_for():
+    text = describe(validate({"queue": [{**LINE, "planet": CONCORDE}, {"building": "caserne", "level": 25}]}))
+    assert f"Mine de Fer niveau 45 ({CONCORDE})" in text and "Caserne niveau 25" in text
+
+
 # ------------------------------------------------------------------------------ enregistrement
 def test_settings_survive_a_restart(tmp_path):
     ConstructionSettings(str(tmp_path)).replace({"planets": ["Aurore-Bis", "6-79-Egide"], "queue": [LINE]})
@@ -117,6 +166,30 @@ def test_api_lists_the_catalog_and_saves_the_list(api):
     res = api.put("/api/constructions", json={"planets": [], "queue": [LINE, {"building": "caserne", "level": 25}]})
     assert res.status_code == 200
     assert [line["building"] for line in api.get("/api/constructions").json()["settings"]["queue"]] == ["mine-de-fer", "caserne"]
+
+
+def test_api_keeps_the_planet_of_a_line_and_accepts_a_long_list(api):
+    lines = [{"building": b.id, "level": 40, "planet": f"{i}-Planete"} for b in BUILDINGS for i in range(10)]  # 160 lignes, bien au-delà de l'ancienne limite de 50
+    assert api.put("/api/constructions", json={"queue": lines}).status_code == 200
+    saved = api.get("/api/constructions").json()["settings"]["queue"]
+    assert len(saved) == 160 and saved[0] == {"building": "mine-de-fer", "level": 40, "planet": "0-Planete"}
+
+
+def test_a_planet_known_only_from_the_inventory_is_accepted_for_a_line(game_client):
+    game_client.post("/api/planets/scan")
+    bot = game_client.app.state.bot
+    bot.inventory.set([{"name": "Aurore-Bis", "coords": "", "levels": {}}], "manuel")  # colonie vue dans l'inventaire, absente du scan
+    ok = game_client.put("/api/constructions", json={"queue": [{**LINE, "planet": "Aurore-Bis"}]})
+    assert ok.status_code == 200 and ok.json()["settings"]["queue"][0]["planet"] == "Aurore-Bis"
+    assert game_client.put("/api/constructions", json={"queue": [{**LINE, "planet": "Nulle-Part"}]}).status_code == 422
+
+
+def test_a_saved_line_for_a_vanished_planet_does_not_block_the_next_save(game_client):
+    game_client.post("/api/planets/scan")
+    old = {**LINE, "planet": "Nulle-Part"}
+    game_client.app.state.bot.constructions.replace({"queue": [old]})  # chargée telle quelle (la planète n'existe plus)
+    assert game_client.put("/api/constructions", json={"queue": [old, {"building": "caserne", "level": 25}]}).status_code == 200
+    assert game_client.put("/api/constructions", json={"queue": [{**LINE, "planet": "Autre-Part"}]}).status_code == 422  # une nouvelle planète inconnue reste refusée
 
 
 def test_api_refuses_a_bad_list_in_french_and_checks_the_origin(api):

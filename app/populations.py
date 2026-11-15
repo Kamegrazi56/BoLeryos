@@ -24,7 +24,7 @@ from typing import Callable
 from .quantities import _clean_planets
 
 FILE_NAME = "populations.json"
-MAX_LINES = 100
+MAX_LINES = 500  # une ligne par population et par planète au plus (le tableau en crée une par case)
 MAX_AMOUNT = 1_000_000_000
 MAX_PLANET_LENGTH = 60
 MODES = ("fixed", "max", "target")

@@ -137,12 +137,6 @@
     itemsOf: (data) => data.models.map((m) => ({ value: m, label: m })),
     emptyText: "Aucune ligne : scannez les modèles, puis ajoutez un modèle ci-dessous.",
   });
-  editor({
-    prefix: "cmp",
-    api: "/api/components",
-    itemsOf: (data) => data.components.map((c) => ({ value: c.id, label: c.label, group: c.category })),
-    emptyText: "Aucune ligne : ajoutez un composant ci-dessous.",
-  });
 
   // ---- scan des modèles (onglet Assemblages)
   const SOURCES = { démarrage: "au démarrage", manuel: "à la demande" };

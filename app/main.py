@@ -94,11 +94,12 @@ class FeatureRequest(BaseModel):
 class ConstructionLine(BaseModel):
     building: str = Field(max_length=60)
     level: int = Field(ge=0, le=100000)
+    planet: str = Field(default="", max_length=60)  # vide : toutes les planètes visées ; sinon, objectif propre à cette planète
 
 
 class ConstructionsRequest(BaseModel):
     planets: list[str] = Field(default_factory=list, max_length=200)  # vide : toutes les planètes
-    queue: list[ConstructionLine] = Field(default_factory=list, max_length=200)
+    queue: list[ConstructionLine] = Field(default_factory=list, max_length=500)  # une ligne par bâtiment et par planète
 
 
 class ResearchLine(BaseModel):
@@ -485,6 +486,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def _known_planets() -> list[str]:
         return [p["name"] for p in bot.supervisor.scan_summary()["planets"]] or bot.supervisor.prefs.get()["catalog"]["planets"]
 
+    def _inventory() -> dict:
+        return {**bot.inventory.get(), "reading": bot.inventory_reader.reading}
+
+    def _research_inventory() -> dict:
+        """Ce que l'onglet Recherches a besoin du relevé : niveaux de recherche, date, origine, erreur et relevé en cours."""
+        data = _inventory()
+        return {k: data[k] for k in ("researches", "read_at", "source", "error", "reading")}
+
+    def _component_inventory() -> dict:
+        """Effectif de chaque composant sur chaque planète : {"counts": {planète: {id: effectif}}, date, origine, erreur, relevé en cours}."""
+        return {**bot.component_counts.get(), "reading": bot.producer.reading}
+
+    def _population_inventory() -> dict:
+        """Ce que l'onglet Population a besoin du relevé : effectif de chaque population sur chaque planète, date, origine, erreur."""
+        data = _inventory()
+        planets = [{"name": p["name"], "coords": p.get("coords", ""), "units": p.get("units", {})} for p in data["planets"]]
+        return {"planets": planets, **{k: data[k] for k in ("read_at", "source", "error", "reading")}}
+
     @app.get("/api/constructions")
     async def api_constructions():
         return JSONResponse(
@@ -493,15 +512,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "buildings": [{"id": b.id, "label": b.label, "page": b.page} for b in BUILDINGS],
                 "planets": _known_planets(),
                 "persistent": bot.constructions.persistent,
+                "inventory": _inventory(),
             },
             headers=NO_STORE,
         )
 
+    @app.post("/api/constructions/inventory/refresh")
+    async def api_constructions_inventory_refresh(request: Request):
+        """Relit tout de suite l'inventaire de l'empire (Empire › Inventaire) : niveaux des bâtiments de chaque planète."""
+        _check_origin(request)
+        await bot.inventory_reader.refresh("manuel")
+        return JSONResponse({"inventory": _inventory()}, headers=NO_STORE)
+
     @app.put("/api/constructions")
     async def api_constructions_put(body: ConstructionsRequest, request: Request):
         _check_origin(request)
+        def with_inventory() -> list[str]:  # le tableau propose les planètes de l'inventaire, même si le scan est vide ou en retard
+            saved = [ln["planet"] for ln in bot.constructions.get()["queue"] if ln.get("planet")]  # une ligne déjà enregistrée ne bloque pas l'enregistrement suivant
+            return list(dict.fromkeys(_known_planets() + [p["name"] for p in bot.inventory.get()["planets"]] + saved))
+
         try:
-            saved = bot.constructions.replace(body.model_dump(), _known_planets)
+            saved = bot.constructions.replace(body.model_dump(), with_inventory)
         except ConstructionError as exc:
             raise HTTPException(422, detail=exc.errors) from exc
         return JSONResponse({"settings": saved}, headers=NO_STORE)
@@ -515,6 +546,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "researches": [{"id": r.id, "label": r.label, "tab": r.tab} for r in RESEARCHES],
                 "planets": _known_planets(),
                 "persistent": bot.researches.persistent,
+                "inventory": _research_inventory(),
             },
             headers=NO_STORE,
         )
@@ -537,6 +569,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "populations": [{"id": p.id, "label": p.label, "tab": p.tab} for p in POPULATIONS],
                 "planets": _known_planets(),
                 "persistent": bot.populations.persistent,
+                "inventory": _population_inventory(),
             },
             headers=NO_STORE,
         )
@@ -544,8 +577,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.put("/api/populations")
     async def api_populations_put(body: PopulationsRequest, request: Request):
         _check_origin(request)
+        def with_inventory() -> list[str]:  # le tableau propose les planètes de l'inventaire, même si le scan est vide ou en retard
+            saved = [p for ln in bot.populations.get()["queue"] for p in ln["planets"]]  # une ligne déjà enregistrée ne bloque pas l'enregistrement suivant
+            return list(dict.fromkeys(_known_planets() + [p["name"] for p in bot.inventory.get()["planets"]] + saved))
+
         try:
-            saved = bot.populations.replace(body.model_dump(), _known_planets)
+            saved = bot.populations.replace(body.model_dump(), with_inventory)
         except PopulationError as exc:
             raise HTTPException(422, detail=exc.errors) from exc
         return JSONResponse({"settings": saved}, headers=NO_STORE)
@@ -591,15 +628,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "components": [{"id": c.id, "label": c.label, "category": c.category} for c in COMPONENTS],
                 "planets": _known_planets(),
                 "persistent": bot.components.persistent,
+                "inventory": _component_inventory(),
             },
             headers=NO_STORE,
         )
 
+    @app.post("/api/components/inventory/refresh")
+    async def api_components_inventory_refresh(request: Request):
+        """Relit tout de suite les effectifs de composants de chaque planète (onglet Composants du Chantier spatial, lecture seule)."""
+        _check_origin(request)
+        await bot.producer.survey("manuel")
+        return JSONResponse({"inventory": _component_inventory()}, headers=NO_STORE)
+
     @app.put("/api/components")
     async def api_components_put(body: QuantityRequest, request: Request):
         _check_origin(request)
+
+        def known() -> list[str]:  # une ligne déjà enregistrée (planète disparue du scan) ne bloque pas l'enregistrement suivant
+            saved = [p for ln in bot.components.get()["queue"] for p in ln["planets"]]
+            return list(dict.fromkeys(_known_planets() + saved))
+
         try:
-            saved = bot.components.replace(body.model_dump(), _known_planets)
+            saved = bot.components.replace(body.model_dump(), known)
         except LineError as exc:
             raise HTTPException(422, detail=exc.errors) from exc
         return JSONResponse({"settings": saved}, headers=NO_STORE)

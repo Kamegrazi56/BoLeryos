@@ -273,25 +273,44 @@ def test_features_page_sets_the_timer_enables_reorders_and_the_switch_starts_the
     assert errors == []
 
 
-def test_constructions_panel_builds_an_ordered_list_of_targets_for_all_or_one_planet(ui):
+def test_constructions_panel_raises_targets_from_the_levels_table(ui, game):
     page, errors, app = ui
+    game.reset(levels={"0": {"Caserne": 10}, "1": {"Caserne": 12}})  # niveaux différents selon la planète
     page.click("#scan-run")
     page.wait_for_function("document.querySelectorAll('#scan-list tr').length === 4", timeout=10000)
     page.goto(page.base + "/reglages#constructions")
-    page.wait_for_function("document.querySelectorAll('#cons-add-building option').length === 16", timeout=5000)
-    assert page.locator("#cons-add-building optgroup").evaluate_all("g => g.map(x => x.label)") == ["Industrie", "Infrastructures"]
-    page.select_option("#cons-add-building", "mine-de-fer")
-    page.fill("#cons-add-level", "45")
-    page.click("#cons-add")
-    page.select_option("#cons-add-building", "caserne")
-    page.fill("#cons-add-level", "25")
-    page.click("#cons-add")
+    assert page.locator("#cons-add, #cons-add-building, #cons-add-level").count() == 0  # plus de liste déroulante : on ne passe que par le tableau
+    page.click("#cons-inv-refresh")
+    page.wait_for_function("document.querySelectorAll('#cons-inv td[data-planet]').length === 16 * 3", timeout=20000)
+    assert page.locator("#cons-inv button[aria-expanded]").evaluate_all("b => b.map(x => x.textContent.trim())") == ["▾ Industrie · 8", "▾ Infrastructures · 8"]
+    # tableau affiché en entier : ni hauteur maximale ni barre de défilement
+    assert page.locator("#cons-inv").evaluate("e => getComputedStyle(e).maxHeight === 'none' && e.scrollHeight <= e.clientHeight + 1 && e.scrollWidth <= e.clientWidth + 1")
+    # un clic sur la ligne de catégorie masque, puis réaffiche, ses bâtiments
+    page.click("#cons-inv button[aria-expanded]:has-text('Industrie')")
+    assert page.locator("#cons-inv tr[data-building]").count() == 8 and page.locator("#cons-inv tr[data-building='mine-de-fer']").count() == 0
+    page.click("#cons-inv td.inv-group:has-text('Industrie')")  # toute la ligne est cliquable
+    assert page.locator("#cons-inv tr[data-building]").count() == 16
+    # « +1 » d'une case : objectif propre à cette planète, puis un deuxième clic le monte encore (40 → 41 → 42)
+    cell = "#cons-inv tr[data-building='mine-de-fer'] td[data-planet='6-79-Egide'] button.add-level"
+    page.click(cell)
+    page.click(cell)
     page.wait_for_function("document.querySelector('#cons-msg').textContent.includes('Enregistré')", timeout=5000)
-    assert page.locator("#cons-queue li[data-building]").evaluate_all("l => l.map(x => x.dataset.building)") == ["mine-de-fer", "caserne"]
-    assert page.locator("#cons-add-building option").count() == 14  # déjà dans la liste : plus proposés
-    page.click("button[aria-label='Monter : Caserne']")
+    assert app.state.bot.constructions.get()["queue"] == [{"building": "mine-de-fer", "level": 42, "planet": "6-79-Egide"}]
+    assert page.text_content("#cons-inv tr[data-building='mine-de-fer'] td[data-planet='6-79-Egide'] .lv") == "40 → 42"
+    # « +1 » en début de ligne : chaque planète monte de 1 niveau, depuis SON niveau
+    before = page.locator("#cons-inv tr[data-building='caserne'] td[data-planet] .lv").evaluate_all("l => l.map(x => Number(x.textContent))")
+    assert before[:2] == [10, 12]
+    page.click("#cons-inv tr[data-building='caserne'] th button.add-level")
     page.wait_for_function("document.querySelector('#cons-msg').textContent.includes('Enregistré')", timeout=5000)
-    assert [line["building"] for line in app.state.bot.constructions.get()["queue"]] == ["caserne", "mine-de-fer"]
+    caserne = [line for line in app.state.bot.constructions.get()["queue"] if line["building"] == "caserne"]
+    assert [line["level"] for line in caserne] == [level + 1 for level in before]
+    assert [line["planet"] for line in caserne] == ["8-50-Concorde", "6-79-Egide", "9-169-Strate"]
+    assert page.locator("#cons-queue li[data-building]").count() == 4  # la liste montre une ligne par bâtiment et par planète
+    assert page.locator("#cons-queue li[data-building='caserne'] .where").evaluate_all("w => w.map(x => x.textContent)") == ["8-50-Concorde", "6-79-Egide", "9-169-Strate"]
+    page.click("button[aria-label='Monter : Caserne (8-50-Concorde)']")
+    page.wait_for_function("document.querySelector('#cons-msg').textContent.includes('Enregistré')", timeout=5000)
+    first = app.state.bot.constructions.get()["queue"][0]
+    assert (first["building"], first["planet"]) == ("caserne", "8-50-Concorde")
     page.wait_for_function("document.querySelectorAll('#cons-planets .planet-grid input').length === 3", timeout=10000)
     assert page.is_checked("#cons-planets input[value='all']")
     page.check("#cons-planets input[value='some']")
@@ -307,8 +326,8 @@ def test_constructions_panel_builds_an_ordered_list_of_targets_for_all_or_one_pl
     page.click("button[aria-label='Tout cocher : les constructions']")
     page.wait_for_function("document.querySelector('#cons-msg').textContent.includes('Enregistré')", timeout=5000)
     assert len(app.state.bot.constructions.get()["planets"]) == 3
-    page.click("button[aria-label='Supprimer : Caserne']")
-    page.wait_for_function("document.querySelectorAll('#cons-queue li[data-building]').length === 1", timeout=5000)
+    page.click("button[aria-label='Supprimer : Mine de Fer (6-79-Egide)']")
+    page.wait_for_function("document.querySelectorAll('#cons-queue li[data-building]').length === 3", timeout=5000)
     assert errors == []
 
 
@@ -317,20 +336,29 @@ def test_researches_panel_builds_an_ordered_list_with_one_research_planet(ui):
     page.click("#scan-run")
     page.wait_for_function("document.querySelectorAll('#scan-list tr').length === 4", timeout=10000)
     page.goto(page.base + "/reglages#researches")
-    page.wait_for_function("document.querySelectorAll('#res-add-research option').length === 23", timeout=5000)
-    assert page.locator("#res-add-research optgroup").evaluate_all("g => g.map(x => x.label)") == ["Civil", "Militaire"]
+    assert page.locator("#res-add, #res-add-research, #res-add-level").count() == 0  # plus de liste déroulante : on ne passe que par le tableau
+    page.wait_for_function("document.querySelectorAll('#res-levels tr[data-research]').length === 23", timeout=5000)
+    assert page.locator("#res-levels button[aria-expanded]").evaluate_all("b => b.map(x => x.textContent.trim())") == ["▾ Civil · 11", "▾ Militaire · 12"]
+    assert page.locator("#res-levels tr[data-research='technologie-laser'] button.add-level").is_disabled()  # niveau pas encore relevé
+    page.click("#res-inv-refresh")
+    page.wait_for_function("document.querySelector('#res-levels tr[data-research=technologie-laser] td').textContent === '24'", timeout=20000)
+    # tableau affiché en entier : ni hauteur maximale ni barre de défilement
+    assert page.locator("#res-levels").evaluate("e => getComputedStyle(e).maxHeight === 'none' && e.scrollHeight <= e.clientHeight + 1 && e.scrollWidth <= e.clientWidth + 1")
+    # un clic sur la ligne Civil / Militaire masque, puis réaffiche, ses recherches
+    page.click("#res-levels button[aria-expanded]:has-text('Civil')")
+    assert page.locator("#res-levels tr[data-research]").count() == 12
+    assert page.locator("#res-levels button[aria-expanded='false']").count() == 1 and page.locator("#res-levels tr[data-research='ordinateur-quantique']").count() == 0
+    page.click("#res-levels td.inv-group:has-text('Civil')")  # toute la ligne est cliquable, pas seulement le texte
+    assert page.locator("#res-levels tr[data-research]").count() == 23
     page.wait_for_function("document.querySelectorAll('#res-planet option').length > 1", timeout=10000)
-    page.select_option("#res-add-research", "technologie-laser")
-    page.fill("#res-add-level", "30")
-    page.click("#res-add")
+    page.click("#res-levels tr[data-research='technologie-laser'] button.add-level")  # niveau 24 → objectif 25
     page.wait_for_function("document.querySelector('#res-msg').className.includes('error')", timeout=5000)  # pas de planète choisie
     page.select_option("#res-planet", "6-79-Egide")
-    page.select_option("#res-add-research", "technologie-energie")
-    page.fill("#res-add-level", "25")
-    page.click("#res-add")
+    page.click("#res-levels tr[data-research='technologie-energie'] button.add-level")  # niveau 20 → objectif 21
     page.wait_for_function("document.querySelector('#res-msg').textContent.includes('Enregistré')", timeout=5000)
     assert page.locator("#res-queue li[data-research]").evaluate_all("l => l.map(x => x.dataset.research)") == ["technologie-laser", "technologie-energie"]
-    assert page.locator("#res-add-research option").count() == 21
+    assert [line["level"] for line in app.state.bot.researches.get()["queue"]] == [25, 21]
+    assert page.locator("#res-levels tr[data-research='technologie-laser'] button.add-level").is_disabled()  # déjà dans la liste
     page.click("button[aria-label='Monter : Technologie Énergie']")
     page.wait_for_function("document.querySelector('#res-msg').textContent.includes('Enregistré')", timeout=5000)
     saved = app.state.bot.researches.get()
@@ -338,56 +366,101 @@ def test_researches_panel_builds_an_ordered_list_with_one_research_planet(ui):
     assert errors == []
 
 
-def test_population_panel_sets_mode_quantity_and_planet_for_each_population(ui):
+def test_population_panel_buttons_create_lines_in_the_chosen_mode(ui):
     page, errors, app = ui
     page.click("#scan-run")
     page.wait_for_function("document.querySelectorAll('#scan-list tr').length === 4", timeout=10000)
     page.goto(page.base + "/reglages#populations")
-    page.wait_for_function("document.querySelectorAll('#pop-add-population option').length === 10", timeout=5000)
-    page.wait_for_function("document.querySelectorAll('#pop-add-planets .planet-grid input').length === 3", timeout=10000)
-    assert page.is_checked("#pop-add-planets input[value='all']")  # par défaut : toutes les planètes, cases grisées
-    assert page.is_disabled("#pop-add-planets input[aria-label^='6-79-Egide']")
-    assert page.locator("#pop-add-population optgroup").evaluate_all("g => g.map(x => x.label)") == ["Assaut", "Logistique", "Administration"]
-    page.select_option("#pop-add-population", "pilote")
-    assert page.locator("#pop-add-mode option").evaluate_all("o => o.map(x => x.textContent)") == ["Quantité", "MAX", "Effectif à atteindre"]
-    assert page.is_checked("#pop-add-repeat input[value='1']")  # par défaut : à chaque passage
-    page.select_option("#pop-add-mode", "target")
-    # Effectif à atteindre : « À chaque passage » / « Une seule fois » grisés, aucun coché
-    assert page.locator("#pop-add-repeat input").evaluate_all("l => l.map(x => [x.disabled, x.checked])") == [[True, False], [True, False]]
-    page.fill("#pop-add-amount", "100")
-    page.check("#pop-add-planets input[value='some']")
-    page.click("#pop-add")  # aucune case cochée : refusé
-    assert "Cochez au moins une planète" in page.text_content("#pop-msg")
-    page.check("#pop-add-planets input[aria-label^='6-79-Egide']")
-    page.click("#pop-add")
-    page.select_option("#pop-add-population", "mineur")
-    page.select_option("#pop-add-mode", "max")
-    assert page.is_enabled("#pop-add-repeat input[value='0']") and page.is_checked("#pop-add-repeat input[value='1']")  # choix retrouvé
-    page.check("#pop-add-repeat input[value='0']")  # MAX une seule fois
-    page.check("#pop-add-planets input[value='all']")  # toutes les planètes
-    assert page.locator("#pop-add-amount-label").is_hidden()  # MAX : pas de quantité
-    page.click("#pop-add")
+    assert page.locator("#pop-add, #pop-add-population, #pop-add-mode, #pop-add-amount").count() == 0  # plus de liste déroulante : on ne passe que par le tableau
+    assert "Aucun effectif relevé" in page.text_content("#pop-inv")
+    page.click("#pop-inv-refresh")
+    page.wait_for_function("document.querySelectorAll('#pop-inv td[data-planet]').length === 10 * 3", timeout=20000)
+    assert page.locator("#pop-inv button[aria-expanded]").evaluate_all("b => b.map(x => x.textContent.trim())") == ["▾ Assaut · 4", "▾ Logistique · 3", "▾ Administration · 3"]
+    # tableau affiché en entier : ni hauteur maximale ni barre de défilement
+    assert page.locator("#pop-inv").evaluate("e => getComputedStyle(e).maxHeight === 'none' && e.scrollHeight <= e.clientHeight + 1 && e.scrollWidth <= e.clientWidth + 1")
+    # un clic sur la ligne de catégorie masque, puis réaffiche, ses populations
+    page.click("#pop-inv button[aria-expanded]:has-text('Assaut')")
+    assert page.locator("#pop-inv tr[data-population]").count() == 6 and page.locator("#pop-inv tr[data-population='rempart-de-fer']").count() == 0
+    page.click("#pop-inv td.inv-group:has-text('Assaut')")  # toute la ligne est cliquable
+    assert page.locator("#pop-inv tr[data-population]").count() == 10
+    # barre au-dessus du tableau : par défaut « Nombre à atteindre », qui ne se répète jamais
+    assert page.locator("#pop-tools input[name=pop-tool-mode]").evaluate_all("r => r.map(x => [x.value, x.checked])") == [["max", False], ["fixed", False], ["target", True]]
+    assert page.locator("#pop-tool-repeat").is_disabled() and page.is_visible("#pop-tool-amount")
+    # « Nombre à atteindre » 12 : le bouton d'une case fixe l'objectif de CETTE planète, un deuxième clic ne change rien
+    page.fill("#pop-tool-amount", "12")
+    cell = "#pop-inv tr[data-population='pilote'] td[data-planet='6-79-Egide'] button.add-level"
+    assert page.text_content(cell) == "→ 12"
+    page.click(cell)
+    page.click(cell)
     page.wait_for_function("document.querySelector('#pop-msg').textContent.includes('Enregistré')", timeout=5000)
-    assert app.state.bot.populations.get()["queue"] == [
-        {"population": "pilote", "mode": "target", "amount": 100, "planets": ["6-79-Egide"], "repeat": False},
-        {"population": "mineur", "mode": "max", "amount": 0, "planets": [], "repeat": False},
-    ]
-    # dans la liste : planètes repliées derrière un résumé ; « Tout cocher » coche les 3 planètes connues
-    assert page.text_content("li[data-population='pilote'] .planet-picker summary") == "6-79-Egide"
-    page.click("li[data-population='mineur'] .planet-picker summary")
-    page.check("input[aria-label='Planètes choisies : Mineur']")
-    page.click("button[aria-label='Tout cocher : Mineur']")
+    assert app.state.bot.populations.get()["queue"] == [{"population": "pilote", "mode": "target", "amount": 12, "planets": ["6-79-Egide"], "repeat": False}]
+    assert page.text_content("#pop-inv tr[data-population='pilote'] td[data-planet='6-79-Egide'] .lv") == "10 → 12"
+    # le bouton en début de ligne agit sur chaque planète : 6 Mineurs partout
+    page.fill("#pop-tool-amount", "6")
+    page.click("#pop-inv tr[data-population='mineur'] th button.add-level")
     page.wait_for_function("document.querySelector('#pop-msg').textContent.includes('Enregistré')", timeout=5000)
-    assert app.state.bot.populations.get()["queue"][1]["planets"] == ["6-79-Egide", "8-50-Concorde", "9-169-Strate"]
-    assert page.text_content("li[data-population='mineur'] .planet-picker summary") == "3 planètes"
-    page.click("li[data-population='mineur'] .planet-picker summary")  # referme le choix
-    assert page.is_disabled("input[aria-label='Une seule fois : Pilote']")  # ligne en effectif à atteindre
-    assert page.is_checked("input[aria-label='Une seule fois : Mineur']")
-    page.select_option("select[aria-label='Mode de Mineur']", "fixed")  # quantité, toujours une seule fois
-    page.fill("input[aria-label='Quantité de Mineur']", "25")
+    mineurs = [ln for ln in app.state.bot.populations.get()["queue"] if ln["population"] == "mineur"]
+    assert [(ln["planets"][0], ln["amount"], ln["mode"], ln["repeat"]) for ln in mineurs] == [("8-50-Concorde", 6, "target", False), ("6-79-Egide", 6, "target", False), ("9-169-Strate", 6, "target", False)]
+    assert page.locator("#pop-queue li[data-population]").count() == 4  # une ligne par population et par planète
+    # « Quantité définie » 25, à chaque passage : la ligne de la case est REMPLACÉE, à sa place dans la liste
+    page.check("#pop-tools input[value=fixed]")
+    assert page.locator("#pop-tool-repeat").is_enabled() and page.is_checked("#pop-tool-repeat")  # à chaque passage par défaut
+    page.fill("#pop-tool-amount", "25")
+    assert page.text_content(cell) == "+25"
+    page.click(cell)
+    page.wait_for_function("document.querySelector('#pop-msg').textContent.includes('Enregistré')", timeout=5000)
+    queue = app.state.bot.populations.get()["queue"]
+    assert queue[0] == {"population": "pilote", "mode": "fixed", "amount": 25, "planets": ["6-79-Egide"], "repeat": True} and len(queue) == 4
+    assert page.text_content("#pop-inv tr[data-population='pilote'] td[data-planet='6-79-Egide'] .tag") == "+25 ↻"
+    # l'interrupteur « Une seule fois » s'applique aux lignes créées ensuite
+    page.uncheck("#pop-tool-repeat")
+    assert "Une seule fois" in page.text_content("#pop-tool-repeat-label")
+    page.click(cell)
+    page.wait_for_function("document.querySelector('#pop-msg').textContent.includes('Enregistré')", timeout=5000)
+    assert app.state.bot.populations.get()["queue"][0]["repeat"] is False
+    assert page.text_content("#pop-inv tr[data-population='pilote'] td[data-planet='6-79-Egide'] .tag") == "+25 1×"
+    # « Max » : pas de quantité, le bouton affiche MAX
+    page.check("#pop-tools input[value=max]")
+    assert page.is_hidden("#pop-tool-amount") and page.text_content(cell) == "MAX"
+    strate = "#pop-inv tr[data-population='mineur'] td[data-planet='9-169-Strate'] button.add-level"
+    page.click(strate)
+    page.wait_for_function("document.querySelector('#pop-msg').textContent.includes('Enregistré')", timeout=5000)
+    last = [ln for ln in app.state.bot.populations.get()["queue"] if ln["population"] == "mineur" and ln["planets"] == ["9-169-Strate"]]
+    assert last == [{"population": "mineur", "mode": "max", "amount": 0, "planets": ["9-169-Strate"], "repeat": False}]
+    # une quantité invalide désactive les boutons (sauf en mode Max)
+    page.check("#pop-tools input[value=target]")
+    page.fill("#pop-tool-amount", "0")
+    assert page.locator("#pop-inv button.add-level:not([disabled])").count() == 0
+    page.fill("#pop-tool-amount", "3")
+    assert page.locator("#pop-inv button.add-level[disabled]").count() == 0
+    # la liste reste modifiable : ordre, suppression
     page.click("button[aria-label='Monter : Mineur']")
     page.wait_for_function("document.querySelector('#pop-msg').textContent.includes('Enregistré')", timeout=5000)
-    assert [(ln["population"], ln["mode"], ln["amount"], ln["repeat"]) for ln in app.state.bot.populations.get()["queue"]] == [("mineur", "fixed", 25, False), ("pilote", "target", 100, False)]
+    assert app.state.bot.populations.get()["queue"][0]["population"] == "mineur"
+    page.click("button[aria-label='Supprimer : Pilote']")
+    page.wait_for_function("document.querySelectorAll('#pop-queue li[data-population]').length === 3", timeout=5000)
+    assert errors == []
+
+
+def test_population_cell_goes_above_the_target_of_an_all_planets_line(ui):
+    page, errors, app = ui
+    page.click("#scan-run")
+    page.wait_for_function("document.querySelectorAll('#scan-list tr').length === 4", timeout=10000)
+    page.goto(page.base + "/reglages#populations")
+    page.click("#pop-inv-refresh")
+    page.wait_for_function("document.querySelectorAll('#pop-inv td[data-planet]').length === 10 * 3", timeout=20000)
+    app.state.bot.populations.replace({"queue": [{"population": "pilote", "mode": "target", "amount": 50, "planets": [], "repeat": False}]})
+    page.reload()
+    page.wait_for_function("document.querySelectorAll('#pop-inv td[data-planet]').length === 10 * 3", timeout=20000)
+    assert page.text_content("#pop-inv tr[data-population='pilote'] td[data-planet='8-50-Concorde'] .lv") == "10 → 50"
+    page.fill("#pop-tool-amount", "51")
+    page.click("#pop-inv tr[data-population='pilote'] td[data-planet='8-50-Concorde'] button.add-level")
+    page.wait_for_function("document.querySelector('#pop-msg').textContent.includes('Enregistré')", timeout=5000)
+    queue = app.state.bot.populations.get()["queue"]
+    assert [(ln["planets"], ln["amount"]) for ln in queue] == [([], 50), (["8-50-Concorde"], 51)]  # la ligne de la planète est la plus précise
+    page.reload()  # les réglages des boutons sont retenus par le navigateur
+    page.wait_for_function("document.querySelectorAll('#pop-inv td[data-planet]').length === 10 * 3", timeout=20000)
+    assert page.input_value("#pop-tool-amount") == "51" and page.is_checked("#pop-tools input[value=target]")
     assert errors == []
 
 
@@ -762,13 +835,28 @@ def test_planet_choice_sorts_naturally_on_two_rows_and_checks_all(ui):
 
 def test_a_line_removed_by_the_bot_disappears_from_the_page(ui):
     page, errors, app = ui
+    page.click("#scan-run")
+    page.wait_for_function("document.querySelectorAll('#scan-list tr').length === 4", timeout=10000)
     page.goto(page.base + "/reglages#components")
-    page.wait_for_function("document.querySelectorAll('#cmp-add-item option').length === 37", timeout=5000)
-    assert page.locator("#cmp-add-item optgroup").evaluate_all("g => g.map(x => x.label)") == ["Infrastructures", "Hangars", "Armement", "Blindages", "Boucliers", "Propulsion"]
-    page.select_option("#cmp-add-item", "canon-laser")
-    page.click("#cmp-add")
+    assert page.locator("#cmp-add, #cmp-add-item, #cmp-add-mode, #cmp-add-amount").count() == 0  # plus de liste déroulante : on ne passe que par le tableau
+    page.wait_for_function("document.querySelectorAll('#cmp-inv td[data-planet]').length > 0", timeout=5000)
+    page.fill("#cmp-tool-amount", "150")  # mode par défaut : nombre à atteindre
+    cell = "#cmp-inv tr[data-item='canon-laser'] td[data-planet='6-79-Egide']"
+    assert page.text_content(cell + " .lv") == "—"  # pas encore relevé
+    page.click("#cmp-inv-refresh")
+    page.wait_for_function("document.querySelector('#cmp-inv tr[data-item=\"canon-laser\"] td[data-planet] .lv').textContent !== '—'", timeout=30000)
+    assert page.text_content(cell + " .lv") == "100"  # effectif lu dans l'onglet Composants du Chantier spatial
+    assert page.locator("#cmp-inv button[aria-expanded]").evaluate_all("b => b.map(x => x.textContent.trim().split(' ')[1])") == ["Infrastructures", "Hangars", "Armement", "Blindages", "Boucliers", "Propulsion"]
+    assert page.locator("#cmp-inv tr[data-item]").count() == 37
+    assert page.locator("#cmp-inv").evaluate("e => getComputedStyle(e).maxHeight === 'none' && e.scrollHeight <= e.clientHeight + 1")
+    page.fill("#cmp-tool-amount", "")  # champ vidé : les boutons se grisent au lieu de garder l'ancien nombre
+    assert page.locator("#cmp-inv button.add-level:not([disabled])").count() == 0
+    page.fill("#cmp-tool-amount", "150")
+    page.click(cell + " button.add-level")
     page.wait_for_function("document.querySelector('#cmp-msg').textContent.includes('Enregistré')", timeout=5000)
+    assert app.state.bot.components.get()["queue"] == [{"item": "canon-laser", "mode": "target", "amount": 150, "planets": ["6-79-Egide"], "repeat": False}]
     assert page.locator("#cmp-queue li[data-item='canon-laser']").count() == 1
+    assert page.text_content(cell + " .lv") == "100 → 150"
     app.state.bot.components.replace({"queue": []})  # le bot retire la ligne atteinte
     page.wait_for_function("document.querySelectorAll('#cmp-queue li.empty-state').length === 1", timeout=8000)
     assert errors == []

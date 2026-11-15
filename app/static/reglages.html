@@ -111,18 +111,21 @@
       </header>
       <details class="help-box">
         <summary>Comment ça marche ?</summary>
-        <p>Chaque ligne dit « monter ce bâtiment jusqu'au niveau N ». L'ordre de la liste est la priorité : le bot lancera la première ligne réalisable. Une seule ligne par bâtiment. Quand la fonctionnalité est activée et le bot sur ON, il clique sur « Améliorer » et <strong>dépense les ressources du jeu</strong> : au plus une construction par planète et par passage. Planètes : « Toutes les planètes » (y compris celles colonisées plus tard) ou les planètes cochées, pour toute la liste.</p>
+        <p>Chaque ligne dit « monter ce bâtiment jusqu'au niveau N » sur une planète (ou, pour une ancienne ligne, sur toutes les planètes visées). L'ordre de la liste est la priorité : le bot lancera la première ligne réalisable. Une seule ligne par bâtiment et par planète ; la ligne d'une planète l'emporte sur une ligne « toutes les planètes » du même bâtiment. Quand la fonctionnalité est activée et le bot sur ON, il clique sur « Améliorer » et <strong>dépense les ressources du jeu</strong> : au plus une construction par planète et par passage.</p>
+        <p>Le tableau « Niveaux actuels » montre le niveau de chaque bâtiment sur chaque planète, lu en une seule page du jeu (<strong>Empire › Inventaire</strong>, lecture seule) au début de chaque passage ou avec « Relever maintenant ». C'est <strong>par là qu'on ajoute des objectifs</strong> : le bouton <strong>+1</strong> d'une case ajoute (ou monte) l'objectif de cette planète au niveau suivant ; chaque clic de plus l'augmente d'un niveau. Le <strong>+1</strong> en début de ligne fait la même chose sur chaque planète (chacune à son niveau + 1). Une case jaune est sous son objectif (« 41 → 42 »), une case verte l'a atteint. Un clic sur la ligne « Industrie » ou « Infrastructures » masque ou réaffiche ses bâtiments. Une planète où tout ce qui est demandé est déjà atteint n'est plus visitée par le bot.</p>
+        <p>Le choix « Planètes » ci-dessous ne concerne que les anciennes lignes « toutes les planètes ».</p>
       </details>
       <h3>Planètes</h3>
       <div id="cons-planets" class="add-planets"></div>
       <h3>Liste d'objectifs</h3>
       <ol id="cons-queue" class="cons-queue"></ol>
-      <div class="row add-row">
-        <label>Ajouter <select id="cons-add-building" aria-label="Bâtiment à ajouter"></select></label>
-        <label>jusqu'au niveau <input id="cons-add-level" type="number" min="1" max="500" step="1" value="1"></label>
-        <button id="cons-add" type="button" class="secondary">+ Ajouter à la liste</button>
-      </div>
       <p id="cons-msg" class="msg" role="status" aria-live="polite"></p>
+      <h3>Niveaux actuels</h3>
+      <div class="row inv-bar">
+        <p id="cons-inv-info" class="inv-info" role="status" aria-live="polite"></p>
+        <button id="cons-inv-refresh" type="button" class="secondary small" title="Ouvre la page Empire › Inventaire du jeu et relit les niveaux (le bot doit être dans une partie)">Relever maintenant</button>
+      </div>
+      <div id="cons-inv" class="cons-wrap" role="region" aria-label="Niveaux des bâtiments par planète"></div>
     </section>
 
     <section class="tabpanel card" id="panel-researches" role="tabpanel" aria-labelledby="tab-researches" hidden>
@@ -133,18 +136,20 @@
       <details class="help-box">
         <summary>Comment ça marche ?</summary>
         <p>Chaque ligne dit « monter cette recherche jusqu'au niveau N » (le niveau à atteindre, pas le niveau actuel). L'ordre de la liste est la priorité : le bot lancera la première ligne réalisable. Une seule ligne par recherche. Dans le jeu, une recherche est payée par <strong>une seule planète</strong> et une seule recherche tourne à la fois : choisissez la planète chargée des recherches. Quand la fonctionnalité est activée et le bot sur ON, il clique sur « Rechercher » et <strong>dépense les ressources de cette planète</strong>.</p>
+        <p>Le tableau « Niveaux actuels » donne le niveau de chaque recherche (lu en lecture seule sur <strong>Empire › Inventaire</strong>, au début de chaque passage ou avec « Relever maintenant »). Le bouton <strong>+1</strong> d'une recherche l'ajoute à la liste d'objectifs au niveau suivant (niveau actuel + 1) ; vous pouvez ensuite changer ce niveau dans la liste. C'est la seule façon d'ajouter une recherche. Un clic sur la ligne « Civil » ou « Militaire » masque ou réaffiche les recherches de cette catégorie.</p>
       </details>
       <div class="scope">
         <label>Planète chargée des recherches <select id="res-planet" aria-label="Planète chargée des recherches"></select></label>
       </div>
       <h3>Liste d'objectifs</h3>
       <ol id="res-queue" class="cons-queue"></ol>
-      <div class="row add-row">
-        <label>Ajouter <select id="res-add-research" aria-label="Recherche à ajouter"></select></label>
-        <label>jusqu'au niveau <input id="res-add-level" type="number" min="1" max="500" step="1" value="1"></label>
-        <button id="res-add" type="button" class="secondary">+ Ajouter à la liste</button>
-      </div>
       <p id="res-msg" class="msg" role="status" aria-live="polite"></p>
+      <h3>Niveaux actuels</h3>
+      <div class="row inv-bar">
+        <p id="res-inv-info" class="inv-info" role="status" aria-live="polite"></p>
+        <button id="res-inv-refresh" type="button" class="secondary small" title="Ouvre la page Empire › Inventaire du jeu et relit les niveaux (le bot doit être dans une partie)">Relever maintenant</button>
+      </div>
+      <div id="res-levels" class="res-wrap" role="region" aria-label="Niveaux des recherches"></div>
     </section>
 
     <section class="tabpanel card" id="panel-populations" role="tabpanel" aria-labelledby="tab-populations" hidden>
@@ -154,19 +159,19 @@
       </header>
       <details class="help-box">
         <summary>Comment ça marche ?</summary>
-        <p>Chaque ligne règle <strong>une population</strong>, indépendamment des autres : <strong>quantité fixe</strong> (recrutée à chaque passage), <strong>MAX</strong> (le maximum payable, à chaque passage) ou <strong>effectif à atteindre</strong> (le bot recrute ce qui manque, planète par planète, puis ne fait plus rien une fois la cible atteinte). Planètes : « Toutes les planètes » (y compris celles colonisées plus tard) ou les planètes cochées ; chacune est traitée séparément. L'ordre de la liste est la priorité quand plusieurs populations se partagent les mêmes ressources. Quand la fonctionnalité est activée et le bot sur ON, il clique sur « Recruter » et <strong>dépense les ressources de la planète</strong> : attention au MAX, qui vide les stocks. Quand la dernière ligne est terminée et que la liste est vide, la fonctionnalité <strong>se désactive d'elle-même</strong>.</p>
+        <p>Chaque ligne règle <strong>une population</strong>, indépendamment des autres : <strong>quantité fixe</strong> (recrutée à chaque passage), <strong>MAX</strong> (le maximum payable, à chaque passage) ou <strong>effectif à atteindre</strong> (le bot recrute ce qui manque, planète par planète, puis ne fait plus rien une fois la cible atteinte). Planètes : une ligne vaut pour une planète (ou, pour une ancienne ligne, pour « toutes les planètes » ou les planètes cochées) ; chacune est traitée séparément, et la ligne d'une planète l'emporte sur une ligne « toutes les planètes » de la même population. L'ordre de la liste est la priorité quand plusieurs populations se partagent les mêmes ressources. Quand la fonctionnalité est activée et le bot sur ON, il clique sur « Recruter » et <strong>dépense les ressources de la planète</strong> : attention au MAX, qui vide les stocks. Quand la dernière ligne est terminée et que la liste est vide, la fonctionnalité <strong>se désactive d'elle-même</strong>.</p>
+        <p>Le tableau « Effectifs actuels » montre le nombre de chaque population sur chaque planète, lu en une seule page du jeu (<strong>Empire › Inventaire</strong>, lecture seule) au début de chaque passage ou avec « Relever maintenant ». C'est <strong>par là qu'on ajoute des lignes</strong> : au-dessus du tableau, choisissez ce que font les boutons — <strong>Max</strong> (recruter le maximum payable), <strong>Quantité définie</strong> (recruter N unités) ou <strong>Nombre à atteindre</strong> (recruter ce qui manque pour atteindre N) — avec le nombre N, et l'interrupteur <strong>À chaque passage de la boucle / Une seule fois</strong> (un effectif à atteindre ne se répète jamais). Un clic sur le bouton d'une case crée la ligne de <strong>cette planète</strong> (ou remplace la sienne, à sa place dans la liste) ; le bouton en début de ligne le fait sur chaque planète. Une case jaune est sous son effectif voulu (« 57 → 100 »), une case verte l'a atteint ; sous le nombre, « MAX » ou « +N » avec ↻ (à chaque passage) ou 1× (une seule fois) rappelle une ligne de recrutement. Un clic sur la ligne « Assaut », « Logistique » ou « Administration » masque ou réaffiche ses populations. Une planète dont tous les objectifs sont des effectifs déjà atteints n'est plus visitée par le bot.</p>
       </details>
       <h3>Lignes de recrutement</h3>
       <ol id="pop-queue" class="cons-queue"></ol>
-      <div class="row add-row">
-        <label>Ajouter <select id="pop-add-population" aria-label="Population à ajouter"></select></label>
-        <label>mode <select id="pop-add-mode" aria-label="Mode de recrutement"></select></label>
-        <span id="pop-add-repeat"></span>
-        <label id="pop-add-amount-label">quantité <input id="pop-add-amount" type="number" min="1" step="1" value="1"></label>
-        <div id="pop-add-planets" class="add-planets"></div>
-        <button id="pop-add" type="button" class="secondary">+ Ajouter à la liste</button>
-      </div>
       <p id="pop-msg" class="msg" role="status" aria-live="polite"></p>
+      <h3>Effectifs actuels</h3>
+      <div class="row inv-bar">
+        <p id="pop-inv-info" class="inv-info" role="status" aria-live="polite"></p>
+        <button id="pop-inv-refresh" type="button" class="secondary small" title="Ouvre la page Empire › Inventaire du jeu et relit les effectifs (le bot doit être dans une partie)">Relever maintenant</button>
+      </div>
+      <div id="pop-tools" class="row pop-tools" role="group" aria-label="Réglages des boutons du tableau"></div>
+      <div id="pop-inv" class="cons-wrap" role="region" aria-label="Effectifs de population par planète"></div>
     </section>
 
     <section class="tabpanel card" id="panel-ships" role="tabpanel" aria-labelledby="tab-ships" hidden>
@@ -204,19 +209,19 @@
       </header>
       <details class="help-box">
         <summary>Comment ça marche ?</summary>
-        <p>Chaque ligne règle <strong>un composant</strong> (37 au total, en 6 catégories) : <strong>quantité fixe</strong> ou <strong>MAX</strong>, <strong>à chaque passage</strong> ou <strong>une seule fois</strong> (une fois par planète, puis la ligne disparaît), ou <strong>effectif à atteindre</strong> (le bot produit ce qui manque, planète par planète, puis la ligne disparaît). Planètes : toutes, une seule ou plusieurs. L'ordre de la liste est la priorité. Quand la fonctionnalité est activée et le bot sur ON, il clique sur « Produire » et <strong>dépense les ressources de la planète</strong> : attention au MAX, qui vide les stocks. Quand la dernière ligne est terminée et que la liste est vide, la fonctionnalité <strong>se désactive d'elle-même</strong>.</p>
+        <p>Chaque ligne règle <strong>un composant</strong> sur <strong>une planète</strong> (37 composants, en 6 catégories) : <strong>quantité fixe</strong> (produite à chaque passage ou une seule fois), <strong>MAX</strong> (le maximum payable) ou <strong>effectif à atteindre</strong> (le bot produit ce qui manque, puis la ligne disparaît). Chaque planète est traitée séparément, et la ligne d'une planète l'emporte sur une ligne « toutes les planètes » du même composant. L'ordre de la liste est la priorité quand plusieurs composants se partagent les mêmes ressources. Quand la fonctionnalité est activée et le bot sur ON, il clique sur « Produire » et <strong>dépense les ressources de la planète</strong> : attention au MAX, qui vide les stocks. Quand la dernière ligne est terminée et que la liste est vide, la fonctionnalité <strong>se désactive d'elle-même</strong>.</p>
+        <p>Le tableau « Effectifs actuels » montre le nombre de chaque composant sur chaque planète, tel qu'il s'affiche dans l'onglet « Composants » du Chantier spatial : le bot le note à chaque passage de la production, ou à la demande avec « Relever maintenant » (il visite alors chaque planète, sans rien produire ; le bot doit être dans une partie). C'est <strong>par là qu'on ajoute des lignes</strong> : au-dessus du tableau, choisissez ce que font les boutons — <strong>Max</strong>, <strong>Quantité définie</strong> (produire N unités) ou <strong>Nombre à atteindre</strong> (produire ce qui manque pour atteindre N) — avec le nombre N, et l'interrupteur <strong>À chaque passage de la boucle / Une seule fois</strong> (un effectif à atteindre ne se répète jamais). Un clic sur le bouton d'une case crée la ligne de <strong>cette planète</strong> (ou remplace la sienne, à sa place dans la liste) ; le bouton en début de ligne le fait sur chaque planète. Une case jaune est sous son effectif voulu (« 57 → 100 »), une case verte l'a atteint ; « — » signale un composant jamais relevé sur cette planète ; sous le nombre, « MAX » ou « +N » avec ↻ (à chaque passage) ou 1× (une seule fois) rappelle une ligne de production. Un clic sur le nom d'une catégorie masque ou réaffiche ses composants.</p>
       </details>
       <h3>Lignes de production</h3>
       <ol id="cmp-queue" class="cons-queue"></ol>
-      <div class="row add-row">
-        <label>Ajouter <select id="cmp-add-item" aria-label="Composant à ajouter"></select></label>
-        <label>mode <select id="cmp-add-mode" aria-label="Mode de production"></select></label>
-        <span id="cmp-add-repeat"></span>
-        <label id="cmp-add-amount-label">quantité <input id="cmp-add-amount" type="number" min="1" step="1" value="1"></label>
-        <div id="cmp-add-planets" class="add-planets"></div>
-        <button id="cmp-add" type="button" class="secondary">+ Ajouter à la liste</button>
-      </div>
       <p id="cmp-msg" class="msg" role="status" aria-live="polite"></p>
+      <h3>Effectifs actuels</h3>
+      <div class="row inv-bar">
+        <p id="cmp-inv-info" class="inv-info" role="status" aria-live="polite"></p>
+        <button id="cmp-inv-refresh" type="button" class="secondary small" title="Visite l'onglet Composants de chaque planète et relit les effectifs (le bot doit être dans une partie)">Relever maintenant</button>
+      </div>
+      <div id="cmp-tools" class="row pop-tools" role="group" aria-label="Réglages des boutons du tableau"></div>
+      <div id="cmp-inv" class="cons-wrap" role="region" aria-label="Effectifs de composants par planète"></div>
     </section>
 
     <section class="tabpanel card" id="panel-slots" role="tabpanel" aria-labelledby="tab-slots" hidden>
@@ -469,7 +474,9 @@
   <script src="/static/constructions.js"></script>
   <script src="/static/recherches.js"></script>
   <script src="/static/mode-choice.js"></script>
+  <script src="/static/line-table.js"></script>
   <script src="/static/population.js"></script>
+  <script src="/static/composants.js"></script>
   <script src="/static/chantier.js"></script>
   <script src="/static/exploration.js"></script>
   <script src="/static/excavation.js"></script>
