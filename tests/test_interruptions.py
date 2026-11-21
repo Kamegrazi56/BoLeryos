@@ -9,6 +9,16 @@ from app import human, interruptions
 DEVLOG_NAME = "Journal de développement"
 
 STEAM_NAME = "Annonce Steam"
+PACKS_NAME = "Annonce des packs expirés"
+PACKS_PAGE = """
+<button id="target" onclick="window.hits = (window.hits || 0) + 1">Cible</button>
+<div id="packs" role="dialog" aria-label="Vos packs sont arrivés à leur terme"
+     style="position:fixed;inset:0;background:#000a;z-index:98">
+  <button aria-label="Fermer la transmission" onclick="document.getElementById('packs').remove()">x</button>
+  <button id="renew" onclick="window.renewed = true">RÉACTIVER MES PACKS</button>
+</div>
+"""
+
 STEAM_PAGE = """
 <button id="target" onclick="window.hits = (window.hits || 0) + 1">Cible</button>
 <div id="steam" role="dialog" aria-label="Votre empire vous accompagne sur Steam"
@@ -117,3 +127,13 @@ def test_human_click_closes_the_steam_announcement_before_clicking(settings):
     hits, closed = _run(settings, scenario, STEAM_PAGE)
     assert hits == 1  # sans la fermeture, l'annonce aurait reçu le clic
     assert closed == [STEAM_NAME]
+
+
+def test_human_click_closes_the_expired_packs_announcement_without_renewing(settings):
+    async def scenario(page, closed):
+        await human.click(page, page.locator("#target"), settings)
+        return await page.evaluate("[window.hits || 0, !!window.renewed]"), closed
+
+    (hits, renewed), closed = _run(settings, scenario, PACKS_PAGE)
+    assert hits == 1 and not renewed  # fermée par la croix : le bouton d'achat n'est jamais touché
+    assert closed == [PACKS_NAME]

@@ -77,6 +77,7 @@ Dans **Réglages › Compte et univers**, saisissez l'identifiant, le mot de pas
 | Session expirée | Se reconnecte tout seul. |
 | Fenêtre « Journal de développement » | La ferme avant chaque clic ou saisie. |
 | Annonce « Votre empire vous accompagne sur Steam » | La ferme aussi avant chaque clic ou saisie : elle apparaît à chaque chargement de page et empêchait d'ouvrir des fenêtres du jeu (Piliers, modèles). |
+| Annonce « Vos packs sont arrivés à leur terme » | La ferme avec sa croix (jamais le bouton « Réactiver mes packs ») : tant qu'elle est ouverte, elle bloque les lectures et les clics. |
 
 **Scan des planètes :** une fois par connexion, dès que le bot est dans la partie, il ouvre la liste des planètes du jeu, lit nom, coordonnées et stocks (Fer, Cristal, Éther), puis la referme. Le bouton **« Scanner les planètes »** (Réglages) la relance à la demande ; le résultat s'affiche aussi sur l'Accueil.
 

@@ -53,7 +53,14 @@ STEAM = Interruption(
     dialog='[role="dialog"][aria-label*="Steam" i]',
     close='button[aria-label="Fermer la transmission"]',
 )
-INTERRUPTIONS: tuple[Interruption, ...] = (DEVLOG, STEAM)
+# Annonce « Vos packs sont arrivés à leur terme » (relevée sur la production le 2026-11-21) : même type de fenêtre, elle
+# bloque les lectures tant qu'elle est ouverte. On ne clique que sur la croix, jamais sur « Réactiver mes packs ».
+PACKS_EXPIRED = Interruption(
+    name="Annonce des packs expirés",
+    dialog='[role="dialog"][aria-label*="packs sont arrivés" i]',
+    close='button[aria-label="Fermer la transmission"]',
+)
+INTERRUPTIONS: tuple[Interruption, ...] = (DEVLOG, STEAM, PACKS_EXPIRED)
 
 # Rappel (journal du bot) enregistré par page ; la page disparaît, l'entrée aussi.
 _callbacks: weakref.WeakKeyDictionary[Page, Callable[[str], None]] = weakref.WeakKeyDictionary()
