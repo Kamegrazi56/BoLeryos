@@ -76,8 +76,11 @@ Dans **Réglages › Compte et univers**, saisissez l'identifiant, le mot de pas
 | Déjà dans une partie | Saute la connexion et le choix de l'univers. |
 | Session expirée | Se reconnecte tout seul. |
 | Fenêtre « Journal de développement » | La ferme avant chaque clic ou saisie. |
+| Annonce « Votre empire vous accompagne sur Steam » | La ferme aussi avant chaque clic ou saisie : elle apparaît à chaque chargement de page et empêchait d'ouvrir des fenêtres du jeu (Piliers, modèles). |
 
 **Scan des planètes :** une fois par connexion, dès que le bot est dans la partie, il ouvre la liste des planètes du jeu, lit nom, coordonnées et stocks (Fer, Cristal, Éther), puis la referme. Le bouton **« Scanner les planètes »** (Réglages) la relance à la demande ; le résultat s'affiche aussi sur l'Accueil.
+
+**Lectures de démarrage :** après le scan des planètes, le bot lit aussi tout seul, une fois par connexion et dans cet ordre : les **modèles de vaisseaux** (Chantier spatial), l'**état des Piliers**, les **effectifs** (Empire › Inventaire : population, niveaux des bâtiments) et les **modèles d'exploration Piliers et Flotte** (Opérations). Ces données servent aux fonctionnalités et aux tableaux des Réglages : elles sont donc présentes dès le lancement de l'instance, sans clic. Chaque lecture est tentée 3 fois au plus par connexion ; une lecture qui échoue est signalée dans les événements et peut être relancée par son bouton. Les brèches de chaque planète restent relevées une fois par jour, au premier passage des explorations.
 
 **Garde-fous :** si le site **refuse** les identifiants, le bot n'essaie qu'**une fois** (risque de blocage du compte) et l'indique ; si la connexion n'aboutit pas (contrôle anti-bot ?), 3 essais espacés (1 min, 5 min) puis il demande de se connecter à la main et **reprend seul** dès que le site est connecté ; le contrôle manuel le met en pause.
 

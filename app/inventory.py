@@ -266,7 +266,7 @@ class InventoryReader(ConstructionPass):
         known = {p["name"] for p in self.bot.supervisor.scanned_planets}
         if known and known != {p["name"] for p in planets}:  # colonnes manquantes (affichage partiel ?) : on le dit
             self.bot.log(f"Inventaire : {len(planets)} planète(s) lue(s) pour {len(known)} planète(s) connue(s) au scan.", "warn", event=True)
-        self.bot.log(f"Inventaire relevé ({source}) : {len(planets)} planète(s).", event=source == "manuel")
+        self.bot.log(f"Inventaire relevé ({source}) : {len(planets)} planète(s).", event=source in ("manuel", "démarrage"))
         return planets
 
     async def refresh(self, source: str) -> dict:

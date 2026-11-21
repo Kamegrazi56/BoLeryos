@@ -46,7 +46,14 @@ DEVLOG = Interruption(
     dialog='[role="dialog"][aria-modal="true"][aria-label*="Devlog" i]',
     close='button[aria-label="Fermer"]',
 )
-INTERRUPTIONS: tuple[Interruption, ...] = (DEVLOG,)
+# Annonce « Votre empire vous accompagne sur Steam » (relevée sur le vrai jeu le 2026-11-21) : elle s'affiche quelques
+# secondes après CHAQUE chargement de page et avale les clics du bot (ex. « Gérer les Piliers » ne s'ouvrait pas).
+STEAM = Interruption(
+    name="Annonce Steam",
+    dialog='[role="dialog"][aria-label*="Steam" i]',
+    close='button[aria-label="Fermer la transmission"]',
+)
+INTERRUPTIONS: tuple[Interruption, ...] = (DEVLOG, STEAM)
 
 # Rappel (journal du bot) enregistré par page ; la page disparaît, l'entrée aussi.
 _callbacks: weakref.WeakKeyDictionary[Page, Callable[[str], None]] = weakref.WeakKeyDictionary()

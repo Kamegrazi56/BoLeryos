@@ -276,6 +276,47 @@ class ExplorationPass(ConstructionPass):
             self.scanning = False
         return self.store.daily()
 
+    async def scan_models(self, source: str) -> dict:
+        """Relève seulement les modèles Piliers et Flotte (au démarrage : ils servent à régler l'exploration), sans chercher
+        les brèches. Ne lève jamais : renvoie {"error": raison} en cas d'échec."""
+        if self.scanning:
+            return {"error": "relevé déjà en cours"}
+        busy = "une fonctionnalité est en cours, réessayez dans un instant" if self.bot.work.locked() else None
+        reason = self.bot.supervisor.game_blocker() or busy
+        if reason:
+            return {"error": reason[0].upper() + reason[1:]}
+        self.scanning = True
+        try:
+            async with self.bot.work:  # jamais en même temps qu'un passage de fonctionnalité
+                await self.bot.claim_bonus()
+                models, problems = await self._read_all_models()
+            self.store.set_models(models, source, " ; ".join(problems))
+            counts = ", ".join(f"{METHODS[m]} {len(v)}" for m, v in models.items())
+            if problems:  # les anciens modèles sont gardés : on n'annonce pas un relevé réussi
+                self.bot.log(f"Exploration : relevé des modèles incomplet ({source}) — {' ; '.join(problems)}. "
+                             f"Anciens modèles gardés : {counts}.", "warn", event=True)
+            else:
+                self.bot.log(f"Exploration : modèles relevés ({source}) — {counts}.", event=True)
+            return {"error": " ; ".join(problems)}
+        except (Interrupted, GameUiError) as exc:
+            self.bot.log(f"Exploration : relevé des modèles impossible ({exc}).", "warn", event=True)
+            return {"error": f"Relevé impossible : {exc}"}
+        finally:
+            self.scanning = False
+
+    async def _read_all_models(self) -> tuple[dict, list[str]]:
+        """Modèles de chaque moyen ; en cas d'échec, les anciens sont gardés et la raison est rendue."""
+        models: dict = {}
+        problems: list[str] = []
+        previous = self.store.daily()["models"]
+        for method, label in METHODS.items():
+            try:
+                models[method] = await self._read_models(method)
+            except GameUiError as exc:
+                problems.append(f"modèles {label} : {exc}")
+                models[method] = previous.get(method, [])
+        return models, problems
+
     async def _find_breaches(self, planets: list[str]) -> tuple[dict, list[str]]:
         breaches: dict = {}
         problems: list[str] = []
@@ -301,14 +342,8 @@ class ExplorationPass(ConstructionPass):
     async def _daily_scan(self, settings: dict, source: str) -> None:
         planets = self._targets(settings)
         breaches, problems = await self._find_breaches(planets)
-        models: dict = {}
-        previous = self.store.daily()["models"]
-        for method, label in METHODS.items():
-            try:
-                models[method] = await self._read_models(method)
-            except GameUiError as exc:
-                problems.append(f"modèles {label} : {exc}")
-                models[method] = previous.get(method, [])
+        models, model_problems = await self._read_all_models()
+        problems += model_problems
         self.store.set_daily(breaches, models, source, " ; ".join(problems), tried=planets)
         found = ", ".join(f"{p} → {b['address']}" for p, b in breaches.items()) or "aucune"
         self.bot.log(f"Exploration : relevé du jour ({source}) — brèches : {found} ; modèles : "

@@ -253,6 +253,15 @@ class ExplorationStore:
         self._save()
         return self.daily()
 
+    def set_models(self, models: dict, source: str, error: str = "") -> dict:
+        """Relevé des seuls modèles (au démarrage) : les brèches et le jour du relevé quotidien ne bougent pas, donc le
+        relevé complet du jour reste dû."""
+        known = self._daily["models"]
+        self._daily = {**self._daily, "error": error, "source": source,
+                       "models": {m: list(models.get(m, known.get(m, []))) for m in METHODS}}
+        self._save()
+        return self.daily()
+
     def add_breaches(self, breaches: dict, tried: list[str], error: str = "") -> dict:
         """Complète le relevé du jour avec des planètes choisies après lui."""
         errors = " ; ".join(e for e in (self._daily["error"], error) if e)

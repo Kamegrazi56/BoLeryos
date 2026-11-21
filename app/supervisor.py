@@ -47,6 +47,11 @@ class ConnectionSupervisor:
         # État des Piliers (ouverts / fermés / en cours de changement), relevé après les modèles : même principe.
         self._pillars_done_session = False
         self._pillars_attempts = 0
+        # Effectifs (inventaire : population, bâtiments) et modèles d'exploration (Piliers, Flotte) : même principe.
+        self._inventory_done_session = False
+        self._inventory_attempts = 0
+        self._explo_models_done_session = False
+        self._explo_models_attempts = 0
         # Connexion automatique
         self.connection = ""  # état affiché dans l'interface
         self._keeper: asyncio.Task | None = None
@@ -220,23 +225,14 @@ class ConnectionSupervisor:
             self._scan_done_session, self._scan_attempts = False, 0
             self._models_done_session, self._models_attempts = False, 0
             self._pillars_done_session, self._pillars_attempts = False, 0
+            self._inventory_done_session, self._inventory_attempts = False, 0
+            self._explo_models_done_session, self._explo_models_attempts = False, 0
         if screen == "game":
             self._universe_attempts = 0
             if not self._in_game:  # arrivée (ou retour) dans la partie
                 self._in_game = True
                 b.log("Connecté à la partie.", event=True)
-            if not self._scan_done_session and self._scan_attempts < SCAN_AUTO_ATTEMPTS and not b.work.locked():
-                self._scan_attempts += 1
-                await self.scan_planets("démarrage")  # une fois par connexion
-            if self._scan_done_session and not self._models_done_session and self._models_attempts < SCAN_AUTO_ATTEMPTS and not b.work.locked():
-                self._models_attempts += 1
-                await self.scan_models("démarrage")  # une fois par connexion, après les planètes
-            pillar = getattr(b, "pillar", None)
-            if (pillar is not None and self._models_done_session and not self._pillars_done_session
-                    and self._pillars_attempts < SCAN_AUTO_ATTEMPTS and not b.work.locked()):
-                self._pillars_attempts += 1
-                result = await pillar.scan("démarrage")  # une fois par connexion, après les modèles (lecture seule)
-                self._pillars_done_session = not result.get("error")
+            await self._startup_reads()
             return None
         if screen == "universes":
             return await self._pick_universe()
@@ -250,6 +246,36 @@ class ConnectionSupervisor:
             b.log(f"Écran non reconnu depuis {UNKNOWN_SCREEN_SECONDS} s : retour à la page de départ.", "warn")
             await b._page.goto(b._settings.login_url, wait_until="domcontentloaded", timeout=30_000)
         return "écran du site non reconnu"
+
+    async def _startup_reads(self) -> None:
+        """Lectures faites une fois par connexion, dans l'ordre : planètes, modèles de vaisseaux, Piliers, effectifs
+        (population, bâtiments) et modèles d'exploration. Chacune est tentée au plus SCAN_AUTO_ATTEMPTS fois ; les
+        suivantes attendent que les planètes soient connues, car les fonctionnalités s'appuient sur ces données."""
+        b = self.bot
+        if not self._scan_done_session and self._scan_attempts < SCAN_AUTO_ATTEMPTS and not b.work.locked():
+            self._scan_attempts += 1
+            await self.scan_planets("démarrage")  # une fois par connexion
+        if self._scan_done_session and not self._models_done_session and self._models_attempts < SCAN_AUTO_ATTEMPTS and not b.work.locked():
+            self._models_attempts += 1
+            await self.scan_models("démarrage")  # une fois par connexion, après les planètes
+        pillar = getattr(b, "pillar", None)
+        if (pillar is not None and self._models_done_session and not self._pillars_done_session
+                and self._pillars_attempts < SCAN_AUTO_ATTEMPTS and not b.work.locked()):
+            self._pillars_attempts += 1
+            result = await pillar.scan("démarrage")  # une fois par connexion, après les modèles (lecture seule)
+            self._pillars_done_session = not result.get("error")
+        reader = getattr(b, "inventory_reader", None)
+        if (reader is not None and self._scan_done_session and not self._inventory_done_session
+                and self._inventory_attempts < SCAN_AUTO_ATTEMPTS and not b.work.locked()):
+            self._inventory_attempts += 1
+            result = await reader.refresh("démarrage")  # effectifs de population, niveaux (lecture seule)
+            self._inventory_done_session = not result.get("error") and result.get("source") == "démarrage"
+        explorer = getattr(b, "explorer", None)
+        if (explorer is not None and self._scan_done_session and not self._explo_models_done_session
+                and self._explo_models_attempts < SCAN_AUTO_ATTEMPTS and not b.work.locked()):
+            self._explo_models_attempts += 1
+            result = await explorer.scan_models("démarrage")  # modèles Piliers et Flotte (lecture seule)
+            self._explo_models_done_session = not result.get("error")
 
     def reset_connection(self) -> None:
         """Nouveaux identifiants ou nouvelle demande : les blocages de connexion précédents tombent."""

@@ -8,6 +8,15 @@ from app import human, interruptions
 
 DEVLOG_NAME = "Journal de développement"
 
+STEAM_NAME = "Annonce Steam"
+STEAM_PAGE = """
+<button id="target" onclick="window.hits = (window.hits || 0) + 1">Cible</button>
+<div id="steam" role="dialog" aria-label="Votre empire vous accompagne sur Steam"
+     style="position:fixed;inset:0;background:#000a;z-index:98">
+  <button aria-label="Fermer la transmission" onclick="document.getElementById('steam').remove()">x</button>
+</div>
+"""
+
 PAGE = """
 <button id="target" onclick="window.hits = (window.hits || 0) + 1">Cible</button>
 <div id="devlog" role="dialog" aria-modal="true" aria-label="Devlog d’Aleryos"
@@ -23,7 +32,7 @@ PAGE = """
 """
 
 
-def _run(settings, scenario):
+def _run(settings, scenario, html: str = PAGE):
     """Lance Chromium sur la page de test et exécute `scenario(page, closed)` ; `closed` liste les fermetures notées."""
 
     async def main():
@@ -31,7 +40,7 @@ def _run(settings, scenario):
             browser = await pw.chromium.launch(executable_path=settings.chromium_path, args=["--no-sandbox"])
             try:
                 page = await browser.new_page()
-                await page.set_content(PAGE)
+                await page.set_content(html)
                 closed: list[str] = []
                 await interruptions.install(page, closed.append)
                 return await scenario(page, closed)
@@ -98,3 +107,13 @@ def test_dismiss_never_raises_on_closed_page(settings):
         return await interruptions.dismiss(page)
 
     assert _run(settings, scenario) == []
+
+
+def test_human_click_closes_the_steam_announcement_before_clicking(settings):
+    async def scenario(page, closed):
+        await human.click(page, page.locator("#target"), settings)
+        return await page.evaluate("window.hits || 0"), closed
+
+    hits, closed = _run(settings, scenario, STEAM_PAGE)
+    assert hits == 1  # sans la fermeture, l'annonce aurait reçu le clic
+    assert closed == [STEAM_NAME]
