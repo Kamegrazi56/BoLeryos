@@ -113,7 +113,7 @@ class ConnectionSupervisor:
         self.scanning = True
         try:
             async with self.bot.work:  # jamais en même temps qu'un passage de fonctionnalité
-                planets = await self._reader.list_planets()
+                planets = await self.bot.engine.scan_planets()
         except (Interrupted, GameUiError) as exc:
             self.scan_error = f"Scan impossible : {exc}"
             self.bot.log(f"Scan des planètes impossible : {exc}.", "warn", event=True)
@@ -161,7 +161,7 @@ class ConnectionSupervisor:
         self.scanning_models = True
         try:
             async with self.bot.work:  # jamais en même temps qu'un passage de fonctionnalité
-                models = await self._models_reader.list_models()
+                models = await self.bot.engine.scan_models()
         except (Interrupted, GameUiError) as exc:
             self.models_scan_error = f"Scan impossible : {exc}"
             self.bot.log(f"Scan des modèles impossible : {exc}.", "warn", event=True)

@@ -26,6 +26,9 @@ from playwright.async_api import BrowserContext, Page
 
 from . import human, interruptions
 from .config import Settings
+from .action_log import ActionLog
+from .api_engine import ApiEngine, api_session_from_request
+from .engine import DEFAULT_ENGINE, BrowserEngine, GameEngine, HybridEngine
 from .account import Account
 from .browser_host import BrowserHost
 from .explore import MAX_SNAPSHOTS, SNAPSHOT_JS, Recorder, should_skip_host
@@ -167,6 +170,15 @@ class BotSession:
         self.builder = ConstructionPass(self)  # lancement des constructions (clic sur « Améliorer »)
         self.inventory = InventoryStore(settings.data_dir)  # niveaux des bâtiments de chaque planète (Empire › Inventaire)
         self.inventory_reader = InventoryReader(self, self.inventory)  # relevé de l'inventaire (lecture seule)
+        self.action_log = ActionLog()  # actions envoyées par la page au serveur du jeu (observation, voir action_log.py)
+        self.api_session: dict | None = None  # en-têtes d'authentification repris du navigateur pour le moteur « api » (jamais journalisés)
+        browser_engine = BrowserEngine(self.supervisor._reader, self.supervisor._models_reader, self.inventory_reader)
+        api_engine = ApiEngine(self)
+        self._engines = {
+            "browser": browser_engine,
+            "hybrid": HybridEngine(browser_engine, api_engine, lambda message: self.log(message, "warn")),
+            "api": api_engine,
+        }
         self.researches = ResearchSettings(settings.data_dir)  # liste d'objectifs de recherche + planète chargée des recherches
         self.researcher = ResearchPass(self)  # lancement des recherches (clic sur « Rechercher »)
         self.populations = PopulationSettings(settings.data_dir)  # lignes de recrutement de population (mode, quantité, planète)
@@ -217,6 +229,11 @@ class BotSession:
         self._snapshot_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------ état
+    @property
+    def engine(self) -> GameEngine:
+        """Moteur de cette instance (préférence « engine » ; Chromium piloté par défaut)."""
+        return self._engines.get(self.supervisor.prefs.get()["engine"]) or self._engines[DEFAULT_ENGINE]
+
     def reset_failures(self, feature_id: str) -> None:
         """Remet à zéro les lancements non confirmés d'une fonctionnalité (appelé quand l'utilisateur la réactive)."""
         passes = {"constructions": self.builder, "researches": self.researcher, "populations": self.recruiter,
@@ -539,6 +556,7 @@ class BotSession:
             self._page, lambda name: self.log(f"Fenêtre « {name} » fermée automatiquement.", event=True)
         )
         self._context.on("response", self._on_response)
+        self._context.on("request", self._on_request)
         self._page.on("websocket", self._on_websocket)
         self._page.on("framenavigated", self._on_navigated)
         if self.display is None:
@@ -966,6 +984,15 @@ class BotSession:
                 await page.keyboard.press(key)
 
     # ------------------------------------------------ exploration de la structure
+    def _on_request(self, request) -> None:
+        """Retient la session que la page utilise vers l'API de l'univers (pour le moteur « api »). Aucun contenu n'est lu."""
+        try:
+            session = api_session_from_request(request.url, dict(request.headers))
+        except Exception:  # noqa: BLE001 - jamais gênant pour la navigation
+            return
+        if session is not None:
+            self.api_session = session
+
     async def _on_response(self, response) -> None:
         rec = self._recorder
         if not rec.enabled:
@@ -997,8 +1024,15 @@ class BotSession:
         rec = self._recorder
         if should_skip_host(urlsplit(ws.url).hostname):  # écoute attachée même si l'enregistrement est éteint : on peut l'allumer plus tard
             return
-        ws.on("framesent", lambda payload: rec.enabled and rec.add_ws_frame(ws.url, "sent", payload))
-        ws.on("framereceived", lambda payload: rec.enabled and rec.add_ws_frame(ws.url, "received", payload))
+        ws.on("framesent", lambda payload: self._ws_frame(ws.url, "sent", payload))
+        ws.on("framereceived", lambda payload: self._ws_frame(ws.url, "received", payload))
+
+    def _ws_frame(self, url: str, direction: str, payload) -> None:
+        """Image WebSocket de la page : au journal des actions, et à l'enregistrement de structure s'il est allumé."""
+        if "-api.aleryos.com" in url:
+            (self.action_log.sent if direction == "sent" else self.action_log.received)(payload)
+        if self._recorder.enabled:
+            self._recorder.add_ws_frame(url, direction, payload)
 
     def _on_navigated(self, frame) -> None:
         """Prend un cliché de la page 1,5 s après chaque navigation, quand l'enregistrement est actif."""
@@ -1117,6 +1151,8 @@ class BotSession:
             self._capture_task = None
         context, self._context = self._context, None
         self._page = None
+        self.api_session = None  # le jeton du contexte fermé ne doit pas survivre
+        self.action_log.clear()
         if context is not None:
             try:
                 await context.close()

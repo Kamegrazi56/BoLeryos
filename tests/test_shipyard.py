@@ -53,6 +53,7 @@ def test_manual_scan_lists_the_models_with_their_type_and_count(game_client):
     assert [m["name"] for m in data["models"]] == MODELS
     assert [m["kind"] for m in data["models"]] == ["militaire", "militaire", "civil"]
     assert data["models"][0]["owned"] == 47
+    assert {m["planet"] for m in data["models"]} == {data["models"][0]["planet"]} and data["models"][0]["planet"]  # effectifs d'UNE planète, nommée
     assert data["source"] == "manuel" and data["scanned_at"] and data["error"] == "" and data["known"] == MODELS
     assert _bot(game_client).supervisor.prefs.get()["catalog"]["models"] == sorted(MODELS)
 

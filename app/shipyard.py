@@ -256,8 +256,14 @@ class ModelScanner(ConstructionPass):
                 if cards:
                     break
                 await asyncio.sleep(0.25)
+        # Les effectifs affichés sont ceux de la planète active du jeu (pas du joueur entier) : on garde son nom pour que
+        # le relevé ne soit pas pris pour un total (le même modèle donne 0 sur une planète et 1 583 sur une autre).
+        try:
+            planet = await self._current_planet()
+        except GameUiError:
+            planet = ""
         models = []
         for card in cards:
             owned = parse_count(card.get("owned"))
-            models.append({"name": card["name"], "kind": card["kind"].lower(), "owned": owned})
+            models.append({"name": card["name"], "kind": card["kind"].lower(), "owned": owned, "planet": planet})
         return models

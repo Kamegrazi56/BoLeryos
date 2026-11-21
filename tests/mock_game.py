@@ -249,7 +249,8 @@ const ui = {tab: 'Assaut', ship: 'Assemblages', way: 'Piliers', mission: 'ATTAQU
             empireTab: 'dash', form: {target: '', units: {}, copies: '1', duration: '1', hours: 6, mira: false, foreuse: '1', mineur: ''}};
 (() => { const q = new URLSearchParams(location.search); if (q.get('mission')) ui.mission = q.get('mission'); if (q.get('method')) ui.way = q.get('method') === 'FLEET' ? 'Flotte' : 'Piliers'; })();
 const CK = {Fer: 'F', Cristal: 'C', 'Éther': 'E'};
-const costLeaves = (c) => Object.entries(c).map(([k, v]) => `<span>${CK[k]}: ${kfmt(v)}</span>`).join('');
+// cost_labels : vrai jeu du 21/11, le coût s'affiche « Fer » puis « 899 » (deux textes) au lieu de « F: 899 »
+const costLeaves = (c) => Object.entries(c).map(([k, v]) => (state.cost_labels ? `<span>${k}</span><span>${kfmt(v)}</span>` : `<span>${CK[k]}: ${kfmt(v)}</span>`)).join('');
 function prodCard(it, verb) {
   const short = it.name === 'Faisceau de Verrouillage' ? 'Faisceau de Verrou' : it.name;
   return `<div class="card"><div class="badge"><span>${int(it.owned)}</span></div><h3>${it.name}</h3><div><span>ATQ</span><span>14</span></div>`
@@ -263,7 +264,7 @@ function prodMain(p, s) {
     const queue = p.prod.filter((i) => i.queue > 0).map((i) => `<div><span>${i.name}</span><span>x${i.queue}</span></div>`).join('');
     const tabs = ['Assaut', 'Logistique', 'Administration', 'Hôpital'].map((t) => `<button role="tab" class="tab" data-tab="${t}">${t}</button>`).join('');
     const cards = items('population').filter((i) => i.tab === ui.tab).map((i) => prodCard(i, 'Recruter')).join('');
-    return '<h2>Population</h2><div>' + tabs + '</div><div data-testid="queue-operation-units"><span>Production d’unités</span>' + queue + '</div>'
+    return '<h2>Population</h2><div>' + tabs + '</div><div><div data-testid="queue-operation-units"><span>Production d’unités</span></div>' + queue + '</div>'
       + '<div data-testid="population-grid"><div class="card"><div class="badge"><span>2 507 383</span></div><h3>Soldat</h3></div>' + cards + '</div>';
   }
   if (s === 'specialized') {
@@ -540,14 +541,15 @@ function render() {
   if (isProd) cards = '';
   else if (s === 'tech') cards = state.tech.filter((t) => t.tab === ui.techTab).map((t) => techCard(p, t, state.research_busy)).join('');
   else cards = p.buildings.filter((b) => b.section === s).map((b) => card(p, b, 'build', p.busy)).join('');
-  const planets = state.planets.map((pl, i) => `<button class="pl" data-i="${i}"><span>${pl.name}</span><span>${pl.coords}</span>`
-    + `<span>${md(pl.stocks.Fer)}</span><span>${md(pl.stocks.Cristal)}</span><span>${md(pl.stocks['Éther'])}</span></button>`).join('');
+  const rowTag = state.planet_rows ? 'div' : 'button'; // planet_rows : entrées qui ne sont pas des boutons (vrai jeu, 20/11)
+  const planets = state.planets.map((pl, i) => `<${rowTag} class="pl" data-i="${i}"><span>${pl.name}</span><span>${pl.coords}</span>`
+    + `<span>${md(pl.stocks.Fer)}</span><span>${md(pl.stocks.Cristal)}</span><span>${md(pl.stocks['Éther'])}</span></${rowTag}>`).join('');
   document.getElementById('root').innerHTML =
     '<div class="launcher"><button id="open-planets"><span class="sr-only">Planètes / Favoris / Piliers</span></button><button hidden><span class="sr-only">Planètes</span></button><button><span class="sr-only">Capteurs</span><span class="game-utility-badge game-utility-badge--fleet">' + state.movements.length + '</span></button>'
     + '<button><span class="sr-only">Chat</span></button><button><span class="sr-only">Favoris</span></button></div>'
     + `<div class="planet"><span>${p.name}</span><span>${p.coords}</span></div>`
     + `<button type="button" id="planet-btn" aria-label="Sélectionner la planète active"><span>${p.name}</span><span>${p.coords}</span></button>`
-    + `<div id="navlist" ${navOpen ? '' : 'hidden'}><span>Navigation</span>${state.planets.map((pl, i) => `<button type="button" class="npl" data-i="${i}"><span>${pl.name}</span><span>${pl.coords}</span></button>`).join('')}</div>`
+    + `<div id="navlist" ${navOpen ? '' : 'hidden'}><span>Navigation</span>${state.planets.map((pl, i) => `<${rowTag} class="npl" data-i="${i}"><span>${pl.name}</span><span>${pl.coords}</span></${rowTag}>`).join('')}</div>`
     + `<div class="res"><div aria-label="FER : ${big(p.stocks.Fer)}"><span>${big(p.stocks.Fer)}</span><span>FER</span></div><div aria-label="CRISTAL : ${big(p.stocks.Cristal)}"><span>${big(p.stocks.Cristal)}</span><span>CRISTAL</span></div>`
     + `<div aria-label="ÉTHER : ${big(p.stocks['Éther'])}"><span>${big(p.stocks['Éther'])}</span><span>ÉTHER</span></div><div><span>${int(p.energy)}</span><span>ÉNERGIE</span></div>`
     + '<div><span>4 808</span><span>ASTRIUM</span></div><div><span>492</span><span>ÉCHOS</span></div></div>'
@@ -1149,7 +1151,7 @@ def create_mock_game() -> FastAPI:
         app.state.game = initial_state()
         patch = await request.json() if (await request.body()) else {}
         g = app.state.game
-        for key in ("close_on_select", "no_debit", "popup_after_click", "require_auth", "slow_build", "slow_tabs", "wipe_target", "empire_reversed"):
+        for key in ("close_on_select", "no_debit", "popup_after_click", "require_auth", "slow_build", "slow_tabs", "wipe_target", "empire_reversed", "planet_rows", "cost_labels"):
             if key in patch:
                 g[key] = patch[key]
         for index, levels in (patch.get("levels") or {}).items():  # niveaux de bâtiments imposés : {index de planète: {nom: niveau}}

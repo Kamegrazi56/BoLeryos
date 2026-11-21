@@ -15,6 +15,7 @@ let saveTimer = null;
 async function savePreferences() {
   const body = {
     universe: $("universe").value.trim(),
+    engine: $("engine").value,
     login_delay: { min_seconds: Number($("login-delay-min").value), max_seconds: Number($("login-delay-max").value) },
   };
   try {
@@ -35,11 +36,12 @@ async function loadPreferences() {
     const names = [...new Set([...(p.catalog.universes || []), p.universe].filter(Boolean))];
     $("universe-list").replaceChildren(...names.map((n) => el("option", { value: n })));
     if (document.activeElement !== $("universe")) $("universe").value = p.universe || "";
+    if (document.activeElement !== $("engine") && [...$("engine").options].some((o) => o.value === p.engine)) $("engine").value = p.engine;
     if (document.activeElement !== $("login-delay-min")) $("login-delay-min").value = p.login_delay.min_seconds;
     if (document.activeElement !== $("login-delay-max")) $("login-delay-max").value = p.login_delay.max_seconds;
   } catch { /* le bot redémarre : on réessaie */ }
 }
-["universe", "login-delay-min", "login-delay-max"].forEach((id) => {
+["universe", "engine", "login-delay-min", "login-delay-max"].forEach((id) => {
   $(id).addEventListener($(id).type === "number" ? "input" : "change", () => {
     if ($(id).value === "" && $(id).type === "number") return;
     scheduleSave();

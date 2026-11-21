@@ -315,3 +315,36 @@ def test_two_recruitments_in_a_row_without_a_debit_disable_the_feature(game_clie
     assert bot.scheduler.store.get("populations")["enabled"] is False
     logs = [e["msg"] for e in game_client.get("/api/status?limit=200").json()["logs"]]
     assert any("débit des ressources n'a pas été constaté" in line for line in logs)
+
+
+def test_a_queue_listed_next_to_its_title_is_counted(game_client, game):
+    """Vrai jeu (20/11) : le bloc « Production d'unités » ne porte que le titre, les lignes « nom xN » sont à côté. Le faux jeu
+    a la même structure : l'effectif en file doit être lu pour confirmer un recrutement sans dépendre des stocks."""
+    _scan(game_client)
+    _set(game_client, [_line("rempart-de-fer", "fixed", 100, CONCORDE)])
+    assert "100 × Rempart de Fer" in _run(game_client)
+
+    async def queued():
+        return (await _bot(game_client).recruiter._read_pop_cards())["rempart de fer"].queued
+
+    assert game_client.portal.call(queued) == 100
+
+
+def test_a_line_skipped_because_of_a_running_training_says_why(game_client, game):
+    """Vrai jeu (21/11) : « 1 ligne sans rien à faire » sans raison ; le journal doit dire pourquoi rien n'est lancé."""
+    _scan(game_client)
+    game.set_prod(0, "Rempart de Fer", queue=5)  # 8-50-Concorde : un entraînement est déjà en cours
+    _set(game_client, [_line("rempart-de-fer", "fixed", 100, CONCORDE)])
+    _run(game_client)
+    logs = [e["msg"] for e in game_client.get("/api/status?limit=200").json()["logs"]]
+    assert any("Rempart de Fer" in m and "5 déjà en cours d'entraînement" in m for m in logs)
+    assert _recruited(game) == []
+
+
+def test_costs_shown_as_a_label_then_an_amount_are_read_and_recruited(game_client, game):
+    """Vrai jeu (21/11) : la carte affiche « Fer » puis « 899 » au lieu de « F: 899 » ; le coût était « illisible », rien n'était recruté."""
+    game.reset(cost_labels=True)
+    _scan(game_client)
+    _set(game_client, [_line("rempart-de-fer", "fixed", 7, CONCORDE)])
+    assert "7 × Rempart de Fer sur 8-50-Concorde" in _run(game_client)
+    assert _recruited(game) == [(CONCORDE, "Rempart de Fer", 7)]

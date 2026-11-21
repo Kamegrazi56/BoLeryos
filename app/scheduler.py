@@ -17,6 +17,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
+from .engine import describe_unsupported
 from .features import Feature, FeatureStore
 
 TICK_SECONDS = 1.0  # fréquence à laquelle l'ordonnanceur regarde si une fonctionnalité est due
@@ -152,6 +153,9 @@ class Scheduler:
     async def _attempt(self, feature: Feature) -> tuple[str, bool]:
         """Un essai du passage : bonus d'activité au début, puis la fonctionnalité."""
         try:
+            engine = getattr(self.bot, "engine", None)
+            if engine is not None and not engine.supports(feature.id):  # moteur de l'instance sans cette fonctionnalité
+                return describe_unsupported(engine, feature.label), True
             claim = getattr(self.bot, "claim_bonus", None)
             if claim is not None:  # bonus d'activité récupéré au début de chaque action, quelle que soit la planète
                 await claim()

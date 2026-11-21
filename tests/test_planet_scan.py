@@ -1,6 +1,7 @@
 """Scan des planètes : à la demande (page Compte et univers) et tout seul une fois par connexion."""
 
-from app.planets import GameUiError
+from app import planets
+from app.planets import GameUiError, describe_diagnostic
 from app.bot import State
 
 MOCK_PLANETS = ["8-50-Concorde", "6-79-Egide", "9-169-Strate"]
@@ -95,3 +96,35 @@ def test_automatic_scan_gives_up_after_three_attempts_and_the_bot_stays_usable(g
     for _ in range(AUTO_ATTEMPTS + 2):
         assert _ensure_ready(game_client) is None
     assert len(calls) == AUTO_ATTEMPTS
+
+
+def test_diagnostic_sentence_has_only_counts_and_tab_names():
+    info = {"buttons": 12, "coordLeaves": 0, "coordInButtons": 0, "tabs": ["Favoris", "Piliers"], "dialogs": 1}
+    assert describe_diagnostic(info) == "12 boutons, 0 coordonnées vues dont 0 dans un bouton, onglets : Favoris, Piliers, fenêtres : 1"
+    assert describe_diagnostic(None) == "page illisible"
+
+
+def test_a_scan_that_finds_nothing_says_what_the_page_contained(game_client, monkeypatch):
+    monkeypatch.setattr(planets, "READ_PLANETS_JS", "() => []")  # la lecture ne trouve jamais la liste
+    data = game_client.post("/api/planets/scan").json()
+    assert data["planets"] == []
+    assert "ne s'affiche pas (" in data["error"] and "boutons" in data["error"] and "onglets" in data["error"]
+
+
+def test_planets_listed_as_rows_instead_of_buttons_are_read_too(game, settings):
+    """Vrai jeu (20/11) : les entrées de la liste ne sont plus des boutons, mais le scan doit les lire."""
+    from dataclasses import replace
+
+    from fastapi.testclient import TestClient
+
+    from app.bot import State
+    from app.main import create_app
+
+    game.reset(planet_rows=True)
+    with TestClient(create_app(replace(settings, login_url=game.url + "/game/asterion/buildings"))) as client:
+        bot = client.app.state.bot
+        client.portal.call(bot.ensure_started)
+        bot._set(State.LOGGED_IN, "test")
+        data = client.post("/api/planets/scan").json()
+    assert [p["name"] for p in data["planets"]] == MOCK_PLANETS and data["error"] == ""
+    assert data["planets"][0]["coords"] == "Z25 95 16" and data["planets"][0]["fer"] is not None

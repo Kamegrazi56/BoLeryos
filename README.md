@@ -170,3 +170,12 @@ python -m pytest
 ```
 
 Les tests utilisent un faux site de connexion local (`tests/mock_site.py`) : aucune tentative n'est envoyée au vrai site.
+
+
+## Moteur de lecture (Réglages › Compte et univers)
+Chaque instance a son moteur :
+- **Navigateur** (par défaut) : le bot lit chaque page du jeu et clique dessus, dans Chromium.
+- **Hybride** : il lit l'état du jeu directement par l'API de l'univers (planètes, modèles, bâtiments, effectifs), sans ouvrir de page, avec la session du navigateur ; les niveaux de recherche et toutes les **actions** restent dans Chromium. Si l'API ne répond pas, la lecture retombe sur le navigateur et le journal le dit.
+- **API seule** (diagnostic, choisie par l'API `PUT /api/preferences`, pas dans l'interface) : lecture seule, aucune fonctionnalité d'action.
+
+**Pourquoi pas d'actions par l'API :** le serveur du jeu refuse (HTTP 403, Cloudflare) la connexion WebSocket d'un client qui n'est pas son navigateur ; ce refus est respecté, pas contourné. Chromium reste donc nécessaire : le gain de mémoire est limité (plus de page de lecture à ouvrir), pas de retrait de Chromium. Détails : [`docs/API-PROTOCOL.md`](docs/API-PROTOCOL.md).

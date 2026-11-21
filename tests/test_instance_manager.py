@@ -79,6 +79,30 @@ def test_create_refuses_a_second_instance_on_the_same_server(settings, tmp_path)
     assert err.value.status == 409
 
 
+def test_the_server_chosen_after_creation_counts_as_used(settings, tmp_path):
+    """L'instance d'origine naît sans serveur ; celui que le joueur choisit ensuite doit bloquer une 2e instance dessus."""
+    manager = _manager(settings, tmp_path)  # instance « principale », sans serveur, démarrée
+    manager.resolve().supervisor.prefs.update({"universe": "Asterion"})
+    summary = manager.summary()
+    assert summary["instances"][0]["universe"] == "Asterion"
+    with pytest.raises(InstanceError) as err:
+        manager.create(" asterion ")
+    assert err.value.status == 409
+    manager.universes = ["Asterion", "Kael"]
+    assert {u["name"]: u["used"] for u in manager.summary()["universes"]} == {"Asterion": True, "Kael": False}
+
+
+def test_the_server_of_a_stopped_instance_is_read_from_its_preferences(settings, tmp_path, no_browser):
+    manager = _manager(settings, tmp_path)
+    info = manager.create("Orion")
+    asyncio.run(manager.start(info["id"]))
+    manager.resolve(info["id"]).supervisor.prefs.update({"universe": "Kael"})
+    asyncio.run(manager.stop(info["id"]))
+    assert [i["universe"] for i in manager.summary()["instances"]] == ["", "Kael"]
+    with pytest.raises(InstanceError):
+        manager.create("Kael")
+
+
 def test_create_refuses_beyond_the_maximum(settings, tmp_path):
     manager = _manager(settings, tmp_path, max_instances=2)
     manager.create("Orion")

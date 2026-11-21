@@ -19,21 +19,61 @@ from .numbers import parse_amount
 # le rend invalide.
 PLANETS_LAUNCHER_RE = re.compile(r"^Planètes(\s.*)?$")
 
-# Liste des planètes (fenêtre ouverte) : chaque entrée est un bouton « nom, coordonnées, stocks ».
+# Liste des planètes (fenêtre ouverte) : chaque entrée contient « nom, coordonnées, stocks » (bouton, lien ou ligne).
 READ_PLANETS_JS = """
 () => {
   const text = (el) => (el.textContent || '').replace(/\\s+/g, ' ').trim();
   const COORD = /^[A-Z]\\d{2} \\d{2} \\d{2}$/;
-  const out = [];
-  for (const b of document.querySelectorAll('button')) {
-    const leaves = [...b.querySelectorAll('*')].filter((el) => el.children.length === 0 && text(el) !== '');
-    const ci = leaves.findIndex((el) => COORD.test(text(el)));
-    if (ci < 1 || leaves.length < 5) continue;
-    out.push({ name: text(leaves[ci - 1]), coords: text(leaves[ci]), stocks: leaves.slice(ci + 1, ci + 4).map(text) });
+  const leavesOf = (root) => [...root.querySelectorAll('*')].filter((el) => el.children.length === 0 && text(el) !== '');
+  const isCoord = (el) => COORD.test(text(el));
+  const out = [], seen = new Set();
+  for (const coord of leavesOf(document).filter(isCoord)) {
+    // L'entrée d'une planète = le plus grand ancêtre (6 niveaux au plus) qui ne contient que ces coordonnées-là :
+    // bouton, lien ou ligne, la balise n'a pas d'importance.
+    let best = null;
+    for (let node = coord.parentElement, depth = 0; node && depth < 6; node = node.parentElement, depth++) {
+      const leaves = leavesOf(node);
+      if (leaves.filter(isCoord).length !== 1 || leaves.length > 12) break;
+      best = leaves;
+    }
+    const ci = best ? best.indexOf(coord) : -1;
+    if (ci < 1 || best.length < 5) continue;
+    const entry = { name: text(best[ci - 1]), coords: text(coord), stocks: best.slice(ci + 1, ci + 4).map(text) };
+    const key = entry.name + '|' + entry.coords;
+    if (!seen.has(key)) { seen.add(key); out.push(entry); }
   }
   return out;
 }
 """
+
+
+# Diagnostic quand la liste ne s'affiche pas : que des comptes et des libellés d'onglets (jamais de noms, de coordonnées
+# ni de stocks), pour comprendre ce que la page contient sans exposer les données du joueur.
+DIAGNOSE_JS = """
+() => {
+  const text = (el) => (el.textContent || '').replace(/\\s+/g, ' ').trim();
+  const COORD = /^[A-Z]\\d{2} \\d{2} \\d{2}$/;
+  const leaves = (root) => [...root.querySelectorAll('*')].filter((el) => el.children.length === 0 && text(el) !== '');
+  const buttons = [...document.querySelectorAll('button')];
+  const coordLeaves = leaves(document).filter((el) => COORD.test(text(el)));
+  return {
+    buttons: buttons.length,
+    coordLeaves: coordLeaves.length,
+    coordInButtons: buttons.filter((b) => leaves(b).some((el) => COORD.test(text(el)))).length,
+    tabs: buttons.map(text).filter((t) => /^(Planètes|Favoris|Piliers)$/.test(t)),
+    dialogs: document.querySelectorAll('[role=dialog]').length,
+  };
+}
+"""
+
+
+def describe_diagnostic(info: dict | None) -> str:
+    """Phrase courte pour le journal et le message d'erreur du scan."""
+    if not info:
+        return "page illisible"
+    tabs = ", ".join(info.get("tabs") or []) or "aucun"
+    return (f"{info.get('buttons', '?')} boutons, {info.get('coordLeaves', '?')} coordonnées vues dont "
+            f"{info.get('coordInButtons', '?')} dans un bouton, onglets : {tabs}, fenêtres : {info.get('dialogs', '?')}")
 
 
 class GameUiError(Exception):
@@ -98,7 +138,13 @@ class PlanetsReader:
             if planets:
                 return planets
             await asyncio.sleep(0.25)
-        raise GameUiError("la liste des planètes ne s'affiche pas")
+        raise GameUiError(f"la liste des planètes ne s'affiche pas ({await self._diagnose()})")
+
+    async def _diagnose(self) -> str:
+        try:
+            return describe_diagnostic(await self.page.evaluate(DIAGNOSE_JS))
+        except Exception:  # noqa: BLE001 - le diagnostic ne doit jamais masquer l'erreur d'origine
+            return "diagnostic indisponible"
 
     async def _close_window(self) -> None:
         close = self.page.get_by_role("button", name="Fermer", exact=True).first

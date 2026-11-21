@@ -30,6 +30,19 @@ FILE_NAME = "inventory.json"
 TAB_NAME = "Inventaire"
 READ_ATTEMPTS = 40  # le tableau arrive un instant après le clic sur l'onglet
 READ_POLL_SECONDS = 0.25
+RECLICK_AFTER = 12  # lectures sans tableau avant de recliquer une fois sur l'onglet (le premier clic peut ne pas avoir pris)
+
+# Ce que la page contient quand le tableau manque : état des onglets et nombre de tableaux (aucun texte de jeu).
+DIAGNOSE_INVENTORY_JS = r"""
+() => {
+  const text = (e) => (e.textContent || '').replace(/\s+/g, ' ').trim();
+  const tabs = [...document.querySelectorAll('[role=tab]')].filter((t) => t.getClientRects().length)
+    .map((t) => text(t) + '=' + (t.getAttribute('aria-selected') ?? 'aucun'));
+  const tables = [...document.querySelectorAll('table')];
+  return { tabs, tables: tables.length, visible: tables.filter((t) => t.getClientRects().length).length,
+           heads: tables.filter((t) => t.tHead).length, grids: document.querySelectorAll('[role=grid], [role=table]').length };
+}
+"""
 TAB_WAIT_SECONDS = 5.0
 
 # Le tableau visible dont la première colonne est « Objet » : en-tête (texte + feuilles de chaque cellule) et lignes (texte
@@ -207,7 +220,9 @@ class InventoryReader(ConstructionPass):
         await self._goto("empire")  # l'univers est celui de la page courante
         await self._open_inventory_tab()
         problem = "tableau absent"
-        for _ in range(READ_ATTEMPTS):
+        for attempt in range(READ_ATTEMPTS):
+            if attempt == RECLICK_AFTER:
+                await self._reclick_tab()
             raw = await self._eval(READ_INVENTORY_JS)
             if raw:
                 try:
@@ -215,7 +230,21 @@ class InventoryReader(ConstructionPass):
                 except GameUiError as exc:
                     problem = str(exc)
             await asyncio.sleep(READ_POLL_SECONDS)
-        raise GameUiError(f"l'inventaire ne s'affiche pas ({problem})")
+        raise GameUiError(f"l'inventaire ne s'affiche pas ({problem} ; page : {await self._diagnose()})")
+
+    async def _reclick_tab(self) -> None:
+        tab = self.page.get_by_role("tab", name=TAB_NAME, exact=True)
+        if await tab.count():
+            await self._guard()
+            await human.click(self.page, tab.first, self.settings)
+
+    async def _diagnose(self) -> str:
+        try:
+            info = await self.page.evaluate(DIAGNOSE_INVENTORY_JS)
+        except Exception:  # noqa: BLE001 - le diagnostic ne doit jamais masquer l'erreur d'origine
+            return "diagnostic indisponible"
+        return (f"onglets {', '.join(info['tabs']) or 'aucun'} ; {info['tables']} tableau(x) dont {info['visible']} visible(s), "
+                f"{info['heads']} avec en-tête, {info['grids']} grille(s) ARIA")
 
     async def update(self, source: str) -> list[dict] | None:
         """Relit et enregistre ; rend les planètes qui viennent d'être lues, ou None si la lecture a échoué (l'ancien tableau
@@ -223,7 +252,7 @@ class InventoryReader(ConstructionPass):
         journalisé) ; seule une interruption (contrôle manuel…) remonte."""
         was_reading, self.reading = self.reading, True
         try:
-            planets, researches = await self.read()
+            planets, researches = await self.bot.engine.read_inventory()
         except Interrupted:
             raise
         except Exception as exc:  # GameUiError, mais aussi erreur Playwright (navigation lente, page rechargée…) : jamais fatal

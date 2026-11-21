@@ -440,3 +440,14 @@ def test_a_failing_inventory_reading_does_not_stop_the_constructions(game_client
     assert "2 construction(s) lancée(s)" in summary  # le passage continue comme avant
     inventory = game_client.get("/api/constructions").json()["inventory"]
     assert inventory["planets"] == [] and "tableau cassé" in inventory["error"]
+
+
+def test_a_missing_table_says_what_the_page_contained(game_client, monkeypatch):
+    """Sans tableau, l'erreur décrit la page (onglets, tableaux) au lieu de « tableau absent » tout court."""
+    from app import inventory
+
+    monkeypatch.setattr(inventory, "READ_INVENTORY_JS", "() => null")
+    monkeypatch.setattr(inventory, "READ_ATTEMPTS", 14)  # assez pour déclencher le second clic sur l'onglet (RECLICK_AFTER)
+    monkeypatch.setattr(inventory, "READ_POLL_SECONDS", 0.01)
+    error = _refresh(game_client)["error"]
+    assert "tableau absent ; page : onglets" in error and "tableau(x)" in error

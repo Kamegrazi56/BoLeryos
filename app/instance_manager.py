@@ -126,6 +126,18 @@ class InstanceManager:
                 return info
         raise InstanceError("Instance inconnue.", 404)
 
+    def _universe_of(self, info: dict) -> str:
+        """Serveur réellement visé par l'instance : celui de ses préférences (le joueur peut le choisir après la création,
+        l'instance d'origine n'en avait aucun), à défaut celui du registre."""
+        bot = self._bots.get(info["id"])
+        if bot is not None:
+            chosen = bot.supervisor.prefs.get()["universe"]
+        elif self._root is not None:
+            chosen = Preferences(str(instance_dir(str(self._root), info["id"]))).get()["universe"]
+        else:
+            chosen = ""
+        return chosen or info["universe"]
+
     @property
     def default_id(self) -> str | None:
         return self._infos[0]["id"] if self._infos else None
@@ -205,7 +217,7 @@ class InstanceManager:
         universe = (universe or "").strip()
         if not universe or len(universe) > MAX_UNIVERSE_LENGTH:
             raise InstanceError("Choisissez un serveur.")
-        if any(norm(i["universe"]) == norm(universe) for i in self._infos):
+        if any(norm(self._universe_of(i)) == norm(universe) for i in self._infos):
             raise InstanceError("Ce serveur a déjà une instance : le jeu n'accepte qu'une session par serveur.", 409)
         if len(self._infos) >= self._settings.max_instances:
             raise InstanceError(f"Nombre maximal d'instances atteint ({self._settings.max_instances}).", 409)
@@ -307,7 +319,7 @@ class InstanceManager:
 
     # ------------------------------------------------------------------ état
     def summary(self) -> dict:
-        used = {norm(i["universe"]) for i in self._infos}
+        used = {norm(self._universe_of(i)) for i in self._infos}
         lobby = self._lobby
         return {
             "default": self.default_id,
@@ -324,7 +336,7 @@ class InstanceManager:
 
     def _describe(self, info: dict) -> dict:
         bot = self._bots.get(info["id"])
-        out = {**info, "running": bot is not None, "state": "stopped", "message": "", "page": "", "in_game": False,
+        out = {**info, "universe": self._universe_of(info), "running": bot is not None, "state": "stopped", "message": "", "page": "", "in_game": False,
                "bot_on": False, "connection": ""}
         if bot is not None:
             status = bot.status()

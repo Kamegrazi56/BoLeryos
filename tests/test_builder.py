@@ -252,3 +252,79 @@ def test_two_launches_in_a_row_without_a_debit_disable_the_feature(game_client, 
     assert bot.scheduler.store.get("constructions")["enabled"] is False
     logs = [e["msg"] for e in game_client.get("/api/status?limit=200").json()["logs"]]
     assert any("débit des ressources n'a pas été constaté" in line for line in logs)
+
+
+# ------------------------------------------------------------------ contrôle du débit avec une forte production
+def test_a_debit_is_seen_when_the_stock_drops_by_the_expected_cost():
+    assert builder.debit_seen(1_000.0, 500.0, 400.0)
+    assert not builder.debit_seen(1_000.0, 1_000.0, 400.0)
+
+
+def test_a_debit_hidden_by_the_production_is_still_seen():
+    """Vrai jeu (Asterion) : la production gagne plus en 8 s que ne coûtent 10 recrues, le stock affiché monte malgré le débit."""
+    was, now, cost = 575_700_000.0, 575_850_000.0, 100_000.0
+    assert not builder.debit_seen(was, now, cost)  # sans tenir compte de la production : « non constaté »
+    assert builder.debit_seen(was, now, cost, rate=30_000.0, elapsed=8.0)  # sans dépense il aurait monté de 240 000 ; il n'a monté que de 150 000 : 90 000 ont été dépensés
+
+
+def test_no_debit_is_still_refused_when_the_production_explains_the_whole_rise():
+    assert not builder.debit_seen(1_000_000.0, 1_240_000.0, 100_000.0, rate=30_000.0, elapsed=8.0)
+
+
+def test_the_production_rate_is_measured_before_the_click(monkeypatch):
+    import asyncio
+
+    reads = iter([{"Fer": 1_000.0, "Cristal": None}, {"Fer": 1_500.0, "Cristal": None}])
+    monkeypatch.setattr(builder, "RATE_PROBE_SECONDS", 0.05)
+    page = builder.ConstructionPass(None)
+
+    async def fake_stocks():
+        return next(reads)
+
+    page._stocks = fake_stocks
+    stocks, rates, at = asyncio.run(page._stocks_timed())
+    assert stocks["Fer"] == 1_500.0 and 5_000.0 < rates["Fer"] < 20_000.0 and "Cristal" not in rates and at > 0
+
+
+def test_planets_listed_as_rows_instead_of_buttons_can_be_selected(game_client, game):
+    """Vrai jeu (20/11) : les entrées de la liste des planètes ne sont plus des boutons ; changer de planète doit marcher."""
+    game.reset(planet_rows=True)
+    _scan(game_client)
+    _set(game_client, [MINE, CENTRALE, CASERNE])
+    summary = _run(game_client)
+    assert _launched(game) == [("8-50-Concorde", "Centrale Énergétique", 28), ("6-79-Egide", "Mine de Fer", 41)]
+    assert "2 construction(s) lancée(s)" in summary
+
+
+def test_a_planet_list_that_opens_slowly_is_waited_for(game_client, game, monkeypatch):
+    """Vrai jeu (20/11) : la liste s'ouvre avec une animation, l'entrée peut manquer à la première lecture."""
+    real = builder.MARK_PLANET_ENTRY_JS
+    monkeypatch.setattr(
+        builder, "MARK_PLANET_ENTRY_JS",
+        "(args) => { window.__lookups = (window.__lookups || 0) + 1; if (window.__lookups < 3) return false; return (" + real.strip() + ")(args); }",
+    )
+    _scan(game_client)
+    _set(game_client, [MINE, CENTRALE, CASERNE])
+    assert "2 construction(s) lancée(s)" in _run(game_client)
+    assert _launched(game) == [("8-50-Concorde", "Centrale Énergétique", 28), ("6-79-Egide", "Mine de Fer", 41)]
+
+
+def test_the_planet_list_diagnostic_counts_what_the_page_shows(game_client):
+    async def diagnose():
+        return await _bot(game_client).builder._diagnose_planet_list("Introuvable")
+
+    sentence = game_client.portal.call(diagnose)
+    assert sentence.startswith("nom trouvé 0 fois dont 0 visible(s)") and "coordonnées visibles" in sentence and "sélecteur(s) de planète" in sentence
+
+
+def test_a_planet_list_that_is_already_open_is_not_closed_by_another_click(game_client, game):
+    """Vrai jeu (21/11) : un clic de plus sur le sélecteur refermait la liste, et la planète était « absente de la liste »."""
+    _scan(game_client)
+    _set(game_client, [MINE, CENTRALE, CASERNE])
+
+    async def open_the_list():
+        await _bot(game_client)._page.click("#planet-btn")  # le faux jeu ouvre alors la liste de navigation
+
+    game_client.portal.call(open_the_list)
+    assert "2 construction(s) lancée(s)" in _run(game_client)
+    assert _launched(game) == [("8-50-Concorde", "Centrale Énergétique", 28), ("6-79-Egide", "Mine de Fer", 41)]

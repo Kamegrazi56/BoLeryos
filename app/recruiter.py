@@ -59,8 +59,15 @@ READ_POP_JS = (
     + """
   const DURATION = /^(?:\\d+(?:[.,]\\d+)?\\s*[jdhms]\\s*)+$/i;
   const queue = {};
+  const boxes = new Set();
   document.querySelectorAll('[data-testid="queue-operation-units"]').forEach((q) => {
-    const ls = leaves(q).map(text);
+    // Vrai jeu (20/11) : ce bloc ne porte plus que le titre « Production d'unités » ; les lignes « nom xN » sont dans son
+    // parent. On remonte donc jusqu'au premier bloc qui contient un « xN ».
+    let box = q;
+    for (let d = 0; d < 4 && box.parentElement && !leaves(box).some((e) => /^x\\d+$/i.test(text(e))); d++) box = box.parentElement;
+    if (boxes.has(box)) return;
+    boxes.add(box);
+    const ls = leaves(box).map(text);
     ls.forEach((t, i) => {
       const m = t.match(/^x(\\d+)$/i);
       if (m && i > 0) queue[ls[i - 1]] = (queue[ls[i - 1]] || 0) + parseInt(m[1], 10);
@@ -73,7 +80,15 @@ READ_POP_JS = (
     for (let i = at - 1; i >= 0; i--) { const t = text(ls[i]); if (/^[\\d\\s\\u00a0\\u202f]+$/.test(t)) { owned = t; break; } }
     const costs = {};
     let firstCost = -1;
-    ls.forEach((e, i) => { const m = text(e).match(/^([FCE]):\\s*(.+)$/); if (m) { costs[m[1]] = m[2]; if (firstCost < 0) firstCost = i; } });
+    const LABELS = { fer: 'F', cristal: 'C', 'éther': 'E', ether: 'E' };
+    const AMOUNT = /^[\\d\\s\\u00a0\\u202f.,]+\\s*(?:k|M|G|Md)?$/;
+    ls.forEach((e, i) => {
+      const t = text(e);
+      const m = t.match(/^([FCE]):\\s*(.+)$/);  // ancien affichage : « F: 899 »
+      const letter = m ? m[1] : LABELS[t.toLowerCase()];  // affichage du 21/11 : « Fer » puis « 899 »
+      const amount = m ? m[2] : (letter && i + 1 < ls.length && AMOUNT.test(text(ls[i + 1])) ? text(ls[i + 1]) : null);
+      if (letter && amount !== null) { costs[letter] = amount; if (firstCost < 0) firstCost = i; }
+    });
     let duration = '';
     for (let i = firstCost + 1; firstCost >= 0 && i < ls.length; i++) { if (DURATION.test(text(ls[i]))) { duration = text(ls[i]); break; } }
     const buttons = [...card.querySelectorAll('button')];
@@ -322,8 +337,10 @@ class PopulationPass(ConstructionPass):
         if card.unreadable or not card.costs:
             self.bot.log(f"Population : « {pop.label} » sur {planet} : valeur illisible ({(card.unreadable or ['coût'])[0]}), rien recruté.", "warn", event=True)
             return None
-        if card.queued > 0 or not card.can:
-            return None  # déjà en cours d'entraînement, ou boutons inactifs (rien de payable)
+        if card.queued > 0 or not card.can:  # déjà en cours d'entraînement, ou boutons inactifs (rien de payable)
+            why = f"{card.queued} déjà en cours d'entraînement" if card.queued > 0 else "boutons MAX ou Recruter inactifs (rien de payable ?)"
+            self.bot.log(f"Population : « {pop.label} » sur {planet} : rien lancé ({why}).")
+            return None
         if line["mode"] == "target" and card.owned is None:
             return None
         wanted = self._wanted(line, card)
@@ -344,7 +361,7 @@ class PopulationPass(ConstructionPass):
         try:
             box = page.locator(f"[{TARGET_ATTRIBUTE}]").first
             quantity = box.locator("input[type=number]").first
-            before = await self._stocks()
+            before, self._rates, self._before_at = await self._stocks_timed()
             await human.think(self.settings)
             await human.click(page, box.get_by_role("button", name=re.compile(r"^(MAX|Quantité maximale)", re.I)).first, self.settings)
             await asyncio.sleep(0.3)
@@ -384,7 +401,8 @@ class PopulationPass(ConstructionPass):
         end = time.monotonic() + (builder.CONFIRM_SECONDS if visible else UNVERIFIABLE_WAIT_SECONDS)
         total_before = (card.owned or 0) + card.queued
         while time.monotonic() < end:
-            if visible and was - ((await self._stocks()).get(key) or was) >= expected * builder.CONFIRM_RATIO:
+            now = (await self._stocks()).get(key) if visible else None
+            if now is not None and builder.debit_seen(was, now, expected, self._rates.get(key, 0.0), time.monotonic() - self._before_at):
                 self._confirmed(sentence)
                 return
             seen = (await self._read_pop_cards()).get(norm(pop.label))
@@ -396,7 +414,7 @@ class PopulationPass(ConstructionPass):
             self.bot.log(f"Recrutement lancé : {sentence} (débit trop petit pour être vérifié à l'écran).", event=True, kind="launch")
             return
         self._unconfirmed += 1
-        self.bot.log(f"Clic sur « Recruter » fait ({sentence}) mais le débit des ressources n'a pas été constaté.", "warn", event=True, kind="attention")
+        self.bot.log(f"Clic sur « Recruter » fait ({sentence}) mais le débit des ressources n'a pas été constaté ({self._stock_note(key, was, expected)}).", "warn", event=True, kind="attention")
         if self._unconfirmed >= UNCONFIRMED_LIMIT:
             self.bot.scheduler.update("populations", {"enabled": False})
             self.bot.log("Recrutement de population désactivé : deux lancements de suite non confirmés. Vérifiez à l'écran avant de le réactiver.", "error", event=True, kind="attention")

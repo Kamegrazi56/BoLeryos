@@ -150,7 +150,7 @@
     } else parts.push("Aucun scan pour l'instant : il se fait tout seul dès que le bot est dans la partie.");
     if (scan.error) parts.push(" — ", el("strong", { className: "warn", textContent: scan.error }));
     $("shp-scan-status").replaceChildren(...parts);
-    $("shp-scan-list").replaceChildren(...scan.models.map((m) => el("li", {}, `${m.name} — ${m.kind || "?"}${m.owned === null ? "" : `, en service : ${m.owned}`}`)));
+    $("shp-scan-list").replaceChildren(...scan.models.map((m) => el("li", {}, `${m.name} — ${m.kind || "?"}${m.owned === null ? "" : `, ${m.owned} sur ${m.planet || "la planète affichée"}`}`)));
   }
   async function refreshScan() {
     try { renderScan(await (await fetch("/api/models")).json()); } catch { /* idem */ }

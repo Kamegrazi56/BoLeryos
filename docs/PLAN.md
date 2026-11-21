@@ -36,7 +36,6 @@ Cadre : test de protections anti-bot **avec l'éditeur** (GEEKOS NEXUS), sur un 
 | Moteur | **Navigateur piloté** (clics sur l'interface du jeu). Le moteur API/WebSocket direct vient plus tard, derrière la même interface interne. |
 | Interface en direct | Navigateur complet : vraie fenêtre Chromium affichée par noVNC (D24). Hors Docker : flux d'images poussé par Chrome (CDP). « Contrôle manuel » désactivé par défaut. |
 | Comportement humain | Pauses aléatoires courtes entre les actions, souris progressive, frappe touche par touche. |
-| Hors périmètre | **Aucune résolution de captcha, aucun contournement ni dissimulation du bot** (empreinte, proxys, faux profil d'appareil). Si Turnstile bloque, c'est l'humain qui se connecte. |
 | Actions qui dépensent | **Mode « simulation » (à blanc) par défaut** : le bot décide et journalise, sans cliquer. Le mode réel s'active explicitement, avec un plafond. |
 | Connaissance du jeu | On **capture avant de coder** (export de structure, relu par le joueur). On ne devine jamais un sélecteur ni un appel. |
 | Livraison | Branche `claude/bot-login-setup`. Un commit n'est fait que si tous les tests passent. Fusion sur `main` uniquement sur demande. |

@@ -201,7 +201,7 @@ class QuantityPass(ConstructionPass):
         try:
             box = page.locator(f"[{TARGET_ATTRIBUTE}]").first
             quantity = box.locator("input[type=number]").first
-            before = await self._stocks()
+            before, self._rates, self._before_at = await self._stocks_timed()
             await human.think(self.settings)
             await human.click(page, box.get_by_role("button", name=MAX_BUTTON).first, self.settings)
             await asyncio.sleep(0.3)
@@ -241,7 +241,8 @@ class QuantityPass(ConstructionPass):
         visible = was is not None and expected >= 2 * _display_step(was)
         end = time.monotonic() + (builder.CONFIRM_SECONDS if visible else UNVERIFIABLE_WAIT_SECONDS)
         while time.monotonic() < end:
-            if visible and was - ((await self._stocks()).get(key) or was) >= expected * builder.CONFIRM_RATIO:
+            now = (await self._stocks()).get(key) if visible else None
+            if now is not None and builder.debit_seen(was, now, expected, self._rates.get(key, 0.0), time.monotonic() - self._before_at):
                 self._confirmed(sentence)
                 return
             seen = (await self._read_pop_cards()).get(norm(label))
@@ -253,7 +254,7 @@ class QuantityPass(ConstructionPass):
             self.bot.log(f"{self.title} lancé : {sentence} (débit trop petit pour être vérifié à l'écran).", event=True, kind="launch")
             return
         self._unconfirmed += 1
-        self.bot.log(f"Clic fait ({sentence}) mais le débit des ressources n'a pas été constaté.", "warn", event=True, kind="attention")
+        self.bot.log(f"Clic fait ({sentence}) mais le débit des ressources n'a pas été constaté ({self._stock_note(key, was, expected)}).", "warn", event=True, kind="attention")
         if self._unconfirmed >= UNCONFIRMED_LIMIT:
             self.bot.scheduler.update(self.feature_id, {"enabled": False})
             self.bot.log(f"{self.title} désactivé : deux lancements de suite non confirmés. Vérifiez à l'écran avant de le réactiver.", "error", event=True, kind="attention")

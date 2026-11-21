@@ -12,6 +12,8 @@ import os
 import tempfile
 from pathlib import Path
 
+from .engine import DEFAULT_ENGINE, ENGINES
+
 MAX_UNIVERSE_LENGTH = 60
 MAX_DELAY_SECONDS = 60.0
 MAX_SUGGESTIONS = 200
@@ -19,6 +21,7 @@ CATALOG_KINDS = ("universes", "planets", "models")
 
 DEFAULTS: dict = {
     "universe": "",  # univers où entrer automatiquement (nom affiché sur la page de choix) ; vide = demander
+    "engine": DEFAULT_ENGINE,  # moteur de l'instance : « browser » (Chromium piloté) ; voir engine.py
     "login_delay": {"min_seconds": 0.4, "max_seconds": 1.4},  # pause avant chaque clic ou saisie de la connexion
     "catalog": {"universes": [], "planets": [], "models": []},  # suggestions, entretenues par le bot
 }
@@ -39,6 +42,11 @@ def validate(data: dict) -> dict:
         errors.append(f"Univers : texte de {MAX_UNIVERSE_LENGTH} caractères au plus.")
     else:
         merged["universe"] = universe.strip()
+    engine = data.get("engine", merged["engine"])
+    if engine not in ENGINES:
+        errors.append(f"Moteur : choisissez parmi {', '.join(ENGINES)}.")
+    else:
+        merged["engine"] = engine
     delay = data.get("login_delay", merged["login_delay"])
     try:
         raw = (delay["min_seconds"], delay["max_seconds"])
@@ -94,7 +102,7 @@ class Preferences:
     def update(self, data: dict) -> dict:
         """Les clés absentes de `data` restent inchangées : la page n'envoie que ce qu'elle modifie."""
         merged = self.get()
-        for key in ("universe", "login_delay"):
+        for key in ("universe", "engine", "login_delay"):
             if key in data:
                 merged[key] = {**merged[key], **data[key]} if isinstance(data[key], dict) else data[key]
         cleaned = validate(merged)

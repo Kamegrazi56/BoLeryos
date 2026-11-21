@@ -261,7 +261,7 @@ input.inline { width: 90px; display: inline-block; margin: 0 6px; }
 /* Compte et univers : les cinq champs sur une seule ligne (plusieurs lignes seulement sur écran étroit). */
 .fields-account { margin-top: 14px; grid-template-columns: minmax(200px, 2fr) minmax(170px, 1.5fr) minmax(150px, 1.3fr) minmax(110px, 1fr) minmax(110px, 1fr); align-items: end; }
 .fields-account label { white-space: nowrap; min-width: 0; }
-.fields-account label input { display: block; width: 100%; min-width: 0; margin-top: 4px; }
+.fields-account label input, .fields-account label select { display: block; width: 100%; min-width: 0; margin-top: 4px; }
 @media (max-width: 1100px) { .fields-account { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); } }
 /* Accueil : connexion au compte, et instances de jeu (un bot par serveur). */
 .fields-login { margin-top: 10px; grid-template-columns: minmax(200px, 2fr) minmax(170px, 1.5fr) auto auto; align-items: end; }

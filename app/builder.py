@@ -23,6 +23,7 @@ from .planets import GameUiError, Interrupted
 
 CONFIRM_SECONDS = 8.0  # attente maximale du débit des ressources après le clic
 CONFIRM_RATIO = 0.5  # le stock principal doit baisser d'au moins cette part du coût
+RATE_PROBE_SECONDS = 0.8  # deux lectures des stocks avant le clic : la production continue pendant qu'on attend le débit
 COOLDOWN_MARGIN = 1.1  # on attend la durée lue + 10 % avant de recliquer sur le même bâtiment
 COOLDOWN_EXTRA_SECONDS = 30.0
 UNCONFIRMED_LIMIT = 2  # lancements non confirmés de suite avant désactivation
@@ -31,6 +32,50 @@ SETTLE_SECONDS = 10.0  # attente maximale que la page affiche les chiffres de la
 SETTLE_POLL_SECONDS = 0.4
 UPGRADE_WAIT_SECONDS = 5.0  # attente de la carte du bâtiment visé avant de cliquer sur « Améliorer »
 PLANET_BUTTON_LABEL = "Sélectionner la planète active"
+PLANET_ENTRY_ATTRIBUTE = "data-bot-planet"
+PLANET_LIST_WAIT_SECONDS = 3.0
+
+# Quand l'entrée d'une planète manque : ce que la page montre (comptes seulement, aucun nom de planète).
+DIAGNOSE_PLANET_LIST_JS = r"""
+(wanted) => {
+  const text = (el) => (el.textContent || '').replace(/\s+/g, ' ').trim();
+  const norm = (s) => s.replace(/[’‘]/g, "'").toLowerCase().replace(/\s+/g, ' ').trim();
+  const COORD = /^[A-Z]\d{2} \d{2} \d{2}$/;
+  const leaves = [...document.querySelectorAll('*')].filter((el) => el.children.length === 0 && text(el) !== '');
+  const shown = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const named = leaves.filter((el) => norm(text(el)) === wanted);
+  const near = leaves.filter((el) => norm(text(el)).includes(wanted.slice(-5)));
+  return { named: named.length, namedShown: named.filter(shown).length, nearShown: near.filter(shown).length,
+           coordShown: leaves.filter((el) => COORD.test(text(el)) && shown(el)).length,
+           selector: document.querySelectorAll('[aria-label="Sélectionner la planète active"]').length };
+}
+"""
+
+# Entrée de la liste des planètes : le plus grand bloc visible (6 niveaux au plus) qui ne contient que les coordonnées de la
+# planète voulue. Vrai jeu (20/11) : ce n'est plus un <button>, la balise n'a donc pas d'importance. Le sélecteur de la
+# planète active (barre du haut) est écarté : il porte aussi son nom et ses coordonnées.
+MARK_PLANET_ENTRY_JS = r"""
+(args) => {
+  const [wanted, attribute] = args;
+  const text = (el) => (el.textContent || '').replace(/\s+/g, ' ').trim();
+  const norm = (s) => s.replace(/[’‘]/g, "'").toLowerCase().replace(/\s+/g, ' ').trim();
+  const COORD = /^[A-Z]\d{2} \d{2} \d{2}$/;
+  const leavesOf = (root) => [...root.querySelectorAll('*')].filter((el) => el.children.length === 0 && text(el) !== '');
+  const shown = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  document.querySelectorAll('[' + attribute + ']').forEach((e) => e.removeAttribute(attribute));
+  for (const leaf of leavesOf(document).filter((el) => norm(text(el)) === wanted)) {
+    if (leaf.closest('[aria-label="Sélectionner la planète active"]')) continue;
+    let best = null;
+    for (let node = leaf.parentElement, depth = 0; node && depth < 6; node = node.parentElement, depth++) {
+      const leaves = leavesOf(node);
+      if (leaves.filter((e) => COORD.test(text(e))).length !== 1 || leaves.length > 12) break;
+      best = node;
+    }
+    if (best && shown(best)) { best.setAttribute(attribute, '1'); return true; }
+  }
+  return false;
+}
+"""
 PAGE_PATHS = {"Industrie": "buildings", "Infrastructures": "facilities"}
 
 # Cartes de la page : un bouton « Améliorer » par bâtiment. Niveau = premier nombre entier, nom = titre h3,
@@ -111,6 +156,15 @@ def _amount(raw: str | None) -> float | None:
         return None
 
 
+def debit_seen(was: float, now: float, expected: float, rate: float = 0.0, elapsed: float = 0.0) -> bool:
+    """Le stock a-t-il baissé de la dépense attendue, production comprise ?
+
+    Un compte à forte production gagne plus de ressources en quelques secondes que n'en coûte un petit lancement : le stock
+    affiché peut alors monter malgré le débit. On compare donc au stock « qu'il aurait eu » sans dépense."""
+    produced = max(0.0, rate) * max(0.0, elapsed)
+    return (was + produced) - now >= expected * CONFIRM_RATIO
+
+
 class Card:
     """Une carte de bâtiment lue sur la page."""
 
@@ -127,6 +181,8 @@ class ConstructionPass:
         self.bot = bot
         self._cooldown: dict[tuple[str, str], float] = {}  # (planète, bâtiment) → fin présumée de la construction
         self._unconfirmed = 0
+        self._rates: dict[str, float] = {}  # production par seconde mesurée juste avant le dernier clic
+        self._before_at = 0.0
         self._reached: dict[tuple[str, str], set[str]] = {}  # (bâtiment, planète de la ligne ou « ») → planètes (norm) où le niveau cible est atteint (passage en cours)
         self._last_planet: str | None = None  # dernière planète traitée et ce que la page affichait à la fin de son traitement
         self._last_sig: tuple | None = None
@@ -158,6 +214,21 @@ class ConstructionPass:
     async def _stocks(self) -> dict[str, float | None]:
         raw = await self._eval(READ_STOCKS_JS)
         return {k: _amount(v) for k, v in raw.items()}
+
+    async def _stocks_timed(self) -> tuple[dict[str, float | None], dict[str, float], float]:
+        """Stocks juste avant un clic, avec la production par seconde de chaque ressource et l'heure de la lecture."""
+        first = await self._stocks()
+        t0 = time.monotonic()
+        await asyncio.sleep(RATE_PROBE_SECONDS)
+        now = await self._stocks()
+        t1 = time.monotonic()
+        rates = {k: (now[k] - first[k]) / (t1 - t0) for k in now if now.get(k) is not None and first.get(k) is not None}
+        return now, rates, t1
+
+    def _stock_note(self, key: str, was: float | None, expected: float) -> str:
+        """Chiffres du contrôle de débit pour le journal (aucune donnée personnelle) : de quoi comprendre un refus."""
+        rate = self._rates.get(key, 0.0)
+        return f"{key} avant {was:.0f}, dépense attendue {expected:.0f}, production mesurée {rate:.0f}/s"
 
     async def _read_cards(self) -> dict[str, Card]:
         return {norm(r["name"]): Card(r) for r in await self._eval(READ_CARDS_JS)}
@@ -212,21 +283,41 @@ class ConstructionPass:
             "b => { const l = [...b.querySelectorAll('*')].filter((e) => !e.children.length && e.textContent.trim()); return l.length ? l[0].textContent.trim() : ''; }"
         )
 
+    async def _diagnose_planet_list(self, name: str) -> str:
+        try:
+            info = await self.page.evaluate(DIAGNOSE_PLANET_LIST_JS, norm(name))
+        except Exception:  # noqa: BLE001 - le diagnostic ne doit jamais masquer l'erreur d'origine
+            return "diagnostic indisponible"
+        return (f"nom trouvé {info['named']} fois dont {info['namedShown']} visible(s), {info['nearShown']} texte(s) voisin(s) visible(s), "
+                f"{info['coordShown']} coordonnées visibles, {info['selector']} sélecteur(s) de planète")
+
+    async def _planet_entry_shown(self, name: str, wait: float) -> bool:
+        """L'entrée de la planète est-elle visible dans la liste (et marquée pour le clic) ? Attend jusqu'à `wait` secondes."""
+        end = time.monotonic() + wait
+        while True:
+            if await self.page.evaluate(MARK_PLANET_ENTRY_JS, [norm(name), PLANET_ENTRY_ATTRIBUTE]):
+                return True
+            if time.monotonic() >= end:
+                return False
+            await asyncio.sleep(0.25)
+
     async def _select_planet(self, name: str) -> None:
         if norm(await self._current_planet()) == norm(name):
             return
         await self._guard()
         page = self.page
-        await human.click(page, page.get_by_role("button", name=PLANET_BUTTON_LABEL).first, self.settings)
-        entry = page.locator("button", has=page.get_by_text(name, exact=True)).filter(has_text=re.compile(r"[A-Z]\d{2} \d{2} \d{2}"))
-        target = None
-        for i in range(await entry.count()):  # des fenêtres cachées du jeu peuvent contenir les mêmes noms : seul le visible compte
-            if await entry.nth(i).is_visible():
-                target = entry.nth(i)
-                break
-        if target is None:
-            raise GameUiError(f"planète « {name} » absente de la liste")
-        await human.click(page, target, self.settings)  # masquée par la barre du bas (écran bas) : human.click passe au clavier
+        if not await self._planet_entry_shown(name, 0.0):  # la liste est peut-être déjà ouverte : un clic de plus la refermerait
+            await human.click(page, page.get_by_role("button", name=PLANET_BUTTON_LABEL).first, self.settings)
+            if not await self._planet_entry_shown(name, PLANET_LIST_WAIT_SECONDS):
+                # toujours rien : le clic a pu la refermer (ouverte entre-temps) ou ne pas prendre ; un second essai, puis on dit ce qu'on voit
+                await human.click(page, page.get_by_role("button", name=PLANET_BUTTON_LABEL).first, self.settings)
+                if not await self._planet_entry_shown(name, PLANET_LIST_WAIT_SECONDS):
+                    raise GameUiError(f"planète « {name} » absente de la liste ({await self._diagnose_planet_list(name)})")
+        target = page.locator(f"[{PLANET_ENTRY_ATTRIBUTE}]").first
+        try:
+            await human.click(page, target, self.settings)  # masquée par la barre du bas (écran bas) : human.click passe au clavier
+        finally:
+            await page.evaluate("(a) => document.querySelectorAll('[' + a + ']').forEach((e) => e.removeAttribute(a))", PLANET_ENTRY_ATTRIBUTE)
         end = time.monotonic() + PLANET_SWITCH_SECONDS
         while time.monotonic() < end:
             if norm(await self._current_planet()) == norm(name):

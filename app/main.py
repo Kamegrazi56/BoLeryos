@@ -84,6 +84,7 @@ class LoginRequest(BaseModel):
 class PreferencesRequest(BaseModel):
     # Clés absentes : valeurs inchangées (la page n'envoie que ce qu'elle modifie).
     universe: str | None = Field(default=None, max_length=MAX_UNIVERSE_LENGTH)
+    engine: str | None = Field(default=None, max_length=20)  # moteur de l'instance (voir engine.py)
     login_delay: dict | None = None
 
 
@@ -396,6 +397,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _check_origin(request)
         bot.clear_recording()
         return JSONResponse(bot.status(), headers=NO_STORE)
+
+    @app.get("/api/actions/observed")
+    async def api_actions_observed(writes: bool = True):
+        """Actions envoyées par la page du jeu (forme et valeurs de jeu, jamais le jeton) : sert à écrire le moteur « api »."""
+        return JSONResponse({"actions": bot.action_log.entries(only_writes=writes)}, headers=NO_STORE)
 
     @app.get("/api/explore/export")
     async def api_explore_export():
