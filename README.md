@@ -51,9 +51,9 @@ Le panneau « Exploration de la structure du site » (désactivé par défaut) e
 
 Une **instance** est un bot sur un serveur du jeu : elle a son univers, ses réglages, ses relevés et son planning, et se démarre, s'arrête, se crée et se supprime sans toucher aux autres. Le **compte** (identifiant, mot de passe, cookies de connexion) est commun à toutes les instances.
 
-1. Sur l'**Accueil**, saisir l'identifiant et le mot de passe (**Se connecter**).
-2. **Lire mes serveurs** : le bot se connecte et relève la liste des serveurs proposés au compte.
-3. **Créer une instance** sur un serveur, puis **Démarrer**. Le jeu n'accepte qu'une session par compte et par serveur : une seule instance par serveur. Le nombre d'instances est limité (`MAX_INSTANCES`, 5 par défaut).
+1. Sur l'**Accueil**, saisir l'identifiant et le mot de passe (**Se connecter**). Aucun univers n'est demandé.
+2. Le bot se connecte, **relève seul la liste des serveurs** du compte et **reste sur la page de choix des univers** sans en ouvrir aucun (le bouton **Relire mes serveurs** relance la lecture). La lecture se refait aussi au redémarrage du conteneur quand des identifiants sont enregistrés et qu'aucune instance ne tourne (`AUTOSTART=0` pour l'éviter). Si des instances tournent déjà, la lecture automatique n'a pas lieu : le bouton sert alors à l'actualiser.
+3. **Créer une instance** sur l'un des serveurs listés, puis **Démarrer**. Le jeu n'accepte qu'une session par compte et par serveur : une seule instance par serveur. Le nombre d'instances est limité (`MAX_INSTANCES`, 5 par défaut).
 
 - **Sélecteur d'instance** dans l'en-tête (dès qu'il y en a plusieurs) : Écran, Réglages et Suivi montrent l'instance choisie, **dans cet onglet** (deux onglets peuvent donc montrer deux instances). Une instance arrêtée est signalée par une bannière avec un bouton **Démarrer**.
 - **Un seul Chromium** pour tout le monde, avec **un contexte par instance** (session de jeu indépendante) : environ 410 Mo pour le navigateur puis environ 105 Mo par instance supplémentaire (mesuré sur une page de test ; la mémoire réelle est affichée sur l'Accueil).

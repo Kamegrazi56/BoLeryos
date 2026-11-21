@@ -393,3 +393,62 @@ def test_chromium_memory_prefers_the_proportional_share_when_available(tmp_path)
     (folder / "statm").write_text("1 99999 0 0 0 0 0")  # résident énorme (pages partagées comptées en entier)
     (folder / "smaps_rollup").write_text("Rss: 400000 kB\nPss:  102400 kB\nShared_Clean: 1 kB\n")
     assert chromium_memory_mb(str(tmp_path)) == 100.0
+
+
+# ------------------------------------------------------------------ lecture automatique des serveurs
+def test_saving_credentials_without_instance_reads_the_servers_by_itself(settings, tmp_path, monkeypatch):
+    calls = []
+
+    async def fake_scan(self):
+        calls.append(1)
+        return {"universes": [], "error": "Connexion en cours : réessayez dans quelques secondes."} if len(calls) < 3 else {"universes": ["Orion"], "error": ""}
+
+    monkeypatch.setattr(InstanceManager, "scan_universes", fake_scan)
+    monkeypatch.setattr("app.instance_manager.AUTO_SCAN_DELAY_SECONDS", 0.01)
+    manager = _manager(settings, tmp_path)
+    asyncio.run(manager.delete(manager.default_id))  # plus aucune instance
+
+    async def scenario() -> None:
+        manager._account.remember("joueur", "secret")
+        manager.credentials_changed()
+        await asyncio.wait_for(manager._auto_scan_task, 5)
+
+    asyncio.run(scenario())
+    assert len(calls) == 3  # elle réessaie tant que la connexion n'a pas abouti, puis s'arrête au premier succès
+
+
+def test_no_automatic_read_while_an_instance_is_running(settings, tmp_path, monkeypatch, no_browser):
+    manager = _manager(settings, tmp_path)  # la première instance reprend : elle tourne
+    called = []
+    monkeypatch.setattr(InstanceManager, "start_auto_scan", lambda self: called.append(1))
+
+    async def scenario() -> None:
+        manager.credentials_changed()
+        await manager.shutdown()
+
+    asyncio.run(scenario())
+    assert not called
+
+
+def test_startup_without_instance_reads_the_servers_when_credentials_are_saved(settings, tmp_path, monkeypatch):
+    calls = []
+
+    async def fake_scan(self):
+        calls.append(1)
+        return {"universes": ["Orion"], "error": ""}
+
+    monkeypatch.setattr(InstanceManager, "scan_universes", fake_scan)
+    manager = _manager(settings, tmp_path, autostart=True)
+    asyncio.run(manager.delete(manager.default_id))  # plus aucune instance
+    manager._account.remember("joueur", "secret")
+
+    async def scenario(autostart: bool) -> None:
+        manager._settings = replace(manager._settings, autostart=autostart)
+        await manager.startup()
+        if manager._auto_scan_task:
+            await manager._auto_scan_task
+
+    asyncio.run(scenario(False))
+    assert calls == []  # AUTOSTART=0 : rien ne se lance
+    asyncio.run(scenario(True))
+    assert calls == [1]

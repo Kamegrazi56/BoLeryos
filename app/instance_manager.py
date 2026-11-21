@@ -37,6 +37,8 @@ TRASH_FOLDER = ".corbeille"
 MAX_NAME_LENGTH = 40
 DEFAULT_NAME = "Principale"
 STARTUP_STAGGER_SECONDS = 4.0  # écart entre deux instances qui reprennent au démarrage
+AUTO_SCAN_ATTEMPTS = 40  # lectures des serveurs après la saisie des identifiants (connexion comprise)
+AUTO_SCAN_DELAY_SECONDS = 3.0
 REFRONT_DELAY_SECONDS = 0.6  # laisse la nouvelle fenêtre s'afficher avant de remettre devant celle qu'on regarde
 
 
@@ -60,6 +62,7 @@ class InstanceManager:
         self._bots: dict[str, BotSession] = {}
         self._lobby: BotSession | None = None
         self._startup_task: asyncio.Task | None = None
+        self._auto_scan_task: asyncio.Task | None = None
         self._load()
         for info in self._infos:  # les instances qui tournaient au dernier arrêt reprennent (sans lancer le navigateur ici)
             if info["autostart"]:
@@ -277,9 +280,14 @@ class InstanceManager:
                     shutil.move(str(source), str(trash / f"{instance_id}-{int(time.time())}"))
 
     async def startup(self) -> None:
-        """Au démarrage de l'application : les instances qui tournaient reprennent leur connexion (si AUTOSTART)."""
-        if self._settings.autostart and self._bots:
+        """Au démarrage de l'application (si AUTOSTART) : les instances qui tournaient reprennent leur connexion ; sans
+        instance qui tourne mais avec des identifiants enregistrés, le bot relit les serveurs et attend sur leur page."""
+        if not self._settings.autostart:
+            return
+        if self._bots:
             self._startup_task = asyncio.create_task(self._staggered_kick(self.running_bots()))
+        elif self._account.has_credentials():
+            self.start_auto_scan()  # la lecture ouvre elle-même la session de connexion
 
     async def _staggered_kick(self, bots: list[BotSession]) -> None:
         """Une instance après l'autre : les connexions au compte ne se font pas toutes à la même seconde."""
@@ -290,10 +298,11 @@ class InstanceManager:
 
     async def shutdown(self) -> None:
         """Arrêt de l'application : toutes les sessions se ferment ; les instances gardent leur marque « démarrée »."""
-        task, self._startup_task = self._startup_task, None
-        if task is not None:
+        tasks = [t for t in (self._startup_task, self._auto_scan_task) if t is not None]
+        self._startup_task = self._auto_scan_task = None
+        for task in tasks:
             task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+        await asyncio.gather(*tasks, return_exceptions=True)
         await self.close_lobby()
         bots, self._bots = list(self._bots.values()), {}
         await asyncio.gather(*(bot.shutdown() for bot in bots), return_exceptions=True)
@@ -312,10 +321,33 @@ class InstanceManager:
     def credentials_changed(self, session: BotSession | None = None) -> None:
         """Nouveaux identifiants : les instances démarrées se reconnectent avec eux. Sans instance démarrée, c'est la
         session qui les a reçus (la session de connexion, en général) qui se connecte ; sinon elle reste inactive."""
-        targets = self.running_bots() or ([session] if session is not None else [])
-        for bot in targets:
+        running = self.running_bots()
+        for bot in running or ([session] if session is not None else []):
             bot.supervisor.reset_connection()
             bot.supervisor.ensure_keeper()
+        if not running:  # aucune instance : le bot lit seul les serveurs et attend sur la page des univers
+            self.start_auto_scan()
+
+    def start_auto_scan(self) -> None:
+        if self._auto_scan_task is None or self._auto_scan_task.done():
+            self._auto_scan_task = asyncio.create_task(self._auto_scan())
+
+    async def _auto_scan(self) -> None:
+        """Relit les serveurs dès que la connexion aboutit (elle prend quelques secondes) ; s'arrête au premier succès,
+        ou si une instance démarre entre-temps (elle prend alors le relais), ou après quelques minutes."""
+        for attempt in range(AUTO_SCAN_ATTEMPTS):
+            if attempt:
+                await asyncio.sleep(AUTO_SCAN_DELAY_SECONDS)
+            if self._bots or not self._account.has_credentials():
+                return
+            try:
+                result = await self.scan_universes()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - page en cours de chargement : on réessaie
+                continue
+            if not result["error"]:
+                return
 
     # ------------------------------------------------------------------ état
     def summary(self) -> dict:

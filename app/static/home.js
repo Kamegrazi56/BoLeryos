@@ -70,7 +70,7 @@ $("login-save").addEventListener("click", async () => {
   if (!identifier || (!password && !passwordSaved)) { $("login-msg").textContent = "Renseignez l'identifiant et le mot de passe."; return; }
   const res = await toLobby("/api/account/credentials", { method: "POST", headers: json, body: JSON.stringify({ identifier, password: password || undefined }) });
   $("login-pw").value = ""; // jamais conservé dans la page
-  if (res.ok) { passwordSaved = true; $("login-msg").textContent = "Identifiants enregistrés : la connexion démarre. Vous pouvez ensuite lire vos serveurs."; }
+  if (res.ok) { passwordSaved = true; $("login-msg").textContent = "Identifiants enregistrés : le bot se connecte et lit vos serveurs (sans entrer dans aucun univers)."; }
   else $("login-msg").textContent = await detail(res, "Refusé.");
   refreshInstances();
 });
@@ -85,7 +85,11 @@ $("login-forget").addEventListener("click", async () => {
 
 function renderServers(summary) {
   const box = $("server-list");
-  if (!summary.universes.length) { box.replaceChildren(el("p", { className: "empty-state", textContent: "Aucun serveur lu pour l'instant." })); return; }
+  if (!summary.universes.length) {
+    const reading = summary.lobby.has_credentials && !summary.instances.some((i) => i.running);
+    box.replaceChildren(el("p", { className: "empty-state", textContent: reading ? "Connexion et lecture des serveurs en cours…" : "Aucun serveur lu pour l'instant : saisissez vos identifiants." }));
+    return;
+  }
   const full = summary.instances.length >= summary.max;
   box.replaceChildren(table(["Serveur", ""], summary.universes.map((u) => [u.name, ""])));
   box.querySelectorAll("tr").forEach((row, i) => {
@@ -147,7 +151,7 @@ function renderInstances(summary) {
   const rows = summary.instances.map((i) => instanceRow(i, summary));
   const t = el("table", {}, el("tr", {}, ...["Nom", "Serveur", "État", ""].map((h) => el("th", { textContent: h }))));
   t.append(...rows);
-  $("instance-table").replaceChildren(summary.instances.length ? t : el("p", { className: "empty-state", textContent: "Aucune instance : lisez vos serveurs puis créez-en une." }));
+  $("instance-table").replaceChildren(summary.instances.length ? t : el("p", { className: "empty-state", textContent: "Aucune instance : choisissez un serveur ci-dessus pour en créer une." }));
   const running = summary.instances.filter((i) => i.running).length;
   const memory = summary.memory_mb ? ` Mémoire du navigateur : ${Math.round(summary.memory_mb)} Mo.` : "";
   $("instance-hint").textContent = `${summary.instances.length} / ${summary.max} instances, ${running} démarrée(s).${memory} Chaque instance démarrée ajoute environ 100 Mo au navigateur.`;
