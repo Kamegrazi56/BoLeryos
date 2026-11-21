@@ -417,17 +417,65 @@ def test_saving_credentials_without_instance_reads_the_servers_by_itself(setting
     assert len(calls) == 3  # elle réessaie tant que la connexion n'a pas abouti, puis s'arrête au premier succès
 
 
-def test_no_automatic_read_while_an_instance_is_running(settings, tmp_path, monkeypatch, no_browser):
+class _FakeScreen:
+    """Session de jeu factice : affiche (ou non) la page des univers."""
+
+    def __init__(self, screen: str, names: list[str]) -> None:
+        self.screen, self.names = screen, names
+
+    async def detect_screen(self) -> str:
+        return self.screen
+
+    async def list_universes(self) -> list[dict]:
+        return [{"index": i, "name": n} for i, n in enumerate(self.names)]
+
+
+def test_automatic_read_while_an_instance_runs_never_opens_the_lobby(settings, tmp_path, monkeypatch, no_browser):
     manager = _manager(settings, tmp_path)  # la première instance reprend : elle tourne
-    called = []
-    monkeypatch.setattr(InstanceManager, "start_auto_scan", lambda self: called.append(1))
+    manager._account.remember("joueur", "secret")
+    monkeypatch.setattr("app.instance_manager.AUTO_SCAN_DELAY_SECONDS", 0.01)
+    monkeypatch.setattr("app.instance_manager.AUTO_SCAN_ATTEMPTS", 3)
+    opened = []
+    monkeypatch.setattr(InstanceManager, "lobby", lambda self: opened.append(1))
 
     async def scenario() -> None:
         manager.credentials_changed()
+        await manager._auto_scan_task
         await manager.shutdown()
 
     asyncio.run(scenario())
-    assert not called
+    assert not opened  # aucune page des serveurs affichée : la lecture patiente sans consommer de session de plus
+    assert manager.universes == []
+
+
+def test_servers_are_read_from_the_servers_page_of_a_running_instance(settings, tmp_path, no_browser):
+    manager = _manager(settings, tmp_path)
+    manager._bots[manager.default_id] = _FakeScreen("universes", ["Asterion", "Orion"])  # connexion faite à la main : aucun identifiant
+
+    result = asyncio.run(manager.scan_universes())
+    assert result == {"universes": ["Asterion", "Orion"], "error": ""}
+    assert manager.universes == ["Asterion", "Orion"]
+
+
+def test_lobby_is_closed_after_reading_when_instances_run(settings, tmp_path, no_browser):
+    manager = _manager(settings, tmp_path)
+    manager._bots[manager.default_id] = _FakeScreen("universes", ["Orion"])
+    closed = []
+
+    async def fake_close() -> None:
+        closed.append(1)
+
+    manager.close_lobby = fake_close
+    asyncio.run(manager.scan_universes())
+    assert closed == [1]
+
+
+def test_scan_ignores_an_instance_that_is_not_on_the_servers_page(settings, tmp_path, no_browser):
+    manager = _manager(settings, tmp_path)
+    manager._bots[manager.default_id] = _FakeScreen("game", ["Asterion"])
+
+    result = asyncio.run(manager.scan_universes())
+    assert result["universes"] == [] and "identifiants" in result["error"]
 
 
 def test_startup_without_instance_reads_the_servers_when_credentials_are_saved(settings, tmp_path, monkeypatch):

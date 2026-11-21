@@ -86,8 +86,12 @@ $("login-forget").addEventListener("click", async () => {
 function renderServers(summary) {
   const box = $("server-list");
   if (!summary.universes.length) {
-    const reading = summary.lobby.has_credentials && !summary.instances.some((i) => i.running);
-    box.replaceChildren(el("p", { className: "empty-state", textContent: reading ? "Connexion et lecture des serveurs en cours…" : "Aucun serveur lu pour l'instant : saisissez vos identifiants." }));
+    const running = summary.instances.some((i) => i.running);
+    let text = "Aucun serveur lu pour l'instant : saisissez vos identifiants.";
+    if (summary.lobby.has_credentials) text = running
+      ? "Aucun serveur lu pour l'instant : cliquez sur « Relire mes serveurs » (la lecture se fait aussi dès qu'une instance affiche la page des serveurs)."
+      : "Connexion et lecture des serveurs en cours…";
+    box.replaceChildren(el("p", { className: "empty-state", textContent: text }));
     return;
   }
   const full = summary.instances.length >= summary.max;

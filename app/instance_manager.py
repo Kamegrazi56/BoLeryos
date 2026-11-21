@@ -198,10 +198,34 @@ class InstanceManager:
         if lobby is not None:
             await lobby.shutdown()
 
+    async def _read_from_running_bots(self) -> list[str]:
+        """Serveurs lus sur la page des univers d'une session déjà connectée (aucune session de plus à ouvrir)."""
+        for bot in [*self._bots.values(), self._lobby]:
+            if bot is None:
+                continue
+            try:
+                if await bot.detect_screen() != "universes":
+                    continue
+                found = [u["name"] for u in await bot.list_universes()]
+            except Exception:  # noqa: BLE001 - page en cours de chargement : on essaie la suivante
+                continue
+            if found:
+                return found
+        return []
+
+    def _remember_universes(self, found: list[str]) -> dict:
+        self.universes = found[:50]
+        self._save()
+        return {"universes": self.universes, "error": ""}
+
     async def scan_universes(self) -> dict:
-        """Lit les serveurs proposés au compte, avec la session de connexion (elle se connecte seule si besoin)."""
+        """Lit les serveurs proposés au compte : d'abord sur la page des univers déjà ouverte (même si la connexion a été faite
+        à la main, sans identifiants enregistrés), sinon avec la session de connexion (elle se connecte seule si besoin)."""
+        found = await self._read_from_running_bots()
+        if found:
+            return await self._remember_and_release(found)
         if not self._account.has_credentials():
-            return {"universes": self.universes, "error": "Saisissez d'abord vos identifiants."}
+            return {"universes": self.universes, "error": "Saisissez d'abord vos identifiants (ou ouvrez la page des serveurs dans l'écran)."}
         lobby = self.lobby()
         self._kick(lobby)
         if lobby._state is not State.LOGGED_IN:
@@ -209,11 +233,21 @@ class InstanceManager:
         found = [u["name"] for u in await lobby.list_universes()]
         if not found:
             return {"universes": self.universes, "error": "La liste des serveurs n'est pas affichée : réessayez dans un instant."}
-        self.universes = found[:50]
-        self._save()
+        return await self._remember_and_release(found)
+
+    async def _remember_and_release(self, found: list[str]) -> dict:
+        result = self._remember_universes(found)
         if self._bots:  # des instances tournent déjà : la session de connexion n'a plus d'utilité (un contexte de moins)
             await self.close_lobby()
-        return {"universes": self.universes, "error": ""}
+        return result
+
+    async def _scan_running_only(self) -> dict:
+        """Avec des instances qui tournent, la lecture automatique n'ouvre pas de session de connexion (mémoire) : elle attend
+        qu'une instance affiche la page des univers."""
+        found = await self._read_from_running_bots()
+        if found:
+            return await self._remember_and_release(found)
+        return {"universes": self.universes, "error": "Aucune instance n'affiche la page des serveurs."}
 
     # ------------------------------------------------------------------ cycle de vie
     def create(self, universe: str, name: str | None = None) -> dict:
@@ -286,8 +320,8 @@ class InstanceManager:
             return
         if self._bots:
             self._startup_task = asyncio.create_task(self._staggered_kick(self.running_bots()))
-        elif self._account.has_credentials():
-            self.start_auto_scan()  # la lecture ouvre elle-même la session de connexion
+        if (self._bots and not self.universes) or (not self._bots and self._account.has_credentials()):
+            self.start_auto_scan()  # sans instance, la lecture ouvre elle-même la session de connexion
 
     async def _staggered_kick(self, bots: list[BotSession]) -> None:
         """Une instance après l'autre : les connexions au compte ne se font pas toutes à la même seconde."""
@@ -325,8 +359,7 @@ class InstanceManager:
         for bot in running or ([session] if session is not None else []):
             bot.supervisor.reset_connection()
             bot.supervisor.ensure_keeper()
-        if not running:  # aucune instance : le bot lit seul les serveurs et attend sur la page des univers
-            self.start_auto_scan()
+        self.start_auto_scan()  # le bot lit seul les serveurs (page des univers d'une instance, ou session de connexion)
 
     def start_auto_scan(self) -> None:
         if self._auto_scan_task is None or self._auto_scan_task.done():
@@ -338,10 +371,10 @@ class InstanceManager:
         for attempt in range(AUTO_SCAN_ATTEMPTS):
             if attempt:
                 await asyncio.sleep(AUTO_SCAN_DELAY_SECONDS)
-            if self._bots or not self._account.has_credentials():
+            if not self._bots and not self._account.has_credentials():
                 return
             try:
-                result = await self.scan_universes()
+                result = await (self._scan_running_only() if self._bots else self.scan_universes())
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001 - page en cours de chargement : on réessaie
