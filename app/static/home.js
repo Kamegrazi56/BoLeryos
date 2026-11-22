@@ -138,6 +138,14 @@ function instanceRow(i, summary) {
     el("td", { textContent: i.connection ? `${state} — ${i.connection}` : state }), actions);
 }
 
+// Données non conservées à la prochaine mise à jour : on le dit en haut de page tant que ce n'est pas réglé.
+function renderStorage(storage) {
+  const box = $("storage-warning");
+  const lost = Boolean(storage) && storage.persistent === false;
+  box.hidden = !lost;
+  box.textContent = lost ? storage.message : "";
+}
+
 function renderInstances(summary) {
   const rows = summary.instances.map((i) => instanceRow(i, summary));
   const t = el("table", {}, el("tr", {}, ...["Nom", "Serveur", "État", ""].map((h) => el("th", { textContent: h }))));
@@ -146,6 +154,7 @@ function renderInstances(summary) {
   const running = summary.instances.filter((i) => i.running).length;
   const memory = summary.memory_mb ? ` Mémoire du navigateur : ${Math.round(summary.memory_mb)} Mo.` : "";
   $("instance-hint").textContent = `${summary.instances.length} / ${summary.max} instances, ${running} démarrée(s).${memory} Chaque instance démarrée ajoute environ 100 Mo au navigateur.`;
+  renderStorage(summary.storage);
   renderServers(summary);
 }
 

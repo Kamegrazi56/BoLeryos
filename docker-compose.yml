@@ -18,4 +18,7 @@ services:
       - boleryos-data:/data
 
 volumes:
+  # Nom fixe : sans lui, Docker préfixe le volume du nom de la pile (« maPile_boleryos-data »). Supprimer puis recréer
+  # la pile sous un autre nom ouvrait alors un volume vide, et toutes les données semblaient effacées.
   boleryos-data:
+    name: boleryos-data

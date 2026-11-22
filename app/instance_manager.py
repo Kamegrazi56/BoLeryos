@@ -30,6 +30,7 @@ from .config import Settings
 from .instances import INSTANCES_FOLDER, default_instance_id, instance_dir, migrate_legacy, slugify
 from .numbers import norm
 from .preferences import MAX_UNIVERSE_LENGTH, Preferences, PreferencesError
+from .storage import storage_status
 
 REGISTRY_FILE = "instances.json"
 LOBBY_ID = "compte"  # pseudo-instance : la session de connexion
@@ -399,6 +400,7 @@ class InstanceManager:
             "default": self.default_id,
             "max": self._settings.max_instances,
             "memory_mb": chromium_memory_mb(),
+            "storage": storage_status(self._settings.data_dir),
             "instances": [self._describe(i) for i in self._infos],
             "universes": [{"name": n, "used": norm(n) in used} for n in self.universes],
             "lobby": {
