@@ -28,7 +28,10 @@ from .numbers import norm
 from .planets import GameUiError, Interrupted
 
 WINDOW_PATH = "/map/continuous/window"
+LIST_PAGE_PATH = "/map/continuous/list/page"  # portions suivantes de la liste « Vue d'ensemble » (25 objets par réponse)
 RESPONSE_WAIT_SECONDS = 4.0
+LIST_PAGE_WAIT_SECONDS = 3.0
+MAX_LIST_PAGES = 12  # portions chargées au plus pour une fenêtre (garde-fou contre une liste sans fin)
 ZOOM_STEPS = 6  # dézooms au plus pour trouver une brèche autour d'une planète
 PAGE_WAIT_SECONDS = 10.0
 TARGET_ATTRIBUTE = "data-bot-target"
@@ -223,6 +226,38 @@ def nearest_from_objects(objects: list, planet_address: str | None, bounds) -> d
             "distance": round(distance(best), 1), "source": "carte"}
 
 
+# Défilement vers le bas de la liste « Vue d'ensemble » : le jeu charge alors la portion suivante (vu sur le vrai jeu le 2026-11-22 :
+# « Chargement de la portion… »). Renvoie le centre de la liste (pour la molette) ou None si elle est introuvable.
+SCROLL_LIST_JS = """() => {
+  const row = document.querySelector('.continuous-inspector__list-row');
+  let box = row ? row.parentElement : document.querySelector('.continuous-inspector__list');
+  while (box && box !== document.body) {
+    const overflow = getComputedStyle(box).overflowY;
+    if (/(auto|scroll)/.test(overflow) && box.scrollHeight > box.clientHeight + 2) { box.scrollTop = box.scrollHeight; break; }
+    box = box.parentElement;
+  }
+  if (!box || box === document.body) return null;
+  const r = box.getBoundingClientRect();
+  return [r.left + r.width / 2, r.top + r.height / 2];
+}"""
+
+
+def describe_view(view: dict) -> str:
+    """Phrase de diagnostic sur la dernière fenêtre de carte lue (objets lus, total annoncé, planètes libres annoncées)."""
+    if not view:
+        return "aucune fenêtre de carte reçue"
+    total = view.get("total")
+    sentence = f"{view['views']} vue(s) de la carte, dernière : {view['objects']} objet(s) lu(s)"
+    if total is not None:
+        sentence += f" sur {total} annoncé(s)"
+    sentence += f" en {view['pages']} page(s)"
+    if view.get("free_announced") is not None:
+        sentence += f", {view['free_announced']} planète(s) libre(s) annoncée(s) par le jeu dont {view['free_read']} lue(s)"
+    if view.get("truncated"):
+        sentence += " ; liste non lue jusqu'au bout"
+    return sentence
+
+
 def compact(address: str) -> str:
     """« M79 50 37 » → « M795037 » (saisie du champ Cible)."""
     return address.replace(" ", "")
@@ -240,6 +275,7 @@ class ExplorationPass(ConstructionPass):
         self.scanning = False
         self._target_debug = ""  # ce que montrait le champ Cible au dernier refus
         self.last_counters: dict | None = None  # derniers compteurs d'exploration lus (quota du jour, places actives)
+        self.map_view: dict = {}  # dernière fenêtre de carte lue par `_search_map` (pour le journal et les messages d'échec)
 
     # ------------------------------------------------------------------ planètes
     def _all_planets(self) -> list[str]:
@@ -358,12 +394,16 @@ class ExplorationPass(ConstructionPass):
         fallback = await self._formula_breach(coords)
         if fallback is not None:
             return fallback
-        raise GameUiError("aucune brèche trouvée autour de la planète")
+        raise GameUiError(f"aucune brèche trouvée autour de la planète ({describe_view(self.map_view)})")
 
     async def _search_map(self, planet: str, pick):
         """Galaxie recentrée sur la planète, puis dézooms : renvoie le premier résultat non vide de `pick(objets, bornes)`
-        sur une fenêtre détaillée de la carte (positions réelles reçues du serveur), ou None."""
+        sur une fenêtre détaillée de la carte (positions réelles reçues du serveur), ou None.
+
+        Le serveur ne livre que 25 objets par réponse, les emplacements libres en dernier : si `pick` ne trouve rien, la liste
+        est descendue (comme le ferait un joueur) pour charger les portions suivantes, puis `pick` regarde l'ensemble."""
         page = self.page
+        self.map_view = {}
         if page.url.split("?")[0].rstrip("/").rsplit("/", 1)[-1] != "galaxy":
             await self._goto("galaxy")
         end = time.monotonic() + PAGE_WAIT_SECONDS
@@ -372,14 +412,17 @@ class ExplorationPass(ConstructionPass):
         await self._select_planet(planet)
         await self._settle(planet)
         pending: list[asyncio.Future] = []
+        portions: list[asyncio.Future] = []
 
         def on_response(response) -> None:
-            if WINDOW_PATH in response.url:
+            if LIST_PAGE_PATH in response.url:
+                portions.append(asyncio.ensure_future(response.json()))
+            elif WINDOW_PATH in response.url:
                 pending.append(asyncio.ensure_future(response.json()))
 
         page.on("response", on_response)
         try:
-            action, seen_detail = "Recentrer la carte", False
+            action, seen_detail, views = "Recentrer la carte", False, 0
             for _ in range(ZOOM_STEPS + 2):
                 before = len(pending)
                 await self._click_named(action)
@@ -390,7 +433,12 @@ class ExplorationPass(ConstructionPass):
                 objects = projection.get("objects") or []
                 if projection.get("mode") == "DETAIL" or objects:
                     seen_detail = True
+                    views += 1
+                    self.map_view = self._view_of(projection, objects, views)
                     found = pick(objects, projection.get("boundsMilli"))
+                    if not found and (projection.get("pagination") or {}).get("nextAfterRef"):
+                        objects = objects + await self._more_objects(projection, portions)
+                        found = pick(objects, projection.get("boundsMilli"))
                     if found:
                         return found
                     action = "Dézoomer"
@@ -403,8 +451,56 @@ class ExplorationPass(ConstructionPass):
             page.remove_listener("response", on_response)
         return None
 
+    def _view_of(self, projection: dict, objects: list, views: int) -> dict:
+        """Résumé de la fenêtre reçue pour le journal : objets lus, total annoncé, planètes libres annoncées par le jeu."""
+        summary = projection.get("summary") or {}
+        return {"views": views, "objects": len(objects), "pages": 1, "truncated": False,
+                "total": (projection.get("pagination") or {}).get("total"),
+                "free_announced": summary.get("freePlanets"), "free_read": self._free_slots(objects)}
+
+    @staticmethod
+    def _free_slots(objects: list) -> int:
+        return sum(1 for o in objects if isinstance(o, dict) and o.get("kind") == "FREE_SLOT")
+
+    async def _more_objects(self, projection: dict, portions: list) -> list:
+        """Charge les portions suivantes de la liste (défilement de la liste, puis lecture des réponses du jeu) et renvoie
+        leurs objets. S'arrête à la dernière portion, sans réponse du jeu, ou après MAX_LIST_PAGES portions."""
+        extra: list = []
+        after = (projection.get("pagination") or {}).get("nextAfterRef")
+        for _ in range(MAX_LIST_PAGES):
+            if not after:
+                break
+            before = len(portions)
+            await self._scroll_list()
+            data = await self._next_payload(portions, before, "objects", LIST_PAGE_WAIT_SECONDS)
+            if data is None:
+                self.map_view["truncated"] = True
+                break
+            extra += [o for o in data.get("objects") or [] if isinstance(o, dict)]
+            after = data.get("nextAfterRef")
+            self.map_view["pages"] += 1
+        else:
+            self.map_view["truncated"] = bool(after)
+        self.map_view["objects"] += len(extra)
+        self.map_view["free_read"] += self._free_slots(extra)
+        return extra
+
+    async def _scroll_list(self) -> None:
+        """Descend la liste « Vue d'ensemble » jusqu'en bas (la molette est donnée sur la liste, comme le ferait un joueur)."""
+        centre = await self._eval(SCROLL_LIST_JS)
+        if centre:
+            await self.page.mouse.move(centre[0], centre[1])
+            await self.page.mouse.wheel(0, -300)  # un petit retour en arrière : la liste déjà en bas ne renverrait aucun défilement
+            await asyncio.sleep(0.2)
+            await self.page.mouse.wheel(0, 3000)
+
     async def _next_window(self, pending: list, before: int) -> dict | None:
-        end = time.monotonic() + RESPONSE_WAIT_SECONDS
+        data = await self._next_payload(pending, before, "projection", RESPONSE_WAIT_SECONDS)
+        return data["projection"] if data else None
+
+    async def _next_payload(self, pending: list, before: int, key: str, seconds: float) -> dict | None:
+        """Dernière réponse lisible reçue depuis `before` et contenant `key` (liste : `objects`, fenêtre : `projection`)."""
+        end = time.monotonic() + seconds
         while time.monotonic() < end:
             if len(pending) > before and all(f.done() for f in pending[before:]):
                 for future in reversed(pending[before:]):
@@ -412,8 +508,8 @@ class ExplorationPass(ConstructionPass):
                         data = future.result()
                     except Exception:  # noqa: BLE001 — réponse illisible : on regarde la précédente
                         continue
-                    if isinstance(data, dict) and isinstance(data.get("projection"), dict):
-                        return data["projection"]
+                    if isinstance(data, dict) and isinstance(data.get(key), (dict, list)):
+                        return data
                 return None
             await asyncio.sleep(0.1)
         return None

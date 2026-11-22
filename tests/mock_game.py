@@ -319,7 +319,7 @@ function galaxyMain() {
   const report = rep ? `<div role="dialog" aria-label="Espionnage"><div><span>Rapport de drone : ${rep.planet}</span>`
     + '<button type="button" id="rclose" aria-label="Fermer le message">x</button><button type="button" id="rdel" aria-label="Supprimer le message">d</button></div>'
     + Object.entries(rep.resources).map(([k, v]) => `<div><span>${k}</span><span>${int(v)}</span></div>`).join('') + '</div>' : '';
-  return '<h2>Galaxie</h2><input aria-label="Recherche de destination">' + zoom + '<section class="continuous-inspector__list">' + rows + breaches + free + more + '</section>' + toast + report;
+  return '<h2>Galaxie</h2><input aria-label="Recherche de destination">' + zoom + `<section class="continuous-inspector__list" ${ui.paged ? 'style="overflow-y:auto;height:60px"' : ''}>` + rows + breaches + free + more + '</section>' + toast + report;
 }
 // Opérations › Exploration : cible, modèles, unités, copies, durée, lancement (structure du vrai jeu).
 const METHOD = () => (ui.way === 'Flotte' ? 'FLEET' : 'PILLARS');
@@ -590,6 +590,8 @@ function render() {
     const r = await (await post('/map/continuous/window', {zoom: ui.zoom})).json();
     ui.windowRows = r.rows || [];
     ui.freeRows = r.free_rows || [];
+    ui.paged = !!(r.projection || {}).pagination;
+    ui.nextAfter = ((r.projection || {}).pagination || {}).nextAfterRef || null;
     render();
   });
   const zl = document.getElementById('zoom-level');
@@ -597,6 +599,13 @@ function render() {
     zl.oninput = () => { ui.zoomLevel = +zl.value; };
     zl.onchange = () => { ui.zoomLevel = +zl.value; post('/api/_zoom', {level: +zl.value}); };
   }
+  const list = document.querySelector('.continuous-inspector__list');
+  if (list) list.onscroll = async () => {
+    if (!ui.nextAfter || list.scrollTop + list.clientHeight < list.scrollHeight - 4) return;
+    const after = ui.nextAfter; ui.nextAfter = null;
+    const r = await (await post('/map/continuous/list/page', {zoom: ui.zoom, afterRef: after})).json();
+    ui.nextAfter = r.nextAfterRef || null;
+  };
   const mo = document.getElementById('more'); if (mo) mo.onclick = () => { ui.listShown += 25; render(); };
   document.querySelectorAll('.drone').forEach((b) => b.onclick = async () => {
     const r = await (await post('/map/continuous/destination', {coords: b.dataset.c, action: 'DRONE'})).json();
@@ -914,6 +923,9 @@ def create_mock_game() -> FastAPI:
                 exp[key] = body[key]
         if "map_api" in body:
             g["map"]["api"] = body["map_api"]
+        for key in ("page_size", "list_dead"):  # pagination de la carte : objets par réponse ; liste qui ne répond plus
+            if "map_" + key in body:
+                g["map"][key] = body["map_" + key]
         for index, by_method in (body.get("units") or {}).items():
             for method, units in by_method.items():
                 g["planets"][int(index)]["units"][method].update(units)
@@ -921,11 +933,8 @@ def create_mock_game() -> FastAPI:
 
     ZOOM_RADII = (300, 1000, 4000, 20000)  # demi-largeur de la fenêtre visible (unités de carte) selon le cran de zoom
 
-    @app.post("/map/continuous/window")
-    async def map_window(request: Request):
-        """Fenêtre visible de la carte, comme le vrai serveur : DETAIL (objets et positions) de près, SUMMARY de loin."""
-        g, body = app.state.game, await request.json()
-        zoom = max(0, min(3, int(body.get("zoom", 1))))
+    def window_objects(g: dict, zoom: int) -> list[dict]:
+        """Objets de la fenêtre visible (planètes, brèches, errants, mines, emplacements libres en dernier, comme le vrai serveur)."""
         positions, breaches = g["map"]["positions"], g["map"]["breaches"]
         cx, cy = positions.get(g["planets"][g["active"]]["coords"], [0, 0])
         radius = ZOOM_RADII[zoom]
@@ -939,16 +948,49 @@ def create_mock_game() -> FastAPI:
                     for a, n, x, y in g["map"]["errants"] if inside(x, y)]
         objects += [{"kind": "MINING", "address": a, "name": "Planete miniere", "miningResourceType": r, "capabilities": ["MINING", "ESPIONAGE"],
                      "positionMilli": [x * 1000, y * 1000]} for a, r, x, y in g["mining"]["mines"] if inside(x, y)]
-        free = g["map"]["free"]
         objects += [{"kind": "FREE_SLOT", "address": a, "positionMilli": [x * 1000, y * 1000], "capabilities": ["COLONIZE", "EXCAVATION"]}
-                    for a, x, y in free if inside(x, y)]
+                    for a, x, y in g["map"]["free"] if inside(x, y)]
+        return objects
+
+    @app.post("/map/continuous/window")
+    async def map_window(request: Request):
+        """Fenêtre visible de la carte, comme le vrai serveur : DETAIL (objets et positions) de près, SUMMARY de loin.
+        Avec `map.page_size`, seuls les premiers objets sont livrés et `pagination.nextAfterRef` donne la suite (25 sur le vrai jeu)."""
+        g, body = app.state.game, await request.json()
+        zoom = max(0, min(3, int(body.get("zoom", 1))))
+        positions, breaches = g["map"]["positions"], g["map"]["breaches"]
+        cx, cy = positions.get(g["planets"][g["active"]]["coords"], [0, 0])
+        radius = ZOOM_RADII[zoom]
+
+        def inside(x, y, r=radius):
+            return abs(x - cx) <= r and abs(y - cy) <= r
+
+        objects = window_objects(g, zoom)
+        free = g["map"]["free"]
         free_rows = [a for a, x, y in free if inside(x, y, radius if g["map"]["api"] else ZOOM_RADII[2])]
         detail = zoom <= 2 and g["map"]["api"]
         # Sans le détail (secours), la liste « Ensemble » montre quand même les brèches proches
         rows = [a for a, x, y in breaches if inside(x, y, radius if g["map"]["api"] else ZOOM_RADII[2])]
         bounds = [[(cx - radius) * 1000, (cy - radius) * 1000], [(cx + radius) * 1000, (cy + radius) * 1000]]
-        return {"success": True, "rows": rows, "free_rows": free_rows,
-                "projection": {"mode": "DETAIL" if detail else "SUMMARY", "boundsMilli": bounds, "objects": objects if detail else []}}
+        size = g["map"].get("page_size")
+        projection = {"mode": "DETAIL" if detail else "SUMMARY", "boundsMilli": bounds, "objects": objects if detail else [],
+                      "summary": {"freePlanets": sum(1 for o in objects if o["kind"] == "FREE_SLOT")}}
+        if detail and size:
+            projection["pagination"] = {"nextAfterRef": str(size) if len(objects) > size else None, "total": len(objects)}
+            projection["objects"] = objects[:size]
+        return {"success": True, "rows": rows, "free_rows": free_rows, "projection": projection}
+
+    @app.post("/map/continuous/list/page")
+    async def map_list_page(request: Request):
+        """Portion suivante de la liste (chargée quand le joueur descend la liste), après la référence `afterRef`."""
+        g, body = app.state.game, await request.json()
+        if g["map"].get("list_dead"):
+            raise HTTPException(503, "liste indisponible")
+        g["map"]["list_pages"] = g["map"].get("list_pages", 0) + 1
+        objects = window_objects(g, max(0, min(3, int(body.get("zoom", 1)))))
+        start, size = int(body["afterRef"]), g["map"]["page_size"]
+        end = start + size
+        return {"success": True, "objects": objects[start:end], "nextAfterRef": str(end) if end < len(objects) else None}
 
     @app.post("/map/continuous/destination")
     async def destination(request: Request):

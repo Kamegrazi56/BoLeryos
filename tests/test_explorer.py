@@ -177,3 +177,13 @@ def test_two_unconfirmed_launches_disable_the_feature(game_client, game, monkeyp
     _set(game_client, planets=[CONCORDE, EGIDE])  # deux lancements dans le passage
     assert "désactivée" in _run(game_client)
     assert _bot(game_client).scheduler.store.get("explorations")["enabled"] is False
+
+
+def test_describe_view_tells_what_the_map_showed():
+    from app.explorer import describe_view
+
+    assert describe_view({}) == "aucune fenêtre de carte reçue"
+    view = {"views": 3, "objects": 28, "pages": 2, "total": 28, "free_announced": 3, "free_read": 0, "truncated": True}
+    text = describe_view(view)
+    assert "28 objet(s) lu(s) sur 28 annoncé(s) en 2 page(s)" in text
+    assert "3 planète(s) libre(s) annoncée(s) par le jeu dont 0 lue(s)" in text and "non lue jusqu'au bout" in text

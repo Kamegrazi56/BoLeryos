@@ -133,3 +133,25 @@ def test_two_unconfirmed_launches_stop_the_feature(game_client, game):
     _set(game_client)
     summary = _run(game_client)
     assert "désactivée après deux lancements non confirmés" in summary and _launched(game) == []
+
+
+def test_free_slots_on_the_next_pages_of_the_map_list_are_found(game_client, game):
+    """Vrai jeu (Asterion, 2026-11-22) : 25 objets par réponse, les emplacements libres sont en dernier → il faut descendre la liste."""
+    _scan(game_client)
+    game.set_exp(map_page_size=1)
+    _set(game_client)
+    daily = game_client.post("/api/excavations/scan").json()["daily"]
+    assert [s["address"] for s in daily["sites"][EGIDE]] == ["M58 80 21", "M68 75 95"]
+    assert daily["sites"][EGIDE][0]["source"] == "carte"
+    view = _bot(game_client).excavator.map_view
+    assert view["pages"] > 1 and view["free_read"] == 2 and view["free_announced"] == 2 and not view["truncated"]
+
+
+def test_an_unreadable_list_is_reported_instead_of_claiming_there_is_no_free_site(game_client, game):
+    _scan(game_client)
+    game.set_exp(map_page_size=1, map_list_dead=True)
+    _set(game_client, planets=[{"name": STRATE, "copies": 1}], mira=STRATE)
+    daily = game_client.post("/api/excavations/scan").json()["daily"]
+    assert "planète(s) libre(s)" in daily["error"] or "aucun emplacement libre" in daily["error"]
+    assert "objet(s) lu(s)" in daily["error"]
+    assert _launched(game) == []

@@ -20,7 +20,7 @@ import time
 from . import builder, human
 from .builder import UNCONFIRMED_LIMIT
 from .excavations import SITES_KEPT, describe, slots
-from .explorer import CLEAR_MARK_JS, MARK_TARGET_JS, TARGET_ATTRIBUTE, ExplorationPass, formula_distance
+from .explorer import CLEAR_MARK_JS, MARK_TARGET_JS, TARGET_ATTRIBUTE, ExplorationPass, describe_view, formula_distance
 from .planets import GameUiError, Interrupted
 
 EXCAVATION_PATH = "operations?method=PILLARS&mission=EXCAVATION"
@@ -312,13 +312,18 @@ class ExcavationPass(ExplorationPass):
     async def _find_sites(self, planet: str) -> list[dict]:
         coords = self._coords(planet)
         found = await self._search_map(planet, lambda objects, bounds: nearest_sites(objects, coords, bounds))
+        view = describe_view(self.map_view)
         if found:
+            self.bot.log(f"Fouilles : carte lue autour de {planet} ({view}).")
             return found
         rows = await self._eval(FREE_ROWS_JS)  # secours : la liste « Ensemble », classée par la formule des adresses
         if rows:
             ranked = sorted(rows, key=lambda a: (formula_distance(coords or "", a) is None, formula_distance(coords or "", a) or 0.0))
             return [{"address": a, "distance": formula_distance(coords or "", a), "source": "formule"} for a in ranked[:SITES_KEPT]]
-        raise GameUiError("aucun emplacement libre trouvé autour de la planète")
+        announced = self.map_view.get("free_announced") or 0
+        if announced and not self.map_view.get("free_read"):  # le jeu en annonce, le bot n'en lit aucun : lecture incomplète
+            raise GameUiError(f"le jeu annonce {announced} planète(s) libre(s) mais aucune n'a pu être lue ({view})")
+        raise GameUiError(f"aucun emplacement libre trouvé autour de la planète ({view})")
 
     # ------------------------------------------------------------------ page Fouille
     async def _open_excavations(self) -> None:
