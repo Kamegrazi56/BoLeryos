@@ -137,3 +137,59 @@ def test_human_click_closes_the_expired_packs_announcement_without_renewing(sett
     (hits, renewed), closed = _run(settings, scenario, PACKS_PAGE)
     assert hits == 1 and not renewed  # fermée par la croix : le bouton d'achat n'est jamais touché
     assert closed == [PACKS_NAME]
+
+
+CATCHUP_NAME = "Rattrapage galactique"
+CATCHUP_PAGE = """
+<button id="target" onclick="window.hits = (window.hits || 0) + 1">Cible</button>
+<div id="catchup" role="dialog" aria-label="Rattrapage galactique"
+     style="position:fixed;inset:0;background:#000a;z-index:98">
+  <button aria-label="Réduire la fenêtre" onclick="window.reduced = true">-</button>
+  <button aria-label="Fermer la transmission" onclick="document.getElementById('catchup').remove()">x</button>
+  <button id="launch" onclick="window.launched = true">Lancer le rattrapage</button>
+</div>
+<div id="confirm" role="dialog" aria-modal="true" aria-label="Confirmer l'action" style="position:fixed;top:0;right:0">
+  <button aria-label="Fermer" onclick="document.getElementById('confirm').remove()">x</button>
+</div>
+"""
+STACKED_PAGE = """
+<button id="target" onclick="window.hits = (window.hits || 0) + 1">Cible</button>
+<div id="a" role="dialog" aria-label="Annonce A" style="position:fixed;inset:0;z-index:97">
+  <button aria-label="Fermer la transmission" onclick="document.getElementById('a').remove()">x</button>
+</div>
+<div id="b" role="dialog" aria-label="Annonce B" style="position:fixed;inset:0;z-index:98">
+  <button aria-label="Fermer la transmission" onclick="document.getElementById('b').remove()">x</button>
+</div>
+"""
+
+
+def test_unlisted_announcement_is_closed_by_its_cross_only(settings):
+    async def scenario(page, closed):
+        await human.click(page, page.locator("#target"), settings)
+        state = await page.evaluate("[window.hits || 0, !!window.launched, !!window.reduced]")
+        return state, closed, await page.locator("#confirm").count()
+
+    (hits, launched, reduced), closed, confirm = _run(settings, scenario, CATCHUP_PAGE)
+    assert hits == 1 and not launched and not reduced  # seule la croix est cliquée
+    assert closed == [CATCHUP_NAME]
+    assert confirm == 1  # une fenêtre sans « Fermer la transmission » reste ouverte
+
+
+def test_stacked_announcements_are_all_closed(settings):
+    async def scenario(page, closed):
+        names = await interruptions.dismiss(page)
+        return names, await page.locator("[role=dialog]").count()
+
+    names, remaining = _run(settings, scenario, STACKED_PAGE)
+    assert sorted(names) == ["Annonce A", "Annonce B"]
+    assert remaining == 0
+
+
+def test_locator_handler_closes_unlisted_announcement_that_blocks_a_click(settings):
+    async def scenario(page, closed):
+        await page.locator("#target").click(timeout=10_000)
+        return await page.evaluate("window.hits || 0"), closed
+
+    hits, closed = _run(settings, scenario, CATCHUP_PAGE)
+    assert hits == 1
+    assert closed == [CATCHUP_NAME]
