@@ -5,6 +5,11 @@ Deux protections se complètent :
 - `dismiss()` est appelée avant chaque action et chaque lecture (clics, frappes, surveillance des attaques),
   car les clics à la souris (`page.mouse`) ne déclenchent pas le gestionnaire.
 
+Une veille de fond (`_watch`) refait la même vérification toutes les secondes, même quand le bot n'agit pas
+(attente, lecture, pause entre deux actions) : une annonce qui apparaît « n'importe quand » est donc fermée en
+quelques secondes. Un verrou par page évite que la veille et une action ferment la même fenêtre en même temps
+(le second clic tomberait sur le jeu, sous la fenêtre déjà fermée).
+
 Pour fermer, on n'utilise AUCUN `locator` : toute opération sur un élément de la fenêtre déclencherait le
 gestionnaire (« intercepting action »), qui la fermerait avant l'opération et la ferait échouer. La position du
 bouton est lue avec `page.evaluate`, puis le clic est un vrai clic de souris.
@@ -17,6 +22,7 @@ cette croix et ne sont donc jamais fermées par erreur.
 
 from __future__ import annotations
 
+import asyncio
 import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -24,6 +30,7 @@ from dataclasses import dataclass
 from playwright.async_api import Locator, Page
 
 GONE_TIMEOUT_MS = 2_000
+WATCH_INTERVAL_S = 1.0  # fréquence de la veille de fond
 MAX_PER_PASS = 4  # annonces empilées fermées au plus par passage (évite toute boucle sans fin)
 
 # Croix des annonces du jeu (« transmissions »), relevée sur le vrai jeu le 2026-11-22 (« Rattrapage galactique »).
@@ -92,6 +99,17 @@ INTERRUPTIONS: tuple[Interruption, ...] = (DEVLOG, STEAM, PACKS_EXPIRED)
 _callbacks: weakref.WeakKeyDictionary[Page, Callable[[str], None]] = weakref.WeakKeyDictionary()
 
 
+_locks: weakref.WeakKeyDictionary[Page, asyncio.Lock] = weakref.WeakKeyDictionary()
+_watchers: set[asyncio.Task] = set()  # références fortes : une tâche sans référence peut être détruite en cours de route
+
+
+def _lock(page: Page) -> asyncio.Lock:
+    lock = _locks.get(page)
+    if lock is None:
+        lock = _locks[page] = asyncio.Lock()
+    return lock
+
+
 def _notify(page: Page, name: str) -> None:
     callback = _callbacks.get(page)
     if callback is not None:
@@ -101,11 +119,12 @@ def _notify(page: Page, name: str) -> None:
 async def _close(page: Page, item: Interruption) -> bool:
     """Clique sur « Fermer » et attend que la fenêtre disparaisse. Retourne True si c'est cette fonction qui l'a fermée."""
     try:
-        point = await page.evaluate(_FIND_CLOSE_JS, [item.dialog, item.close])
-        if point is None:
-            return False
-        await page.mouse.click(point["x"], point["y"])
-        await page.wait_for_function(_IS_GONE_JS, arg=item.dialog, timeout=GONE_TIMEOUT_MS)
+        async with _lock(page):  # position relue sous verrou : si un autre appel a déjà fermé la fenêtre, pas de clic
+            point = await page.evaluate(_FIND_CLOSE_JS, [item.dialog, item.close])
+            if point is None:
+                return False
+            await page.mouse.click(point["x"], point["y"])
+            await page.wait_for_function(_IS_GONE_JS, arg=item.dialog, timeout=GONE_TIMEOUT_MS)
     except Exception:  # noqa: BLE001 - déjà fermée, page en navigation… : l'action du bot continue
         return False
     _notify(page, item.name)
@@ -115,11 +134,14 @@ async def _close(page: Page, item: Interruption) -> bool:
 async def _close_any_transmission(page: Page) -> str | None:
     """Ferme une annonce du jeu non listée ; retourne son titre, ou None s'il n'y en a pas (ou si elle résiste)."""
     try:
-        found = await page.evaluate(_FIND_ANY_JS, TRANSMISSION_CLOSE)
-        if found is None:
-            return None
-        await page.mouse.click(found["x"], found["y"])
-        await page.wait_for_function(_ANY_GONE_JS, arg=[TRANSMISSION_CLOSE, found["label"]], timeout=GONE_TIMEOUT_MS)
+        async with _lock(page):
+            found = await page.evaluate(_FIND_ANY_JS, TRANSMISSION_CLOSE)
+            if found is None:
+                return None
+            await page.mouse.click(found["x"], found["y"])
+            await page.wait_for_function(
+                _ANY_GONE_JS, arg=[TRANSMISSION_CLOSE, found["label"]], timeout=GONE_TIMEOUT_MS
+            )
     except Exception:  # noqa: BLE001 - déjà fermée, page en navigation… : l'action du bot continue
         return None
     name = found["label"] or "Annonce du jeu"
@@ -138,6 +160,13 @@ async def dismiss(page: Page) -> list[str]:
     return names
 
 
+async def _watch(page: Page) -> None:
+    """Veille de fond : ferme toute fenêtre gênante, à tout moment, jusqu'à la fermeture de la page."""
+    while not page.is_closed():
+        await asyncio.sleep(WATCH_INTERVAL_S)
+        await dismiss(page)  # ne lève jamais d'erreur
+
+
 async def install(page: Page, on_closed: Callable[[str], None] | None = None) -> None:
     """Enregistre les gestionnaires sur la page ; `on_closed(nom)` est appelé à chaque fermeture."""
     if on_closed is not None:
@@ -153,3 +182,7 @@ async def install(page: Page, on_closed: Callable[[str], None] | None = None) ->
         await _close_any_transmission(page)
 
     await page.add_locator_handler(page.locator(_TRANSMISSION_DIALOG), any_handler)
+
+    task = asyncio.ensure_future(_watch(page))
+    _watchers.add(task)
+    task.add_done_callback(_watchers.discard)

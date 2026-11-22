@@ -231,3 +231,47 @@ def test_models_dialog_is_reopened_when_an_announcement_swallows_the_click(setti
     rows, closed = _run(settings, scenario, LATE_PACKS_PAGE)
     assert [r["name"] for r in rows] == ["Expe"]
     assert closed == [PACKS_NAME]
+
+
+# Annonces qui surgissent seules, sans aucune action du bot (la veille de fond doit les fermer).
+LATE_ANNOUNCEMENTS_PAGE = """
+<button id="target" onclick="window.hits = (window.hits || 0) + 1">Cible</button>
+<script>
+setTimeout(() => document.body.insertAdjacentHTML('beforeend', `
+  <div id="a1" role="dialog" aria-label="Rattrapage galactique" style="position:fixed;inset:0;background:#000a;z-index:98">
+    <button aria-label="Fermer la transmission" onclick="document.getElementById('a1').remove()">x</button>
+  </div>`), 300);
+setTimeout(() => document.body.insertAdjacentHTML('beforeend', `
+  <div id="packs" role="dialog" aria-label="Vos packs sont arrivés à leur terme"
+       style="position:fixed;inset:0;background:#000a;z-index:98">
+    <button aria-label="Fermer la transmission" onclick="document.getElementById('packs').remove()">x</button>
+    <button id="renew" onclick="window.renewed = true">RÉACTIVER MES PACKS</button>
+  </div>`), 1500);
+</script>
+"""
+
+
+def test_background_watch_closes_announcements_appearing_while_the_bot_is_idle(settings, monkeypatch):
+    monkeypatch.setattr(interruptions, "WATCH_INTERVAL_S", 0.1)
+
+    async def scenario(page, closed):
+        await asyncio.sleep(2.5)  # le bot n'agit pas : seule la veille peut fermer
+        return await page.evaluate("document.querySelectorAll('[role=dialog]').length"), closed
+
+    remaining, closed = _run(settings, scenario, LATE_ANNOUNCEMENTS_PAGE)
+    assert remaining == 0
+    assert closed == ["Rattrapage galactique", PACKS_NAME]
+
+
+def test_watch_and_action_never_click_twice_on_the_same_announcement(settings, monkeypatch):
+    monkeypatch.setattr(interruptions, "WATCH_INTERVAL_S", 0.01)
+
+    async def scenario(page, closed):
+        for _ in range(5):
+            await asyncio.gather(interruptions.dismiss(page), interruptions.dismiss(page))
+        # un clic en trop tomberait sur « Cible » ou sur « Réactiver » placés sous l'annonce
+        return await page.evaluate("[window.hits || 0, !!window.renewed]"), closed
+
+    (hits, renewed), closed = _run(settings, scenario, PACKS_PAGE)
+    assert (hits, renewed) == (0, False)
+    assert closed == [PACKS_NAME]
