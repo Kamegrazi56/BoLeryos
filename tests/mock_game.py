@@ -150,7 +150,7 @@ def initial_state():
                                {"name": "Canalisation Éthérique", "progress": 0, "need": 180},
                                {"name": "Veines Profondes", "progress": 0, "need": 0}]},
         # Fouilles : plafond personnel, Fouilles en cours (origine, site, durée, fin), Mira Venn, autres missions actives
-        "exc": {"max": 6, "active": [], "mira_busy": False, "other_missions": 0, "no_effect": False},
+        "exc": {"max": 6, "active": [], "mira_busy": False, "other_missions": 0, "no_effect": False, "rt_rate": 0.1},
         # Piliers (fenêtre « Gérer les Piliers », vrai jeu 10/11) : planète → {"closed", "pending": {"to", "end"} | None} ;
         # absente = Piliers actifs. no_effect : le clic de confirmation ne fait rien.
         "pillars": {}, "pillar_no_effect": False,
@@ -373,6 +373,8 @@ function excForm(p) {
     + hero + `<div><h3>2. Composition de mission</h3><button type="button">Modèles</button>${rows}</div><button type="button">Mobilisation générale</button>`
     + `<div><h3>Durée et lancement</h3>${hours}<div><span>Fouilles actives</span><span>${exc.active.length} / ${exc.max}</span></div>`
     + `<div><span>Missions actives</span><span>${missions} / ${state.missions_max}</span></div>`
+    + `<div><span>Réserves de Trame</span></div><div><span>Énergie requise</span><span>—</span></div>`
+    + `<div><span>RT requis</span><span>${total >= 1 ? (total * exc.rt_rate).toLocaleString('fr-FR', {maximumFractionDigits: 3}) + ' RT' : '—'}</span></div>`  // vrai jeu 22/11 : « — » sans équipe, sinon « 0,077 RT »
     + `<button type="button" id="elaunch" ${ok ? '' : 'disabled'}>Lancer la fouille</button></div>`
     + `<section><h3>Missions en cours</h3>${excCards() || '<p>Aucune mission disponible</p>'}</section>`;
 }
@@ -1165,7 +1167,7 @@ def create_mock_game() -> FastAPI:
     async def set_exc(request: Request):
         """Crochet de test : plafond, Fouilles en cours (« end_in » en secondes), Mira, autres missions, clic sans effet."""
         body, exc = await request.json(), app.state.game["exc"]
-        for key in ("max", "mira_busy", "other_missions", "no_effect"):
+        for key in ("max", "mira_busy", "other_missions", "no_effect", "rt_rate"):
             if key in body:
                 exc[key] = body[key]
         if "missions_max" in body:  # places de mission du compte (en-tête d'Opérations)

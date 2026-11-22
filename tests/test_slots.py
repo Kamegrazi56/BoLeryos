@@ -3,7 +3,7 @@ faux jeu avant chaque lancement (compteur « Missions actives X / Y » commun au
 
 import pytest
 
-from app.slots import SlotError, SlotSettings, need, validate
+from app.slots import SlotError, SlotSettings, launchable_excavations, need, validate
 
 EGIDE, CONCORDE = "6-79-Egide", "8-50-Concorde"
 TEAM = {"Scientifique": 2500, "Mineur": 2500}
@@ -117,3 +117,10 @@ def test_hacking_and_mining_wait_for_a_free_place(game_client, game):
                                                  "delay_min": 0, "delay_max": 0}).status_code == 200
     assert "plus de place de mission" in game_client.portal.call(_bot(game_client).miner.run_pass)
     assert _launched(game, "mining") == []
+
+
+def test_excavations_set_beyond_the_sites_or_the_game_maximum_do_not_reserve_places():
+    wanted = [{"planet": "A"}] * 3 + [{"planet": "B"}] * 3 + [{"planet": "C"}] * 3 + [{"planet": "D"}] * 3
+    daily = {"tried": ["A", "B", "C"], "sites": {"A": [1, 2], "B": [1, 2, 3]}, "max_active": 6}  # C essayée sans site, D pas encore relevée
+    assert launchable_excavations(wanted, daily) == 6  # 2 + 3 + 0 + 3 = 8, ramené au maximum du jeu
+    assert launchable_excavations(wanted, {**daily, "max_active": None}) == 8

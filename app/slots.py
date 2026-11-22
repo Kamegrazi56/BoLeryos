@@ -5,7 +5,8 @@ Réglages du joueur : un nombre de places à toujours garder libres, et l'ordre 
 des missions. Avant chaque lancement, une fonctionnalité ne peut prendre que :
     Y − X − places gardées libres − ce qui manque encore aux fonctionnalités de priorité supérieure (activées).
 Ce qui manque à une fonctionnalité :
-  - Fouilles : Fouilles réglées − Fouilles en cours (une Fouille finie qui attend son délai compte comme manquante) ;
+  - Fouilles : Fouilles réglées qui peuvent partir (au plus les sites libres relevés par planète et le maximum du jeu) − Fouilles
+    en cours (une Fouille finie qui attend son délai compte comme manquante) ;
   - Forages : places réglées − forages en cours ;
   - Piratage : 1 si Naël n'est pas en mission ;
   - Explorations : les copies de son prochain passage, 0 si le quota du jour est épuisé.
@@ -110,6 +111,17 @@ class SlotSettings:
 
 
 # ------------------------------------------------------------------ besoins des fonctionnalités
+def launchable_excavations(wanted: list[dict], daily: dict) -> int:
+    """Fouilles réglées qui peuvent vraiment partir : au plus autant que de sites libres relevés par planète (une planète pas
+    encore relevée compte pour tout ce qui est réglé) et que le maximum du jeu. Les Fouilles réglées en trop n'ont pas à
+    réserver de places de mission aux fonctionnalités placées plus bas."""
+    per_planet: dict[str, int] = {}
+    for w in wanted:
+        per_planet[w["planet"]] = per_planet.get(w["planet"], 0) + 1
+    total = sum(min(n, len(daily["sites"].get(p, []))) if p in daily["tried"] else n for p, n in per_planet.items())
+    return min(total, daily["max_active"]) if daily.get("max_active") else total
+
+
 def need(bot, feature_id: str, now: float | None = None) -> int:
     """Places qui manquent encore à une fonctionnalité (0 si elle est désactivée ou n'a rien à lancer)."""
     now = time.time() if now is None else now
@@ -120,7 +132,7 @@ def need(bot, feature_id: str, now: float | None = None) -> int:
         s = bot.excavations.get()
         wanted = [w for w in excavation_slots(s, bot.explorer._all_planets()) if w["units"]]
         running = sum(1 for t in bot.excavations.tracked() if t.get("end") and t["end"] > now)
-        return max(0, len(wanted) - running)
+        return max(0, launchable_excavations(wanted, bot.excavations.daily()) - running)
     if feature_id == "minings":
         s = bot.minings.get()
         if not s["planets"] or not s["resources"]:

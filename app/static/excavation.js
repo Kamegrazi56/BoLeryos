@@ -25,21 +25,16 @@
   const allPlanets = () => !form.planets.length && !noneChecked;
   const maxActive = () => data.daily.max_active || null; // Fouilles actives au plus pour le compte (relevé du jour)
   const used = () => (allPlanets() ? form.copies * data.planets.length : form.planets.reduce((s, p) => s + p.copies, 0));
-  /** Nombre de Fouilles demandé, ramené à ce que le jeu permet encore (`others` : Fouilles des autres planètes). */
-  function capped(requested, others, perPlanets = 1) {
-    const max = maxActive();
-    const wanted = Math.min(10, Math.max(1, requested));
-    if (!max) return wanted;
-    const room = Math.max(1, Math.floor((max - others) / perPlanets));
-    if (wanted > room) say(`Le jeu permet ${max} Fouilles à la fois : ${room} au plus ici.`, "error");
-    else if ($("exc-msg").textContent.startsWith("Le jeu permet")) say(""); // nombre de nouveau possible : l'avertissement s'efface
-    return Math.min(wanted, room);
-  }
+  /** Nombre de Fouilles demandé, de 1 à 10 : il peut dépasser le maximum du jeu (voir `renderLimit`). */
+  const capped = (requested) => Math.min(10, Math.max(1, requested));
   function renderLimit() {
     const max = maxActive();
     const n = used();
-    $("exc-limit").textContent = max ? `Fouilles simultanées : ${n} / ${max} (maximum du jeu, relevé du jour)` : "Maximum du jeu inconnu : il sera lu au relevé du jour.";
-    $("exc-limit").classList.toggle("warn", !!max && n > max);
+    const over = !!max && n > max;
+    $("exc-limit").textContent = max
+      ? `Fouilles réglées : ${n} — le jeu en permet ${max} à la fois (relevé du jour)${over ? " : les Fouilles en trop attendent une place libre." : "."}`
+      : "Maximum du jeu inconnu : il sera lu au relevé du jour.";
+    $("exc-limit").classList.remove("warn"); // dépasser le maximum est permis : simple information
   }
 
   function fromSettings(s) {
@@ -48,7 +43,7 @@
     planets.forEach((p) => { memory[p.name] = clone(p); });
     noneChecked = false;
     return { send: pick(s), copies: s.copies, fouilles: s.fouilles.map(pick), planets, per_slot: s.per_slot, mira: s.mira,
-             delay_min: s.delay_min, delay_max: s.delay_max };
+             delay_min: s.delay_min, delay_max: s.delay_max, max_rt: s.max_rt ?? null };
   }
 
   // ------------------------------------------------------------------------------ une Fouille : durée + équipe
@@ -108,7 +103,7 @@
     const copies = el("input", { type: "number", min: "1", max: "10", step: "1", value: entry.copies, ariaLabel: `Fouilles simultanées : ${entry.name}` });
     copies.addEventListener("change", () => {
       if (copies.value === "") return;
-      entry.copies = capped(Number(copies.value), used() - entry.copies);
+      entry.copies = capped(Number(copies.value));
       renderPlanetRows(); // une Fouille de plus ou de moins
       changed();
     });
@@ -136,7 +131,7 @@
   }
   $("exc-copies").addEventListener("change", () => {
     if ($("exc-copies").value === "") return;
-    form.copies = capped(Number($("exc-copies").value), 0, Math.max(1, data.planets.length)); // pour chaque planète
+    form.copies = capped(Number($("exc-copies").value));
     renderPlanetRows();
     changed();
   });
@@ -156,6 +151,7 @@
     renderMira();
     $("exc-delay-min").value = form.delay_min ?? "";
     $("exc-delay-max").value = form.delay_max ?? "";
+    $("exc-max-rt").value = form.max_rt ?? "";
   }
   $("exc-duration").addEventListener("change", () => { form.send.duration = Number($("exc-duration").value); changed(); });
   $("exc-mira").addEventListener("change", () => { form.mira = $("exc-mira").value; changed(); });
@@ -163,6 +159,8 @@
     form[key] = $(id).value === "" ? null : Number($(id).value);
     changed();
   }));
+
+  $("exc-max-rt").addEventListener("input", () => { form.max_rt = $("exc-max-rt").value === "" ? null : Number($("exc-max-rt").value); changed(); });
 
   // ------------------------------------------------------------------------------ résumé
   const sendText = (f) => `${f.duration} h, ${total(f.units)} unités`;
@@ -179,7 +177,8 @@
     const what = allPlanets()
       ? planetText("chaque planète", form.copies, form.fouilles)
       : form.planets.map((p) => planetText(p.name, p.copies, p.fouilles)).join(" ; ");
-    $("exc-summary").textContent = `En continu : ${what}.${delay}`;
+    const cap = form.max_rt ? ` Aucune Fouille au-dessus de ${form.max_rt} RT.` : "";
+    $("exc-summary").textContent = `En continu : ${what}.${delay}${cap}`;
   }
 
   // ------------------------------------------------------------------------------ relevé du jour et Fouilles suivies
@@ -213,7 +212,7 @@
   // ------------------------------------------------------------------------------ enregistrement et relecture
   function formValue() {
     return { ...form.send, copies: form.copies, fouilles: form.fouilles, planets: form.planets, per_slot: form.per_slot, mira: form.mira,
-             delay_min: form.delay_min, delay_max: form.delay_max };
+             delay_min: form.delay_min, delay_max: form.delay_max, max_rt: form.max_rt };
   }
 
   $("exc-save").addEventListener("click", async () => {

@@ -179,6 +179,7 @@ class ExcavationRequest(ExcavationSend):  # durée + équipe : l'envoi commun
     mira: str = Field(default="", max_length=200)
     delay_min: int | None = Field(default=None, ge=0, le=100_000)
     delay_max: int | None = Field(default=None, ge=0, le=100_000)
+    max_rt: float | None = Field(default=None, ge=0, le=2_000_000_000)  # coût maximum en RT d'une Fouille (None ou vide : aucun plafond)
 
 
 class SlotsRequest(BaseModel):

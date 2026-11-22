@@ -15,7 +15,10 @@ Réglages :
   - `per_slot` : chaque Fouille (1, 2, …) a sa propre durée et sa propre équipe (`fouilles` de la planète, ou `fouilles` commun
     avec « toutes les planètes »). Décoché, l'envoi commun vaut pour toutes, mais les réglages par Fouille restent en mémoire ;
   - `mira` : la planète dont la Fouille 1 part avec Mira Venn (« » : aucune) ;
-  - le délai avant relance (minutes, tiré au hasard entre le minimum et le maximum).
+  - le délai avant relance (minutes, tiré au hasard entre le minimum et le maximum) ;
+  - `max_rt` : coût maximum en RT d'UNE Fouille (ligne « RT requis » de la page, relevée le 2026-11-22), `None` : aucun plafond.
+Le nombre de Fouilles réglées peut dépasser ce que le jeu permet à la fois (« Fouilles actives » : N / 6) ou ce que les sites
+libres d'une planète offrent : le bot traite les planètes dans l'ordre, lance ce qui est possible et laisse le reste attendre.
 L'ancien format (`lines` : planète, équipe, durée, places, Mira) est encore lu et converti.
 
 Fichier `<data_dir>/excavations.json` : {"settings": {...}, "daily": {...}, "tracked": [...]}.
@@ -27,6 +30,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import os
 import tempfile
 import time
@@ -43,6 +47,7 @@ MAX_TEAM = 5000
 MAX_SLOTS = 10  # Fouilles simultanées par planète
 MAX_PLANETS = 50
 MAX_DELAY_MINUTES = 24 * 60
+MAX_RT = 1_000_000_000  # plafond de coût en RT par Fouille accepté dans les réglages
 SITES_KEPT = 10  # sites libres les plus proches gardés par planète au relevé du jour
 DEFAULT_SETTINGS: dict = {
     "duration": DURATIONS[0], "units": {},  # envoi commun
@@ -52,6 +57,7 @@ DEFAULT_SETTINGS: dict = {
     "per_slot": False,
     "mira": "",
     "delay_min": None, "delay_max": None,
+    "max_rt": None,  # coût maximum en RT d'une Fouille ; None = pas de plafond
 }
 # `tried` : planètes dont les sites ont été relevés ce jour-là ; une planète choisie après le relevé l'est au passage suivant.
 EMPTY_DAILY: dict = {"day": "", "scanned_at": None, "source": "", "error": "", "max_active": None, "sites": {}, "tried": []}
@@ -69,6 +75,11 @@ def today() -> str:
 
 def _int_in(value, low: int, high: int) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and low <= value <= high
+
+
+def _rt_limit_ok(value) -> bool:
+    """Plafond de RT : nombre (entier ou décimal) strictement positif ; le coût réel est fractionnaire (« 0,077 RT »)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and 0 < value <= MAX_RT
 
 
 def _send(raw, where: str, errors: list[str]) -> dict:
@@ -125,13 +136,12 @@ def _from_lines(data: dict) -> dict:
     first = lines[0] if lines else {}
     return {"duration": first.get("duration", DURATIONS[0]), "units": first.get("units", {}), "copies": 1, "fouilles": [],
             "planets": [{**p, "fouilles": p["fouilles"][:MAX_SLOTS]} for p in planets.values()], "per_slot": bool(lines),
-            "mira": mira, "delay_min": data.get("delay_min"), "delay_max": data.get("delay_max")}
+            "mira": mira, "delay_min": data.get("delay_min"), "delay_max": data.get("delay_max"), "max_rt": None}
 
 
-def validate(data, known_planets: list[str] | None = None, max_active: int | None = None) -> dict:
-    """Réglages complets et valides, ou ExcavationError (messages en français).
-    `max_active` : Fouilles actives au plus pour le compte (relevé du jour) ; le total des Fouilles simultanées ne peut pas
-    le dépasser (avec « toutes les planètes » : Fouilles par planète × planètes connues)."""
+def validate(data, known_planets: list[str] | None = None) -> dict:
+    """Réglages complets et valides, ou ExcavationError (messages en français). Le total des Fouilles réglées n'est pas borné
+    par le maximum du jeu : ce qui ne peut pas partir attend une place libre."""
     if not isinstance(data, dict):
         raise ExcavationError(["Réglages de fouille illisibles."])
     if "lines" in data and "planets" not in data:
@@ -182,12 +192,12 @@ def validate(data, known_planets: list[str] | None = None, max_active: int | Non
         errors.append(f"Délai avant relance : choisissez un minimum et un maximum (0 à {MAX_DELAY_MINUTES} minutes).")
     elif delay_min > delay_max:
         errors.append("Délai avant relance : le minimum dépasse le maximum.")
+    max_rt = data.get("max_rt")
+    if max_rt is not None and not _rt_limit_ok(max_rt):
+        errors.append(f"Coût maximum en RT : un nombre supérieur à 0 (décimales acceptées, jusqu'à {MAX_RT}), ou vide pour aucun plafond.")
+        max_rt = None
     out = {**common, "copies": copies, "fouilles": fouilles, "planets": planets, "per_slot": per_slot, "mira": mira,
-           "delay_min": delay_min, "delay_max": delay_max}
-    if max_active and not errors:
-        wanted = sum(p["copies"] for p in planets) if planets else copies * len(known_planets or [])
-        if wanted > max_active:
-            errors.append(f"Fouilles simultanées : {wanted} au total, le jeu en permet {max_active} à la fois.")
+           "delay_min": delay_min, "delay_max": delay_max, "max_rt": max_rt}
     if not errors:  # chaque Fouille qui partira doit avoir une équipe complète
         for slot in slots(out, [] if planets else ["toutes les planètes"]):
             problem = _team_problem(slot["units"])
@@ -260,7 +270,7 @@ class ExcavationStore:
         return copy.deepcopy(self._settings)
 
     def replace(self, data, known_planets: list[str] | None = None) -> dict:
-        self._settings = validate(data, known_planets, self._daily.get("max_active"))
+        self._settings = validate(data, known_planets)
         self._save()
         return self.get()
 

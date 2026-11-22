@@ -281,7 +281,7 @@
       </header>
       <details class="help-box">
         <summary>Comment ça marche ?</summary>
-        <p>Chaque planète de départ lance ses <strong>Fouilles simultanées</strong>, chacune avec sa durée et son équipe (de 1 à 5 000 unités) : celles de « Durée et équipe de chaque Fouille », ou les siennes avec « Réglages différents par Fouille » (une nouvelle Fouille reprend alors celles de la précédente). Une fois par jour, le bot relève les <strong>sites libres les plus proches</strong> de chaque planète de départ (une planète cochée dans la journée est relevée au passage suivant). À chaque passage, il lit les Fouilles en cours dans le jeu et relance <strong>à l'identique</strong> une Fouille finie dès que le délai tiré au hasard entre votre minimum et votre maximum est écoulé. Mira Venn part avec la Fouille 1 de la planète choisie quand elle est disponible, sinon la Fouille part sans héros. Le bot clique sur « Lancer la fouille » : <strong>une Fouille ne peut pas être rappelée</strong>.</p>
+        <p>Chaque planète de départ lance ses <strong>Fouilles simultanées</strong>, chacune avec sa durée et son équipe (de 1 à 5 000 unités) : celles de « Durée et équipe de chaque Fouille », ou les siennes avec « Réglages différents par Fouille » (une nouvelle Fouille reprend alors celles de la précédente). Une fois par jour, le bot relève les <strong>sites libres les plus proches</strong> de chaque planète de départ (une planète cochée dans la journée est relevée au passage suivant). À chaque passage, il lit les Fouilles en cours dans le jeu et relance <strong>à l'identique</strong> une Fouille finie dès que le délai tiré au hasard entre votre minimum et votre maximum est écoulé. Vous pouvez <strong>régler plus de Fouilles que le jeu n'en permet</strong> ou que la planète n'a de sites libres : le bot traite les planètes dans l'ordre, lance autant de Fouilles que d'emplacements trouvés, passe à la suivante pour le reste et s'arrête quand le jeu est plein ; le reste attend une place libre. Le <strong>coût maximum en RT</strong> (facultatif) empêche une Fouille de partir si le jeu en affiche un coût plus élevé. Mira Venn part avec la Fouille 1 de la planète choisie quand elle est disponible, sinon la Fouille part sans héros. Le bot clique sur « Lancer la fouille » : <strong>une Fouille ne peut pas être rappelée</strong>.</p>
       </details>
       <h3>Planètes de départ</h3>
       <div id="exc-planets" class="add-planets"></div>
@@ -303,6 +303,11 @@
       <div class="row">
         <label>Délai avant relance : de <input id="exc-delay-min" type="number" min="0" step="1" aria-label="Délai minimum avant relance (minutes)"></label>
         <label>à <input id="exc-delay-max" type="number" min="0" step="1" aria-label="Délai maximum avant relance (minutes)"> minutes</label>
+      </div>
+      <h3>Garde-fou</h3>
+      <div class="row">
+        <label>Coût maximum en RT par Fouille <input id="exc-max-rt" type="number" min="0" step="any" placeholder="aucun plafond" aria-label="Coût maximum en RT par Fouille"></label>
+        <span class="hint">Le jeu affiche « RT requis » avant le lancement : si ce coût dépasse le maximum, la Fouille ne part pas.</span>
       </div>
       <p id="exc-summary" class="status-line exp-summary" role="status" aria-live="polite"></p>
       <div class="row actions"><button id="exc-save" type="button">Enregistrer</button><p id="exc-msg" class="msg" role="status" aria-live="polite"></p></div>

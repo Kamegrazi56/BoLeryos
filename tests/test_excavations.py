@@ -47,21 +47,25 @@ def test_only_soldiers_scientists_and_miners_go_on_an_excavation():
             validate({**SETTINGS, "units": {**TEAM, unit: 10}})
 
 
-def test_the_total_of_simultaneous_excavations_cannot_exceed_what_the_game_allows():
-    two = {**SETTINGS, "planets": [{"name": EGIDE, "copies": 4}, {"name": CONCORDE, "copies": 3}]}
-    with pytest.raises(ExcavationError, match="7 au total, le jeu en permet 6"):
-        validate(two, max_active=6)
-    assert validate({**two, "planets": [{"name": EGIDE, "copies": 4}, {"name": CONCORDE, "copies": 2}]}, max_active=6)
-    with pytest.raises(ExcavationError, match="4 au total"):  # toutes les planètes : 2 Fouilles × 2 planètes connues
-        validate({**SETTINGS, "planets": [], "mira": "", "copies": 2}, known_planets=[EGIDE, CONCORDE], max_active=3)
-    assert validate(two)  # maximum inconnu (pas encore de relevé) : pas de limite
-
-
-def test_the_store_uses_the_maximum_read_by_the_daily_record(tmp_path):
+def test_more_excavations_than_the_game_allows_can_be_set(tmp_path):
+    """Demande du joueur (2026-11-22) : le réglage n'est plus borné par le maximum du jeu ni par les sites libres."""
+    many = {**SETTINGS, "planets": [{"name": EGIDE, "copies": 10}, {"name": CONCORDE, "copies": 10}]}
     store = ExcavationStore(str(tmp_path))
-    store.set_daily({}, 2, "quotidien")
-    with pytest.raises(ExcavationError, match="le jeu en permet 2"):
-        store.replace({**SETTINGS, "planets": [{"name": EGIDE, "copies": 3}]})
+    store.set_daily({}, 2, "quotidien")  # le jeu n'en permet que 2
+    assert sum(p["copies"] for p in store.replace(many)["planets"]) == 20
+    assert validate({**SETTINGS, "planets": [], "mira": "", "copies": 10}, known_planets=[EGIDE, CONCORDE])
+
+
+@pytest.mark.parametrize("value", [0, -5, 0.0, "30", True, 2_000_000_000, float("nan"), float("inf")])
+def test_a_wrong_maximum_rt_cost_is_refused(value):
+    with pytest.raises(ExcavationError, match="Coût maximum en RT"):
+        validate({**SETTINGS, "max_rt": value})
+
+
+def test_the_maximum_rt_cost_is_optional_and_kept():
+    assert validate(SETTINGS)["max_rt"] is None
+    assert validate({**SETTINGS, "max_rt": 1500})["max_rt"] == 1500
+    assert validate({**SETTINGS, "max_rt": 0.05})["max_rt"] == 0.05  # le coût réel est fractionnaire
 
 
 def test_each_excavation_can_have_its_own_duration_and_team():

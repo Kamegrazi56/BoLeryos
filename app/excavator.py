@@ -190,6 +190,34 @@ FREE_ROWS_JS = (
 )
 
 
+# Valeur affichée après le libellé « RT requis » (vrai jeu, 2026-11-22 : « — » tant qu'aucune équipe n'est saisie, puis « 0,077 RT »).
+RT_REQUIRED_JS = (
+    "() => {"
+    + _PRELUDE_JS
+    + """
+  const leaves = [...document.querySelectorAll('main *')].filter((e) => e.children.length === 0 && visible(e) && text(e));
+  const i = leaves.findIndex((e) => /^RT requis$/i.test(text(e)));
+  return i >= 0 && leaves[i + 1] ? text(leaves[i + 1]) : '';
+}"""
+)
+
+
+def parse_rt(raw: str) -> float | None:
+    """Coût en RT lu sur la page (vrai jeu, 2026-11-22 : « 0,077 RT » ; milliers par espace). Virgule ou point décimal, suffixe
+    « RT » accepté. None si ce n'est pas un nombre sûr (« — », vide, texte, « 1.234 » ambigu) : le garde-fou ne devine jamais."""
+    text = re.sub(r"[\s\u00a0\u202f]", "", raw or "")
+    text = re.sub(r"RT$", "", text, flags=re.IGNORECASE)
+    if re.fullmatch(r"\d{1,3}(\.\d{3})+,\d+", text):  # « 1.234,5 » : points de milliers, virgule décimale
+        text = text.replace(".", "").replace(",", ".")
+    elif re.fullmatch(r"\d+,\d+", text):
+        text = text.replace(",", ".")
+    elif re.fullmatch(r"\d{1,3}(\.\d{3})+", text):
+        return None  # « 1.234 » : milliers ou décimales ? on ne devine pas
+    elif not re.fullmatch(r"\d+(\.\d+)?", text):
+        return None
+    return float(text)
+
+
 def nearest_sites(objects: list, planet_address: str | None, bounds, limit: int = SITES_KEPT) -> list[dict]:
     """Emplacements libres où la Fouille est possible, du plus proche au plus lointain (positions réelles de la carte)."""
     sites = [o for o in objects if isinstance(o, dict) and o.get("kind") == "FREE_SLOT" and o.get("address")
@@ -463,6 +491,8 @@ class ExcavationPass(ExplorationPass):
             self._skip(planet, f"durée de {line['duration']} h indisponible")
             return None
         hero = await self._pick_mira() if line["mira"] else ""
+        if not await self._within_rt_budget(planet):
+            return None
         go = page.get_by_role("button", name=LAUNCH_NAME)
         if not await wait_enabled(go):  # le jeu valide l'équipe et les coûts un instant après la saisie
             self._skip(planet, "« Lancer la fouille » reste grisé (unités, énergie ou RT insuffisants, ou site déjà fouillé)")
@@ -474,6 +504,26 @@ class ExcavationPass(ExplorationPass):
         sentence = f"{describe(line)} vers {site}{hero}"
         await self._confirm_launch(before, sentence)
         return sentence
+
+    async def _within_rt_budget(self, planet: str) -> bool:
+        """Garde-fou : le coût en RT affiché pour cette Fouille ne dépasse pas le maximum réglé. Sans plafond : toujours vrai.
+        Un coût illisible avec un plafond réglé n'est jamais deviné : rien n'est lancé."""
+        limit = self.store.get().get("max_rt")
+        if not limit:
+            return True
+        end = time.monotonic() + READY_SECONDS
+        cost = None
+        while cost is None and time.monotonic() < end:  # le jeu affiche « — » un instant après la saisie
+            cost = parse_rt(await self.page.evaluate(RT_REQUIRED_JS))
+            if cost is None:
+                await asyncio.sleep(0.25)
+        if cost is None:
+            self._skip(planet, "coût en RT illisible alors qu'un plafond est réglé")
+            return False
+        if cost > limit:
+            self._skip(planet, f"coût de {cost:g} RT au-dessus du maximum réglé ({limit:g} RT)")
+            return False
+        return True
 
     async def _choose_duration(self, hours: int) -> bool:
         button = self.page.locator("main").get_by_role("button", name=f"{hours} heures", exact=True)

@@ -1,10 +1,14 @@
 """Fouilles dans le faux jeu : relevé des sites libres, lancements Fouille par Fouille (durée et équipe de chacune), Mira Venn,
 délai avant relance, relance à l'identique."""
 
+import pytest
+
+from app.excavator import parse_rt
+
 EGIDE, CONCORDE, STRATE = "6-79-Egide", "8-50-Concorde", "9-169-Strate"
 TEAM = {"Scientifique": 2500, "Mineur": 2500}
 BASE = {"duration": 6, "units": TEAM, "copies": 1, "fouilles": [], "planets": [{"name": EGIDE, "copies": 2}],
-        "per_slot": False, "mira": EGIDE, "delay_min": 0, "delay_max": 0}
+        "per_slot": False, "mira": EGIDE, "delay_min": 0, "delay_max": 0, "max_rt": None}
 
 
 def _bot(client):
@@ -12,7 +16,8 @@ def _bot(client):
 
 
 def _scan(client):
-    assert len(client.post("/api/planets/scan").json()["planets"]) == 3
+    r = client.post("/api/planets/scan").json()
+    assert len(r["planets"]) == 3
 
 
 def _set(client, **patch):
@@ -155,3 +160,48 @@ def test_an_unreadable_list_is_reported_instead_of_claiming_there_is_no_free_sit
     assert "planète(s) libre(s)" in daily["error"] or "aucun emplacement libre" in daily["error"]
     assert "objet(s) lu(s)" in daily["error"]
     assert _launched(game) == []
+
+
+def test_more_excavations_than_free_sites_go_planet_by_planet_until_the_game_is_full(game_client, game):
+    """Demande du joueur (2026-11-22) : chaque planète lance autant de Fouilles que de sites trouvés, une planète sans site est
+    sautée, et le bot s'arrête quand le jeu est plein."""
+    _scan(game_client)
+    game.set_exc(max=3)
+    _set(game_client, mira="", planets=[{"name": EGIDE, "copies": 3}, {"name": STRATE, "copies": 3}, {"name": CONCORDE, "copies": 3}])
+    summary = _run(game_client)
+    assert [(a["planet"], a["target"]) for a in _launched(game)] == [(EGIDE, "M58 80 21"), (EGIDE, "M68 75 95"), (CONCORDE, "Z25 70 30")], summary
+    assert "toutes les Fouilles possibles sont en cours (3/3)" in summary
+    assert _forbidden(game) == []
+
+
+@pytest.mark.parametrize("raw,expected", [("0,077 RT", 0.077), ("0,077\u00a0RT", 0.077), ("1 234,5 RT", 1234.5), ("1\u202f234 RT", 1234.0),
+                                           ("1.234,5", 1234.5), ("56", 56.0), ("12.5", 12.5), (" 7 ", 7.0), ("500 rt", 500.0),
+                                           ("—", None), ("", None), ("beaucoup", None), ("1 2 x", None), ("1.234", None), ("RT", None)])
+def test_the_rt_cost_is_read_or_left_unknown(raw, expected):
+    assert parse_rt(raw) == expected
+
+
+def test_an_excavation_costing_more_rt_than_the_maximum_is_not_launched(game_client, game):
+    _scan(game_client)
+    game.set_exc(rt_rate=0.1)  # équipe de 5 000 unités : « 500 RT »
+    _set(game_client, mira="", planets=[{"name": EGIDE, "copies": 1}], max_rt=499.9)
+    summary = _run(game_client)
+    assert _launched(game) == [] and "0 Fouille(s) lancée(s)" in summary
+    _set(game_client, mira="", planets=[{"name": EGIDE, "copies": 1}], max_rt=500)
+    assert len(_launched(game)) == 0 and _run(game_client).startswith("1 Fouille(s) lancée(s)")
+
+
+def test_without_a_maximum_the_rt_cost_is_not_looked_at(game_client, game):
+    _scan(game_client)
+    game.set_exc(rt_rate=1000)
+    _set(game_client, mira="", planets=[{"name": EGIDE, "copies": 1}])
+    assert _run(game_client).startswith("1 Fouille(s) lancée(s)")
+
+
+def test_a_fractional_rt_cost_is_compared_without_rounding(game_client, game):
+    _scan(game_client)
+    game.set_exc(rt_rate=0.0000154)  # équipe de 5 000 unités : « 0,077 RT », comme sur le vrai jeu
+    _set(game_client, mira="", planets=[{"name": EGIDE, "copies": 1}], max_rt=0.07)
+    assert _launched(game) == [] and "0 Fouille(s) lancée(s)" in _run(game_client)
+    _set(game_client, mira="", planets=[{"name": EGIDE, "copies": 1}], max_rt=0.08)
+    assert _run(game_client).startswith("1 Fouille(s) lancée(s)")
