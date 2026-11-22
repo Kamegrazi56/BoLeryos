@@ -144,6 +144,13 @@ function renderStorage(storage) {
   const lost = Boolean(storage) && storage.persistent === false;
   box.hidden = !lost;
   box.textContent = lost ? storage.message : "";
+  $("storage-info").textContent = storage && storage.volume ? storageInfo(storage) : "";
+}
+
+// Nom et date de création du volume : si la date change après un redéploiement, c'est un volume neuf (donc vide).
+function storageInfo(storage) {
+  const date = storage.created ? ` créé le ${storage.created.replace("T", " à ")}` : "";
+  return `Données : volume « ${storage.volume} »${date}.`;
 }
 
 function renderInstances(summary) {

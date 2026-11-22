@@ -20,6 +20,31 @@ def test_volume_monte_est_persistant(tmp_path: Path, monkeypatch) -> None:
     assert storage_ok(data)["persistent"] is True
 
 
+def _volume_mountinfo(tmp_path: Path, mount_point: str, name: str) -> str:
+    f = tmp_path / "mountinfo"
+    f.write_text(f"36 35 8:1 /var/lib/docker/volumes/{name}/_data {mount_point} rw - ext4 /dev/sda1 rw\n", encoding="utf8")
+    return str(f)
+
+
+def test_volume_nomme_affiche_son_nom_et_sa_date(tmp_path: Path, monkeypatch) -> None:
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setattr(storage, "MOUNTINFO", _volume_mountinfo(tmp_path, str(data.resolve()), "boleryos-data"))
+    status = storage_ok(data)
+    assert status["persistent"] is True and status["volume"] == "boleryos-data"
+    assert (data / storage.MARKER).exists()
+    assert storage_ok(data)["created"] == status["created"]
+
+
+def test_volume_anonyme_est_signale(tmp_path: Path, monkeypatch) -> None:
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setattr(storage, "MOUNTINFO", _volume_mountinfo(tmp_path, str(data.resolve()), "ab12" * 16))
+    status = storage_ok(data)
+    assert status["persistent"] is False and status["volume"] == "anonyme"
+    assert "anonyme" in status["message"]
+
+
 def test_dossier_non_monte_est_signale(tmp_path: Path, monkeypatch) -> None:
     data = tmp_path / "data"
     data.mkdir()
