@@ -83,15 +83,24 @@ class InstanceManager:
             names = data.get("universes")
             self.universes = [n for n in names if isinstance(n, str)][:50] if isinstance(names, list) else []
             return
-        # Premier démarrage avec ce gestionnaire : l'instance existante (anciens fichiers) devient la première.
-        root = str(self._root) if self._root is not None else None
-        instance_id = default_instance_id(root)
-        universe = ""
-        if root is not None:
-            migrate_legacy(root, instance_id)
-            universe = Preferences(str(instance_dir(root, instance_id))).get()["universe"]
-        self._infos = [{"id": instance_id, "name": universe or DEFAULT_NAME, "universe": universe, "autostart": True}]
+        # Premier démarrage avec ce gestionnaire : seule une instance déjà utilisée (anciens fichiers à plat) est reprise.
+        # Sur un volume neuf, la liste reste vide : le joueur crée ses instances depuis l'Accueil.
+        self._infos = self._adopt_legacy()
         self._save()
+
+    def _adopt_legacy(self) -> list[dict]:
+        """L'instance des anciennes versions (fichiers à plat dans /data), s'il y en a une ; sinon aucune.
+
+        Sans dossier de données (développement, tests), rien ne se garde : une instance en mémoire sert de point d'entrée."""
+        if self._root is None:
+            return [{"id": default_instance_id(None), "name": DEFAULT_NAME, "universe": "", "autostart": True}]
+        root = str(self._root)
+        instance_id = default_instance_id(root)
+        existing = self._root / INSTANCES_FOLDER / instance_id  # registre perdu mais dossier déjà rempli : on le reprend
+        if not migrate_legacy(root, instance_id) and not (existing.is_dir() and any(existing.iterdir())):
+            return []
+        universe = Preferences(str(instance_dir(root, instance_id))).get()["universe"]
+        return [{"id": instance_id, "name": universe or DEFAULT_NAME, "universe": universe, "autostart": True}]
 
     @staticmethod
     def _clean(raw) -> list[dict]:

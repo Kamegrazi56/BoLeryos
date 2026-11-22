@@ -22,8 +22,15 @@ def no_browser(monkeypatch):
     return kicked
 
 
+def _seed_legacy(tmp_path):
+    """Un ancien /data à plat (réglages d'une instance déjà utilisée) : le gestionnaire en reprend l'instance « principale »."""
+    if not (tmp_path / "preferences.json").exists():
+        (tmp_path / "preferences.json").write_text("{}", encoding="utf8")
+
+
 @pytest.fixture
 def data_client(settings, tmp_path, no_browser):
+    _seed_legacy(tmp_path)
     cfg = replace(settings, data_dir=str(tmp_path))
     with TestClient(create_app(cfg)) as client:
         yield client
@@ -35,7 +42,9 @@ def _create(client, universe, **extra):
     return r.json()
 
 
-def _manager(settings, tmp_path, **overrides):
+def _manager(settings, tmp_path, legacy=True, **overrides):
+    if legacy:
+        _seed_legacy(tmp_path)
     cfg = replace(settings, data_dir=str(tmp_path), **overrides)
     return InstanceManager(cfg, BrowserHost(cfg), Account(cfg.data_dir))
 
@@ -48,6 +57,19 @@ def test_first_run_makes_one_instance_from_the_existing_files(settings, tmp_path
     assert [i["id"] for i in summary["instances"]] == ["asterion"]
     assert summary["instances"][0]["universe"] == "Asterion" and summary["instances"][0]["running"]
     assert (tmp_path / "instances.json").exists()
+
+
+def test_first_run_on_a_new_volume_has_no_instance(settings, tmp_path):
+    manager = _manager(settings, tmp_path, legacy=False)
+    assert manager.summary()["instances"] == [] and manager.default_id is None
+    assert json.loads((tmp_path / "instances.json").read_text(encoding="utf8"))["instances"] == []
+    assert not (tmp_path / "instances").exists()  # aucun dossier d'instance vide laissé derrière
+
+
+def test_a_new_volume_stays_empty_after_restart_and_keeps_created_instances(settings, tmp_path):
+    first = _manager(settings, tmp_path, legacy=False)
+    first.create("Orion")
+    assert [i["universe"] for i in _manager(settings, tmp_path, legacy=False).summary()["instances"]] == ["Orion"]
 
 
 def test_registry_is_saved_and_reloaded(settings, tmp_path):

@@ -87,24 +87,25 @@ def test_credentials_never_appear_in_the_journal(settings, tmp_path):
 
 
 # ------------------------------------------------------------------------------ API
+# Sur un volume neuf, aucune instance n'existe : le compte se règle par la session de connexion (`compte`).
 def test_form_endpoint_prefills_identifier_but_never_the_password(make_client, tmp_path):
     c = make_client(data_dir=str(tmp_path))
-    assert c.get("/api/account/form").json() == {"identifier": "", "has_password": False}
-    c.app.state.bot.set_credentials(ID, PW)
-    form = c.get("/api/account/form")
+    assert c.get("/api/i/compte/account/form").json() == {"identifier": "", "has_password": False}
+    c.app.state.manager.lobby().set_credentials(ID, PW)
+    form = c.get("/api/i/compte/account/form")
     assert form.json() == {"identifier": ID, "has_password": True}
-    assert PW not in form.text and PW not in c.get("/api/account").text
-    assert c.get("/api/account").json()["saved_on_disk"] is True
+    assert PW not in form.text and PW not in c.get("/api/i/compte/account").text
+    assert c.get("/api/i/compte/account").json()["saved_on_disk"] is True
 
 
 def test_posting_without_password_and_none_known_is_refused(make_client, tmp_path):
     c = make_client(data_dir=str(tmp_path))
-    res = c.post("/api/account/credentials", json={"identifier": ID})
+    res = c.post("/api/i/compte/account/credentials", json={"identifier": ID})
     assert res.status_code == 422 and "mot de passe" in res.text
 
 
 def test_ui_protected_flag(make_client, tmp_path):
-    assert make_client(data_dir=str(tmp_path)).get("/api/account").json()["ui_protected"] is False
+    assert make_client(data_dir=str(tmp_path)).get("/api/i/compte/account").json()["ui_protected"] is False
 
 
 # ------------------------------------------------------------------------ délai de connexion
