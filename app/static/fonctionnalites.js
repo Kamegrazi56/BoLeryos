@@ -98,6 +98,16 @@
     return { switchBox, timing };
   }
 
+  /** Case « Fonctionner hors planning » : la fonctionnalité ignore le planning général (pas ses horaires propres). */
+  function offPlanning(f, suffix = "") {
+    const box = el("input", { type: "checkbox", checked: f.ignore_planning, ariaLabel: `Fonctionner hors planning : ${f.label}${suffix}` });
+    box.addEventListener("change", () => push(f.id, { ignore_planning: box.checked }));
+    return el("label", {
+      className: "off-planning",
+      title: "Cochée : cette fonctionnalité continue de travailler en dehors des plages du planning général (la page du jeu reste alors ouverte). Ses horaires propres, s'il y en a, restent respectés.",
+    }, box, el("span", { textContent: "Fonctionner hors planning" }));
+  }
+
   function card(f, index, total, waiting) {
     const { switchBox, timing } = controls(f);
     const up = el("button", { type: "button", className: "secondary small icon", textContent: "↑", title: "Plus prioritaire", ariaLabel: `Monter ${f.label}`, disabled: index === 0 });
@@ -111,6 +121,7 @@
       el("span", { className: "rank", textContent: String(index + 1) }),
       el("div", { className: "feature-main" },
         el("div", { className: "feature-head" }, name, el("span", { className: `pill ${state}`, textContent: STATE_LABEL[state] })),
+        offPlanning(f),
         el("p", { className: "status-line feature-status", textContent: statusText(f, waiting) })),
       el("div", { className: "feature-controls" }, switchBox, timing),
       el("div", { className: "feature-order" }, up, down));
@@ -124,6 +135,7 @@
     const state = stateOf(f);
     return el("div", { className: `fhead state-${state}` },
       el("div", { className: "fhead-row" }, switchBox, el("span", { className: `pill ${state}`, textContent: STATE_LABEL[state] })),
+      el("div", { className: "fhead-row" }, offPlanning(f, " (page)")),
       el("div", { className: "fhead-row" }, timing),
       el("p", { className: "status-line fhead-status", textContent: statusText(f, waiting) }),
       el("span", { className: "fhead-msg", role: "status", ariaLive: "polite" }));

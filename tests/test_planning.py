@@ -125,3 +125,36 @@ def test_outside_the_planning_the_bot_on_does_nothing_and_closes_the_game(game_c
     finally:
         bot.scheduler._on = False
     assert bot.planning_pause() is None
+
+
+def test_a_feature_ignoring_the_planning_keeps_the_game_open_and_works_alone(game_client):
+    bot = game_client.app.state.bot
+    bot.planning.replace({"enabled": True, "days": {}, "offset_min": 0, "offset_max": 0})  # aucune plage
+    bot.scheduler._on = True
+    store = bot.scheduler.store
+    try:
+        assert bot.planning_pause() == "hors planning — aucune plage prévue"
+        assert bot.feature_pause("constructions") == "hors planning — aucune plage prévue"
+        # case cochée mais fonctionnalité éteinte : elle ne compte pas
+        bot.scheduler.update("constructions", {"ignore_planning": True})
+        assert bot.planning_pause() == "hors planning — aucune plage prévue"
+        bot.scheduler.update("constructions", {"enabled": True, "min_minutes": 5, "max_minutes": 6})
+        assert bot.planning_pause() is None  # le jeu reste ouvert
+        assert bot.feature_pause("constructions") is None  # celle-ci travaille
+        assert bot.feature_pause("researches") == "hors planning — aucune plage prévue"  # les autres restent en pause
+        assert store.get("constructions")["ignore_planning"] is True
+        bot.scheduler.update("constructions", {"ignore_planning": False})
+        assert bot.planning_pause() == "hors planning — aucune plage prévue"
+    finally:
+        bot.scheduler._on = False
+
+
+def test_the_api_saves_the_off_planning_box_and_keeps_own_hours_outside_the_general_planning(client):
+    client.put("/api/planning", json={"enabled": True, "days": {"mon": [{"start": "08:00", "end": "09:00"}]}, "offset_min": 0, "offset_max": 0})
+    assert client.get("/api/features").json()["features"][0]["ignore_planning"] is False
+    own = {"enabled": True, "days": {"mon": [{"start": "20:00", "end": "21:00"}]}, "offset_min": 0, "offset_max": 0}
+    assert client.put("/api/feature-hours/hackings", json=own).status_code == 422  # hors du planning général
+    ok = client.put("/api/features/hackings", json={"ignore_planning": True})
+    assert ok.status_code == 200
+    assert next(f for f in ok.json()["features"] if f["id"] == "hackings")["ignore_planning"] is True
+    assert client.put("/api/feature-hours/hackings", json=own).status_code == 200  # ses horaires restent à elle

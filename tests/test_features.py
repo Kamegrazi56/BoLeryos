@@ -74,7 +74,7 @@ def test_a_feature_cannot_be_enabled_without_its_timer():
     with pytest.raises(FeaturesError) as err:
         validate_entry({"enabled": True}, floor=1)
     assert "minuteur" in err.value.errors[0].lower()
-    assert validate_entry({"enabled": False}, floor=1) == {"enabled": False, "min_minutes": None, "max_minutes": None}
+    assert validate_entry({"enabled": False}, floor=1) == {"enabled": False, "min_minutes": None, "max_minutes": None, "ignore_planning": False}
 
 
 def test_a_self_timed_feature_needs_no_timer_and_runs_again_when_its_mission_ends():
@@ -132,7 +132,7 @@ def test_settings_survive_a_restart_including_order_and_activation(tmp_path):
     sched.reorder(["c", "a", "b"])
     again, *_ = make(tmp_path)
     assert again.store.order == ["c", "a", "b"]
-    assert again.store.get("b") == {"enabled": True, "min_minutes": 5.0, "max_minutes": 7.0}
+    assert again.store.get("b") == {"enabled": True, "min_minutes": 5.0, "max_minutes": 7.0, "ignore_planning": False}
     assert again.on is False  # seul l'interrupteur général repasse à OFF
 
 

@@ -3,6 +3,7 @@
 Chaque fonctionnalité a un interrupteur et un minuteur « entre X et Y minutes » : après chaque passage, le bot attend une
 durée tirée au hasard entre les deux, puis relance. L'ordre de la liste est l'ordre de priorité. Les réglages sont gardés
 dans `<data_dir>/features.json` et survivent à un redémarrage ; seul l'interrupteur général du bot repasse à OFF.
+Une case « Fonctionner hors planning » (`ignore_planning`) dispense une fonctionnalité du planning général.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from typing import Awaitable, Callable
 
 MAX_MINUTES = 24 * 60.0
 FILE_NAME = "features.json"
-DEFAULT_ENTRY: dict = {"enabled": False, "min_minutes": None, "max_minutes": None}
+DEFAULT_ENTRY: dict = {"enabled": False, "min_minutes": None, "max_minutes": None, "ignore_planning": False}
 
 
 @dataclass(frozen=True)
@@ -119,9 +120,12 @@ def _is_number(value) -> bool:
 def validate_entry(entry: dict, floor: float, timed: bool = True) -> dict:
     """Entrée complète et valide. Activer sans minuteur renseigné est refusé (sauf relance automatique : `timed` faux)."""
     errors: list[str] = []
-    out = {"enabled": entry.get("enabled", False), "min_minutes": entry.get("min_minutes"), "max_minutes": entry.get("max_minutes")}
+    out = {"enabled": entry.get("enabled", False), "min_minutes": entry.get("min_minutes"), "max_minutes": entry.get("max_minutes"),
+           "ignore_planning": entry.get("ignore_planning", False)}
     if not isinstance(out["enabled"], bool):
         errors.append("Activation : oui ou non.")
+    if not isinstance(out["ignore_planning"], bool):
+        errors.append("Fonctionner hors planning : oui ou non.")
     low, high = out["min_minutes"], out["max_minutes"]
     for name, value in (("minimum", low), ("maximum", high)):
         if value is not None and (not _is_number(value) or not floor <= value <= MAX_MINUTES):
@@ -183,6 +187,14 @@ class FeatureStore:
 
     def get(self, fid: str) -> dict:
         return dict(self._entries[fid])
+
+    def ignores_planning(self, fid: str) -> bool:
+        """Activée et autorisée à travailler hors des plages du planning général."""
+        entry = self._entries[fid]
+        return bool(entry["enabled"] and entry["ignore_planning"])
+
+    def any_ignores_planning(self) -> bool:
+        return any(self.ignores_planning(fid) for fid in self._ids)
 
     def update(self, fid: str, patch: dict) -> dict:
         if fid not in self._entries:

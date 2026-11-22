@@ -97,8 +97,12 @@ class Scheduler:
     # ------------------------------------------------------------------ réglages
     def update(self, fid: str, patch: dict) -> dict:
         """Enregistre les réglages d'une fonctionnalité. Lève KeyError (inconnue) ou FeaturesError (refusé)."""
-        was = self.store.get(fid)["enabled"]
+        before = self.store.get(fid)
+        was = before["enabled"]
         saved = self.store.update(fid, patch)
+        if saved["ignore_planning"] != before["ignore_planning"]:
+            etat = "travaille aussi hors planning" if saved["ignore_planning"] else "suit de nouveau le planning"
+            self.bot.log(f"Fonctionnalité « {self._features[fid].label} » : {etat}.", event=True)
         rt = self._runtime[fid]
         label = self._features[fid].label
         if saved["enabled"] and not was:

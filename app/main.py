@@ -93,6 +93,7 @@ class FeatureRequest(BaseModel):
     enabled: bool | None = None
     min_minutes: float | None = None
     max_minutes: float | None = None
+    ignore_planning: bool | None = None  # « Fonctionner hors planning » : ignore le planning général
 
 
 class ConstructionLine(BaseModel):
@@ -918,7 +919,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if fid not in FEATURE_HOURS:
             raise HTTPException(404, detail=["Fonctionnalité sans horaires propres."])
         try:
-            bot.feature_hours.replace(fid, body.model_dump(), bot.planning.get())
+            # Une fonctionnalité qui ignore le planning général peut avoir des plages hors de celui-ci.
+            general = {} if bot.scheduler.store.get(fid)["ignore_planning"] else bot.planning.get()
+            bot.feature_hours.replace(fid, body.model_dump(), general)
         except FeatureHoursError as exc:
             raise HTTPException(422, detail=exc.errors) from exc
         bot.log(f"Horaires du {FEATURE_HOURS[fid]} enregistrés.", event=True)

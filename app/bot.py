@@ -242,15 +242,28 @@ class BotSession:
             passes[feature_id]._unconfirmed = 0
 
     def feature_pause(self, feature_id: str) -> str | None:
-        """Horaires propres d'une fonctionnalité (Piratage, Exploration) : raison si elle ne doit rien lancer maintenant."""
+        """Pourquoi une fonctionnalité ne doit rien lancer maintenant : hors du planning général (sauf si sa case
+        « Fonctionner hors planning » est cochée), ou hors de ses horaires propres (Piratage, Exploration)."""
+        if not self.scheduler.store.ignores_planning(feature_id):
+            reason = self._planning_off()
+            if reason:
+                return reason
         return self.feature_hours.pause_reason(feature_id)
 
-    def planning_pause(self) -> str | None:
-        """Bot sur ON hors d'une plage du planning : rien ne tourne et la page du jeu est fermée (None : il peut agir).
+    def _planning_off(self) -> str | None:
+        """Bot sur ON hors d'une plage du planning général (None : dans une plage, ou planning sans effet).
         Sur OFF, en contrôle manuel ou pendant une campagne d'espionnage (manuelle), le planning ne s'applique pas."""
         if not self.scheduler.on or self._manual or self.spy.running:
             return None
         return planning.pause_reason(self.planning.get())
+
+    def planning_pause(self) -> str | None:
+        """Hors planning : rien ne tourne et la page du jeu est fermée (None : le jeu reste ouvert). Le jeu reste aussi
+        ouvert tant qu'une fonctionnalité activée a la case « Fonctionner hors planning » : elle seule travaille alors."""
+        reason = self._planning_off()
+        if reason and self.scheduler.store.any_ignores_planning():
+            return None
+        return reason
 
     def _feature_blocker(self) -> str | None:
         return self.planning_pause() or self.supervisor.game_blocker()
