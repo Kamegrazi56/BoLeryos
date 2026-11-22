@@ -1,19 +1,6 @@
-// Page Accueil : état de la connexion, univers, planètes scannées, derniers événements.
+// Page Accueil : compte, serveurs, instances, planètes scannées, derniers événements.
 const { el, ago, fmt, table } = window.ui;
 const $ = (id) => document.getElementById(id);
-
-function renderStatus(status) {
-  const sup = status.supervisor;
-  let sentence;
-  if (!sup.has_credentials) sentence = "Aucun identifiant en mémoire : saisissez-les dans Réglages › Compte et univers.";
-  else if (sup.connection) sentence = sup.connection[0].toUpperCase() + sup.connection.slice(1) + ".";
-  else sentence = "Connexion automatique en préparation…";
-  $("sentence").textContent = sentence;
-  $("counters").replaceChildren(
-    el("span", {}, "Univers : ", el("strong", { textContent: sup.universe || "non choisi" })),
-    el("span", {}, "Identifiants : ", el("strong", { textContent: sup.has_credentials ? "en mémoire" : "absents" })),
-  );
-}
 
 function renderPlanets(scan) {
   const box = $("planets");
@@ -37,9 +24,9 @@ const getJson = (url) => fetch(url).then((r) => { if (!r.ok) throw new Error(Str
 
 async function refresh() {
   try {
-    const [status, scan, events] = await Promise.all([getJson("/api/status?limit=1"), getJson("/api/planets"), getJson("/api/events")]);
+    // /api/status sert de sonde : une instance arrêtée (409) ou inconnue (404) masque la vue.
+    const [, scan, events] = await Promise.all([getJson("/api/status?limit=1"), getJson("/api/planets"), getJson("/api/events")]);
     $("instance-view").hidden = false;
-    renderStatus(status);
     renderPlanets(scan);
     renderEvents(events);
   } catch {

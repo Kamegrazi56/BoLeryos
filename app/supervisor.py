@@ -16,6 +16,7 @@ from .shipyard import ModelScanner
 from .preferences import Preferences
 
 SCAN_AUTO_ATTEMPTS = 3  # tentatives du scan de démarrage par connexion (pas d'acharnement si le jeu change)
+NO_UNIVERSE_WAIT = "sur la page des serveurs, aucun univers choisi"  # attente normale : ni alerte ni événement
 UNIVERSE_ATTEMPTS = 4  # entrées dans l'univers sans résultat avant de demander une intervention
 UNKNOWN_SCREEN_SECONDS = 45  # écran non reconnu pendant ce temps : retour à la page de départ
 LOGIN_FAILURES_BEFORE_BLOCK = 3
@@ -305,7 +306,7 @@ class ConnectionSupervisor:
             except Exception as exc:  # noqa: BLE001
                 problem = f"vérification de l'écran impossible ({type(exc).__name__})"
             self.connection = problem or "connecté, dans la partie"
-            if problem:
+            if problem and problem != NO_UNIVERSE_WAIT:  # attendre sans univers est normal : pas d'alerte dans le suivi
                 self._note("connection", f"Connexion automatique : {problem}.", event=True)
             else:
                 self._last_notes.pop("connection", None)
@@ -318,7 +319,7 @@ class ConnectionSupervisor:
         self.prefs.add_catalog("universes", [u["name"] for u in universes])
         wanted = self.prefs.get()["universe"]
         if not wanted:
-            return "choisissez un univers (Réglages › Compte et univers, ou bouton d'univers sur la page Écran)"
+            return NO_UNIVERSE_WAIT
         match = next((u for u in universes if norm(u["name"]) == norm(wanted)), None)
         if match is None:
             return f"univers « {wanted} » indisponible sur la page de choix"
@@ -334,7 +335,7 @@ class ConnectionSupervisor:
         if self._login_blocked:
             return self._login_blocked
         if not b.has_credentials():
-            return "identifiants requis (Réglages › Compte et univers)"
+            return "identifiants requis (page Accueil)"
         wait = self._next_login_at - time.monotonic()
         if wait > 0:
             return f"nouvelle tentative de connexion dans {wait:.0f} s"
@@ -346,8 +347,8 @@ class ConnectionSupervisor:
         kind = b.last_login_kind
         self._login_failures += 1
         if kind == "refused":  # identifiants refusés : ne pas réessayer (risque de blocage du compte)
-            self._login_blocked = "connexion refusée par le site : corrigez les identifiants (Réglages › Compte et univers)"
-            b.log("Reconnexion automatique suspendue : le site a refusé les identifiants (corrigez-les dans Réglages › Compte).", "error", kind="attention")
+            self._login_blocked = "connexion refusée par le site : corrigez les identifiants (page Accueil)"
+            b.log("Reconnexion automatique suspendue : le site a refusé les identifiants (corrigez-les sur la page Accueil).", "error", kind="attention")
         elif self._login_failures >= LOGIN_FAILURES_BEFORE_BLOCK:
             self._login_blocked = "intervention requise (contrôle anti-bot ?) : connectez-vous à la main (page Écran, contrôle manuel) ; le bot reprendra seul"
             b.log("Trois tentatives de connexion sans résultat : connectez-vous à la main (page Écran, contrôle manuel) ; le bot reprendra seul.", "error", kind="attention")

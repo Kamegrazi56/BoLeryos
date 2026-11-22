@@ -54,16 +54,11 @@
     <div class="panels">
     <section class="tabpanel card" id="panel-account" role="tabpanel" aria-labelledby="tab-account">
       <header class="panel-head">
-        <div><p class="eyebrow">Bot</p><h2>Compte et univers</h2><p class="lede">Le compte du jeu que le bot utilise, et l'univers où il entre.</p></div>
+        <div><p class="eyebrow">Bot</p><h2>Compte et univers</h2><p class="lede">Délai entre les clics, moteur de lecture et scan des planètes. L'univers se choisit sur la page Accueil (une instance par univers). Pour vous connecter ou changer de compte, utilisez la page Accueil.</p></div>
       </header>
       <p id="acct-status" class="status-line">Chargement…</p>
       <p id="conn-status" class="status-line" role="status" aria-live="polite"></p>
       <div class="fields fields-account">
-        <label>Identifiant (e-mail du compte) <input id="acct-id" type="text" autocomplete="off" spellcheck="false"></label>
-        <label>Mot de passe <input id="acct-pw" type="password" autocomplete="off"></label>
-        <label>Univers <span data-help-text="Le nom de l'univers tel qu'il est affiché sur la page « Choisissez votre univers ». Une fois connecté, le bot clique dessus. Des suggestions apparaissent dès que le bot a vu cette page."></span>
-          <input id="universe" type="text" list="universe-list" autocomplete="off" spellcheck="false" placeholder="ex. Asterion"></label>
-        <datalist id="universe-list"></datalist>
         <label>Délai min. (s) <span data-help-text="Délai entre deux clics pendant la connexion : le bot attend une durée au hasard entre le minimum et le maximum avant chaque clic ou saisie. Enregistré tout seul."></span>
           <input id="login-delay-min" type="number" min="0" max="60" step="0.1"></label>
         <label>Délai max. (s)
@@ -71,17 +66,11 @@
         <label>Moteur de lecture <span data-help-text="Navigateur : le bot lit chaque page du jeu et clique dessus. Hybride : il lit l'état du jeu directement par l'API (planètes, inventaire), sans ouvrir de page, et agit toujours dans Chromium. Les actions par l'API ne sont pas possibles : le serveur du jeu refuse les clients qui ne sont pas son navigateur. Propre à cette instance."></span>
           <select id="engine"><option value="browser">Navigateur</option><option value="hybrid">Hybride (lecture par l'API)</option></select></label>
       </div>
-      <div class="row actions">
-        <button id="acct-save" type="button">Enregistrer et se connecter</button>
-        <button id="acct-login" type="button" class="secondary">Relancer la connexion</button>
-        <button id="acct-forget" type="button" class="secondary">Oublier le compte</button>
-        <span id="acct-msg" class="hint" role="status"></span>
-      </div>
       <p id="acct-warn" class="hint warn-note" role="note" hidden><strong>Attention :</strong> l'interface du bot n'est pas protégée par un mot de passe (UI_USER / UI_PASSWORD). Quiconque peut l'ouvrir voit l'identifiant enregistré et peut utiliser le compte.</p>
       <details class="help-box">
         <summary>Comment ça marche ?</summary>
-        <p>Dès que les identifiants sont enregistrés, le bot <strong>se connecte tout seul</strong>, entre dans l'univers indiqué et <strong>reste connecté</strong> (il se reconnecte si la session expire). Si le site refuse les identifiants, le bot n'insiste pas ; si un contrôle anti-bot l'arrête, il vous demande de vous connecter à la main (page Écran, contrôle manuel) puis reprend seul.</p>
-        <p>Les champs sont <strong>enregistrés par le bot</strong> et réaffichés à chaque visite : l'identifiant tel quel, le mot de passe <strong>chiffré</strong> sur le disque du bot (dossier /data). Le mot de passe n'est jamais réaffiché (le champ reste vide et indique qu'il est enregistré : laissez-le vide pour le garder). Rien n'apparaît dans le journal ni dans les réglages exportés. « Oublier le compte » efface tout ; « Se déconnecter » (page Écran) arrête seulement la reconnexion automatique. Après un redémarrage, le bot ne se connecte pas seul : cliquez sur « Relancer la connexion ». Utilisez de préférence un compte de test.</p>
+        <p>La connexion au compte se fait <strong>uniquement depuis la page Accueil</strong> (identifiant, mot de passe, « Se connecter », « Oublier »). Une fois connecté, le bot entre dans l'univers de son instance (choisi sur l'Accueil) et <strong>reste connecté</strong> (il se reconnecte si la session expire). Si le site refuse les identifiants, le bot n'insiste pas ; si un contrôle anti-bot l'arrête, il vous demande de vous connecter à la main (page Écran, contrôle manuel) puis reprend seul.</p>
+        <p>Les identifiants sont <strong>enregistrés par le bot</strong> : l'identifiant tel quel, le mot de passe <strong>chiffré</strong> sur le disque du bot (dossier /data). Le mot de passe n'est jamais réaffiché. Rien n'apparaît dans le journal ni dans les réglages exportés. Utilisez de préférence un compte de test.</p>
       </details>
 
       <h3 id="scan-title">Scan des planètes <span data-help-text="Le bot ouvre la liste des planètes du jeu et la lit : nom, coordonnées et stocks de Fer, de Cristal et d'Éther. Il le fait tout seul une fois par connexion, dès qu'il est dans la partie ; le bouton relance un scan à la demande (le bot doit être connecté et dans l'univers)."></span></h3>

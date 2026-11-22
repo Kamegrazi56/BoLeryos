@@ -1,4 +1,4 @@
-// Page Réglages : compte (identifiants), univers à rejoindre, délai de connexion, scan des planètes.
+// Page Réglages : délai de connexion, moteur de lecture, scan des planètes.
 const { el, fmt, table, help } = window.ui;
 const $ = (id) => document.getElementById(id);
 document.querySelectorAll("[data-help-text]").forEach((node) => node.replaceWith(help(node.dataset.helpText)));
@@ -14,7 +14,6 @@ function say(text, kind) {
 let saveTimer = null;
 async function savePreferences() {
   const body = {
-    universe: $("universe").value.trim(),
     engine: $("engine").value,
     login_delay: { min_seconds: Number($("login-delay-min").value), max_seconds: Number($("login-delay-max").value) },
   };
@@ -33,15 +32,12 @@ function scheduleSave() {
 async function loadPreferences() {
   try {
     const { preferences: p } = await (await fetch("/api/preferences")).json();
-    const names = [...new Set([...(p.catalog.universes || []), p.universe].filter(Boolean))];
-    $("universe-list").replaceChildren(...names.map((n) => el("option", { value: n })));
-    if (document.activeElement !== $("universe")) $("universe").value = p.universe || "";
     if (document.activeElement !== $("engine") && [...$("engine").options].some((o) => o.value === p.engine)) $("engine").value = p.engine;
     if (document.activeElement !== $("login-delay-min")) $("login-delay-min").value = p.login_delay.min_seconds;
     if (document.activeElement !== $("login-delay-max")) $("login-delay-max").value = p.login_delay.max_seconds;
   } catch { /* le bot redémarre : on réessaie */ }
 }
-["universe", "engine", "login-delay-min", "login-delay-max"].forEach((id) => {
+["engine", "login-delay-min", "login-delay-max"].forEach((id) => {
   $(id).addEventListener($(id).type === "number" ? "input" : "change", () => {
     if ($(id).value === "" && $(id).type === "number") return;
     scheduleSave();
@@ -54,7 +50,7 @@ async function refreshAccount() {
     const a = await (await fetch("/api/account")).json();
     $("acct-status").replaceChildren(
       el("strong", { textContent: a.has_credentials ? `Identifiants en mémoire (${a.hint})` : "Aucun identifiant en mémoire" }),
-      a.has_credentials ? " — le bot peut se reconnecter tout seul." : " — le bot ne pourra pas se connecter tout seul.",
+      a.has_credentials ? " — le bot peut se reconnecter tout seul." : " — connectez-vous depuis la page Accueil.",
     );
     $("acct-warn").hidden = a.ui_protected || !a.saved_on_disk;
   } catch { /* idem */ }
@@ -67,43 +63,6 @@ window.addEventListener("boleryos:status", (event) => {
   if (s.connection) parts.push(s.connection);
   $("conn-status").replaceChildren("Connexion : ", el("strong", { textContent: parts.join(" — ") }));
 });
-/** Champs mémorisés : l'identifiant est réaffiché ; le mot de passe jamais (le champ reste vide, avec une indication). */
-let passwordSaved = false;
-function showPasswordSaved(saved) {
-  passwordSaved = saved;
-  $("acct-pw").placeholder = saved ? "•••••••••• (enregistré : laissez vide pour le garder)" : "";
-}
-async function fillAccountForm() {
-  try {
-    const form = await (await fetch("/api/account/form")).json();
-    if (form.identifier && !$("acct-id").value) $("acct-id").value = form.identifier;
-    showPasswordSaved(!!form.has_password);
-  } catch { /* le bot redémarre : les champs resteront vides */ }
-}
-$("acct-save").addEventListener("click", async () => {
-  const identifier = $("acct-id").value.trim(), password = $("acct-pw").value;
-  if (!identifier || (!password && !passwordSaved)) { $("acct-msg").textContent = "Renseignez l'identifiant et le mot de passe."; return; }
-  clearTimeout(saveTimer);
-  await savePreferences(); // l'univers est enregistré avant que le bot ne se connecte
-  const res = await fetch("/api/account/credentials", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ identifier, password: password || undefined }) });
-  $("acct-pw").value = ""; // jamais conservé dans la page
-  if (res.ok) showPasswordSaved(true);
-  $("acct-msg").textContent = res.ok ? "Enregistré : le bot se connecte." : detailText(await res.json().catch(() => ({})), "Refusé.");
-  refreshAccount();
-});
-$("acct-login").addEventListener("click", async () => {
-  const res = await fetch("/api/account/login", { method: "POST" });
-  const data = await res.json();
-  $("acct-msg").textContent = res.ok ? data.message : detailText(data, "Impossible.");
-});
-$("acct-forget").addEventListener("click", async () => {
-  await fetch("/api/account/credentials", { method: "DELETE" });
-  $("acct-id").value = ""; $("acct-pw").value = "";
-  showPasswordSaved(false);
-  $("acct-msg").textContent = "Oubliés.";
-  refreshAccount();
-});
-
 // ----------------------------------------------------------------------------- scan des planètes
 const SCAN_SOURCE = { "démarrage": "au démarrage", manuel: "à la demande" };
 function renderScan(scan) {
@@ -135,7 +94,6 @@ $("scan-run").addEventListener("click", async () => {
 loadPreferences();
 refreshAccount();
 refreshScan();
-fillAccountForm();
 setInterval(refreshAccount, 8000);
 setInterval(refreshScan, 5000);
 

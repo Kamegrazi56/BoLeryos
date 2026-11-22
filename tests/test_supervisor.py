@@ -118,7 +118,8 @@ def test_forget_credentials_and_origin_check(world_client):
 def test_without_a_chosen_universe_it_waits_then_continues_once_chosen(world_client, game):
     c = world_client
     _creds(c)  # aucun univers choisi
-    assert _until(lambda: "choisissez un univers" in _connection(c)), _connection(c)
+    assert _until(lambda: "aucun univers choisi" in _connection(c)), _connection(c)
+    assert "choisissez un univers" not in c.get("/api/events").text  # attente normale : rien dans le suivi
     assert game.info()["logged_in"] is True and not _in_game(c)
     assert "Asterion" in c.get("/api/preferences").json()["preferences"]["catalog"]["universes"]  # suggestions
     _universe(c, "Asterion")

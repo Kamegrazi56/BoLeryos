@@ -54,7 +54,7 @@ def ui(settings, game):
         bot._set(State.LOGGED_IN, "test")
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(base + "/reglages")
-        page.wait_for_selector("#acct-id")
+        page.wait_for_selector("#acct-status")
         yield page, errors, app
         browser.close()
     server.should_exit = True
@@ -119,30 +119,26 @@ def test_the_removed_features_have_no_settings_and_no_routes(ui):
 
 
 # ------------------------------------------------------------------------------- réglages
-def test_account_keeps_credentials_in_memory_and_never_shows_them_again(ui):
+def test_settings_has_no_login_form_and_never_shows_credentials(ui):
+    """La connexion se fait uniquement sur l'Accueil : Réglages n'a ni champ ni bouton de connexion."""
     page, _, app = ui
-    page.fill("#acct-id", "titulaire.secret@example.com")
-    page.fill("#acct-pw", "mot-de-passe-tres-secret")
-    page.click("#acct-save")
-    page.wait_for_function("document.querySelector('#acct-status').textContent.includes('en mémoire (ti***)')", timeout=5000)
-    assert page.input_value("#acct-pw") == ""  # le mot de passe ne reste pas dans la page
-    assert app.state.bot.has_credentials()
-    assert "titulaire.secret" not in page.content()
-    page.click("#acct-forget")
-    page.wait_for_function("document.querySelector('#acct-status').textContent.includes('Aucun identifiant')", timeout=5000)
-    assert not app.state.bot.has_credentials()
-    page.click("#acct-login")
-    page.wait_for_function("document.querySelector('#acct-msg').textContent.includes('Aucun identifiant')", timeout=5000)
-
-
-def test_universe_is_typed_with_suggestions_and_saved(ui):
-    page, _, app = ui
-    app.state.bot.supervisor.prefs.add_catalog("universes", ["Asterion", "Kael"])
+    for selector in ("#acct-id", "#acct-pw", "#acct-save", "#acct-login", "#acct-forget"):
+        assert page.locator(selector).count() == 0, selector
+    app.state.bot.set_credentials("titulaire.secret@example.com", "mot-de-passe-tres-secret")
     page.reload()
-    page.wait_for_function("document.querySelectorAll('#universe-list option').length == 2")
-    assert page.locator("#universe-list option").evaluate_all("o => o.map(x => x.value)") == ["Asterion", "Kael"]
-    _edit(page, lambda: (page.fill("#universe", "Kael"), page.press("#universe", "Tab")))
-    assert _saved(app)["universe"] == "Kael"
+    page.wait_for_function("document.querySelector('#acct-status').textContent.includes('en mémoire (ti***)')", timeout=5000)
+    assert "titulaire.secret" not in page.content() and "mot-de-passe-tres-secret" not in page.content()
+    app.state.bot.forget_credentials()
+    page.reload()
+    page.wait_for_function("document.querySelector('#acct-status').textContent.includes('page Accueil')", timeout=5000)
+
+
+def test_settings_no_longer_offer_to_choose_the_universe(ui):
+    page, _, _ = ui
+    for selector in ("#universe", "#universe-list"):
+        assert page.locator(selector).count() == 0, selector
+    for selector in ("#login-delay-min", "#login-delay-max", "#engine", "#scan-run"):
+        assert page.locator(selector).count() == 1, selector
 
 
 def test_login_delay_is_saved_and_a_bad_range_is_refused(ui):
@@ -155,7 +151,7 @@ def test_login_delay_is_saved_and_a_bad_range_is_refused(ui):
 
 
 def test_entering_the_account_makes_the_bot_connect_by_itself(settings, game):
-    """Comme TBot : identifiants + univers saisis dans Réglages, et le bot se connecte tout seul."""
+    """Comme TBot : identifiants saisis sur l'Accueil + univers de l'instance, et le bot se connecte tout seul."""
     from dataclasses import replace as _replace
 
     game.reset(require_auth=True)
@@ -173,11 +169,11 @@ def test_entering_the_account_makes_the_bot_connect_by_itself(settings, game):
             browser = pw.chromium.launch(executable_path=settings.chromium_path, args=["--no-sandbox"])
             page = browser.new_page(viewport={"width": 1400, "height": 900})
             page.goto(f"http://127.0.0.1:{port}/reglages#account")
-            page.wait_for_selector("#acct-id")
-            page.fill("#acct-id", "joueur.test@example.com")
-            page.fill("#acct-pw", "good-password")
-            page.fill("#universe", "Asterion")
-            page.click("#acct-save")
+            page.wait_for_selector("#engine")
+            # L'univers n'est plus dans les Réglages : il vient de l'instance (créée depuis l'Accueil) ; ici, par la même route.
+            assert page.request.put(f"http://127.0.0.1:{port}/api/preferences", data={"universe": "Asterion"}).ok
+            # La connexion se fait depuis l'Accueil : ici on enregistre les identifiants par la même route que son bouton.
+            assert page.request.post(f"http://127.0.0.1:{port}/api/account/credentials", data={"identifier": "joueur.test@example.com", "password": "good-password"}).ok
             page.wait_for_function("document.querySelector('#conn-status').textContent.includes('dans la partie')", timeout=90000)
             assert "Connecté" in page.inner_text("#conn-status")
             assert "/game/" in app.state.bot._page.url and game.info()["logged_in"] is True
@@ -214,7 +210,7 @@ def test_home_shows_connection_scanned_planets_and_events(ui):
     page.wait_for_function("document.querySelectorAll('#planets tr').length === 4", timeout=10000)
     assert "8-50-Concorde" in page.text_content("#planets")
     assert "Scan des planètes" in page.text_content("#events")
-    assert "Aucun identifiant" in page.text_content("#sentence")
+    assert page.locator("#sentence").count() == 0 and page.locator("#hero-title").count() == 0  # plus de carte « Connexion »
     assert errors == []
 
 
