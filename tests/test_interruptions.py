@@ -193,3 +193,41 @@ def test_locator_handler_closes_unlisted_announcement_that_blocks_a_click(settin
     hits, closed = _run(settings, scenario, CATCHUP_PAGE)
     assert hits == 1
     assert closed == [CATCHUP_NAME]
+
+
+# Le clic sur « Modèles » est avalé par une annonce qui surgit juste après lui (vu sur la production, 22/11).
+LATE_PACKS_PAGE = """
+<button onclick="openModels(this)">Modèles</button>
+<script>
+function openModels(button) {
+  if (!window.shown) {  // 1er clic : l'annonce arrive et le clic est perdu
+    window.shown = true;
+    document.body.insertAdjacentHTML('beforeend', `
+      <div id="packs" role="dialog" aria-label="Vos packs sont arrivés à leur terme"
+           style="position:fixed;inset:0;background:#000a;z-index:98">
+        <button aria-label="Fermer la transmission" onclick="document.getElementById('packs').remove()">x</button>
+      </div>`);
+    return;
+  }
+  document.body.insertAdjacentHTML('beforeend', `
+    <div role="dialog" aria-label="Modèles de Flotte"><div><span>Expe</span><span>5 Unités</span>
+    <button title="Appliquer le modèle">Appliquer</button><button>Supprimer</button></div></div>`);
+}
+</script>
+"""
+
+
+def test_models_dialog_is_reopened_when_an_announcement_swallows_the_click(settings):
+    from types import SimpleNamespace
+
+    from app.explorer import ExplorationPass
+
+    async def scenario(page, closed):
+        bot = SimpleNamespace(_page=page, _settings=settings, supervisor=SimpleNamespace(game_blocker=lambda: None))
+        explorer = ExplorationPass.__new__(ExplorationPass)
+        explorer.bot = bot
+        return await explorer._open_models_dialog(), closed
+
+    rows, closed = _run(settings, scenario, LATE_PACKS_PAGE)
+    assert [r["name"] for r in rows] == ["Expe"]
+    assert closed == [PACKS_NAME]

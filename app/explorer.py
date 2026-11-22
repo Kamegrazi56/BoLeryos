@@ -20,7 +20,7 @@ import math
 import re
 import time
 
-from . import builder, human
+from . import builder, human, interruptions
 from .builder import UNCONFIRMED_LIMIT, ConstructionPass
 from .explorations import METHODS, plans
 from .slots import MISSIONS_COUNT_JS, allowance
@@ -34,6 +34,7 @@ LIST_PAGE_WAIT_SECONDS = 3.0
 MAX_LIST_PAGES = 12  # portions chargées au plus pour une fenêtre (garde-fou contre une liste sans fin)
 ZOOM_STEPS = 6  # dézooms au plus pour trouver une brèche autour d'une planète
 PAGE_WAIT_SECONDS = 10.0
+MODELS_OPEN_ATTEMPTS = 3  # clics sur « Modèles » si une annonce du jeu avale le clic
 TARGET_ATTRIBUTE = "data-bot-target"
 TARGET_ATTEMPTS = 2  # saisie de la cible, puis une nouvelle saisie si le jeu ne l'a pas affichée validée
 TARGET_RETRY_PAUSE_SECONDS = 1.5
@@ -559,13 +560,18 @@ class ExplorationPass(ConstructionPass):
         return allowance(self.bot, self.feature_id, count[0], count[1])
 
     async def _open_models_dialog(self) -> list[dict]:
-        await self._click_named("Modèles")
-        end = time.monotonic() + PAGE_WAIT_SECONDS / 2
-        while time.monotonic() < end:
-            rows = await self.page.evaluate(MODELS_JS)
-            if rows is not None:
-                return rows
-            await asyncio.sleep(0.2)
+        """Ouvre la fenêtre des modèles. Une annonce du jeu peut surgir après le clic et l'avaler (vu sur la production,
+        « Vos packs sont arrivés à leur terme ») : tant qu'on attend, on la ferme, puis on recommence le clic."""
+        for _ in range(MODELS_OPEN_ATTEMPTS):
+            await self._click_named("Modèles")
+            end = time.monotonic() + PAGE_WAIT_SECONDS / 2
+            while time.monotonic() < end:
+                rows = await self.page.evaluate(MODELS_JS)
+                if rows is not None:
+                    return rows
+                if await interruptions.dismiss(self.page):
+                    break  # annonce fermée : le clic a sans doute été perdu, on clique à nouveau
+                await asyncio.sleep(0.2)
         raise GameUiError("la fenêtre des modèles ne s'ouvre pas")
 
     async def _close_models_dialog(self) -> None:
