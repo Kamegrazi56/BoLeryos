@@ -116,6 +116,13 @@ class Scheduler:
             self.bot.log(f"Fonctionnalité « {label} » désactivée.", event=True)
         return saved
 
+    def wake(self, fid: str) -> None:
+        """Fait passer la fonctionnalité au prochain tour, sans attendre son minuteur (ex. un retour de flotte vient d'être programmé).
+        Sans effet si elle est éteinte, si le bot est sur OFF (le passage viendra à l'allumage) ou si elle tourne déjà."""
+        rt = self._runtime.get(fid)
+        if rt is not None and not rt.running and self.store.get(fid)["enabled"]:
+            rt.next_at = self._clock()
+
     def reorder(self, order: list[str]) -> list[str]:
         return self.store.set_order(order)
 

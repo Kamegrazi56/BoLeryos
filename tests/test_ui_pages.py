@@ -485,6 +485,34 @@ def test_pillars_panel_programs_a_change_and_explains_a_refusal(ui):
     assert errors == []
 
 
+def test_fleets_panel_reads_the_flights_programs_a_return_and_explains_a_refusal(ui):
+    page, errors, app = ui
+    page.click("#scan-run")
+    page.wait_for_function("document.querySelectorAll('#scan-list tr').length === 4", timeout=10000)
+    page.goto(page.base + "/reglages#fleets")
+    page.reload()
+    assert "Aucun relevé" in page.text_content("#flt-status-line")
+    page.click("#flt-scan")
+    page.wait_for_function("document.querySelectorAll('#flt-fleet option').length === 1", timeout=20000)
+    assert "Déploiement" in page.text_content("#flt-fleets") and "476051 U" in page.text_content("#flt-fleets")
+    page.fill("#flt-at", "2020-01-01T10:00")  # dans le passé
+    page.click("#flt-add")
+    page.wait_for_function("document.getElementById('flt-msg').classList.contains('error')")
+    assert "déjà passée" in page.text_content("#flt-msg")
+    page.fill("#flt-at", time.strftime("%Y-%m-%dT%H:%M", time.localtime(time.time() + 7 * 24 * 3600)))
+    page.click("#flt-add")
+    page.wait_for_function("document.getElementById('flt-msg').classList.contains('ok')")
+    (recall,) = app.state.bot.fleets.pending()
+    assert page.locator("#flt-recalls li[data-id]").count() == 1 and "Programmé" in page.text_content("#flt-recalls")
+    page.fill("#flt-margin", "9")
+    page.press("#flt-margin", "Tab")
+    page.wait_for_function("document.getElementById('flt-msg').textContent.includes('Marge')", timeout=5000)
+    assert app.state.bot.fleets.margin() == 9
+    page.click(f"#flt-recalls li[data-id='{recall['id']}'] button")
+    page.wait_for_function("document.querySelectorAll('#flt-recalls li[data-id]').length === 0")
+    assert errors == []
+
+
 def test_slots_panel_saves_the_places_kept_free_and_the_priority(ui):
     page, errors, app = ui
     page.goto(page.base + "/reglages#slots")
@@ -500,12 +528,12 @@ def test_slots_panel_saves_the_places_kept_free_and_the_priority(ui):
     assert errors == []
 
 
-def test_settings_page_has_sixteen_tabs_and_only_one_panel_shows_at_a_time(ui):
+def test_settings_page_has_seventeen_tabs_and_only_one_panel_shows_at_a_time(ui):
     page, errors, _ = ui
     page.goto(page.base + "/reglages")
     # ordre du menu latéral : Bot, Économie, Opérations, Alliance
-    ids = ["account", "features", "planning", "constructions", "researches", "populations", "ships", "components", "slots", "explorations", "excavations", "hackings", "minings", "pillars", "spying", "alliance"]
-    assert page.locator("[role=tab]").count() == 16
+    ids = ["account", "features", "planning", "constructions", "researches", "populations", "ships", "components", "slots", "explorations", "excavations", "hackings", "minings", "pillars", "fleets", "spying", "alliance"]
+    assert page.locator("[role=tab]").count() == 17
     for tab in ids:
         page.click(f"#tab-{tab}")
         assert page.get_attribute(f"#tab-{tab}", "aria-selected") == "true"

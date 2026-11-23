@@ -35,6 +35,8 @@ from .excavations import DURATIONS as EXCAVATION_DURATIONS
 from .excavations import MAX_TEAM as EXCAVATION_MAX_TEAM
 from .excavations import UNITS as EXCAVATION_UNITS
 from .excavations import ExcavationError
+from .fleets import FleetError
+from .fleets import when as fleet_when
 from .pillars import ACTIONS as PILLAR_ACTIONS
 from .pillars import PillarError
 from .pillars import click_time as pillar_click_time
@@ -192,6 +194,15 @@ class PillarChangeRequest(BaseModel):
     planet: str = Field(default="", max_length=200)
     action: str = Field(default="", max_length=10)  # open | close
     at: str = Field(default="", max_length=40)  # « AAAA-MM-JJTHH:MM », heure de Paris, heure où le changement est effectif
+
+
+class FleetRecallRequest(BaseModel):
+    fleet_id: str = Field(default="", max_length=40)
+    at: str = Field(default="", max_length=40)  # « AAAA-MM-JJTHH:MM:SS », heure de Paris, heure où la flotte doit être rentrée
+
+
+class FleetSettingsRequest(BaseModel):
+    margin: int = Field(default=5, ge=0, le=1000)  # secondes d'avance du clic de rappel
 
 
 class HackingRequest(BaseModel):
@@ -874,6 +885,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _check_origin(request)
         result = await bot.pillar.scan("manuel")
         return JSONResponse(_pillars_payload(result.get("error", "")), headers=NO_STORE)
+
+    # --- Retours de flottes : flottes en vol (Capteurs) et heure de retour voulue -----------
+    def _fleets_payload(error: str = "") -> dict:
+        store = bot.fleets
+        snap = store.snapshot()
+        fleets = [f for f in snap["fleets"] if not f["excluded"]]
+        return {"fleets": fleets, "excluded": len(snap["fleets"]) - len(fleets), "read_at": snap["read_at"], "recalls": store.recalls(),
+                "margin": store.margin(), "scanning": bot.fleet.scanning, "persistent": store.persistent, "error": error}
+
+    @app.get("/api/fleets")
+    async def api_fleets():
+        return JSONResponse(_fleets_payload(), headers=NO_STORE)
+
+    @app.post("/api/fleets/scan")
+    async def api_fleets_scan(request: Request):
+        """Relève tout de suite les flottes en vol (panneau Capteurs, lecture seule)."""
+        _check_origin(request)
+        result = await bot.fleet.scan("manuel")
+        return JSONResponse(_fleets_payload(result.get("error", "")), headers=NO_STORE)
+
+    @app.post("/api/fleets/recalls")
+    async def api_fleets_add(body: FleetRecallRequest, request: Request):
+        _check_origin(request)
+        try:
+            recall = bot.fleets.add(body.fleet_id, body.at)
+        except FleetError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        bot.log(f"Flottes : retour de {recall['fleet']['label']} programmé pour le {fleet_when(recall['at'])}.", event=True)
+        bot.scheduler.wake("fleets")  # sans attendre le prochain passage (jusqu'à 30 min) : le retour est pris en compte tout de suite
+        return JSONResponse(_fleets_payload(), headers=NO_STORE)
+
+    @app.delete("/api/fleets/recalls/{recall_id}")
+    async def api_fleets_remove(recall_id: str, request: Request):
+        _check_origin(request)
+        if not bot.fleets.remove(recall_id):
+            raise HTTPException(404, detail=["Retour introuvable."])
+        return JSONResponse(_fleets_payload(), headers=NO_STORE)
+
+    @app.put("/api/fleets/settings")
+    async def api_fleets_settings(body: FleetSettingsRequest, request: Request):
+        _check_origin(request)
+        try:
+            bot.fleets.set_margin(body.margin)
+        except FleetError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        return JSONResponse(_fleets_payload(), headers=NO_STORE)
 
     # --- Planning : plages horaires actives par jour (heure française) -----------
     def _planning_payload() -> dict:

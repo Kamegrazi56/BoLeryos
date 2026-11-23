@@ -79,6 +79,10 @@ async def _run_pillars(bot) -> str:
     return await bot.pillar.run_pass()
 
 
+async def _run_fleets(bot) -> str:
+    return await bot.fleet.run_pass()
+
+
 async def _run_test(bot) -> str:
     return "passage de test : rien n'a été fait dans le jeu"
 
@@ -103,6 +107,8 @@ FEATURES: tuple[Feature, ...] = (
             timer_label="Donner des jetons toutes les"),
     Feature("pillars", "Piliers programmés", "Ouvre ou ferme les Piliers des planètes aux dates et heures programmées (onglet Piliers) : le bot clique 1 h avant l'heure voulue (le changement prend 1 h dans le jeu) et confirme. Un changement qu'il n'a pas pu faire avec plus d'1 h de retard (bot sur OFF…) est abandonné. Ne touche jamais au champ de force.", _run_pillars,
             self_timed=True, next_due=lambda bot: bot.pillar.next_due()),
+    Feature("fleets", "Retours de flottes", "Fait rentrer à l'heure voulue une flotte en vol (onglet Flottes) : le bot lit la durée de retour affichée par le jeu dans « Préparer le retour de la flotte » et confirme le rappel pour que la flotte arrive à l'heure choisie, quelques secondes avant (marge réglable). Jamais les flottes d'exploration, de fouille, de forage, de piratage ni d'espionnage.", _run_fleets,
+            self_timed=True, next_due=lambda bot: bot.fleet.next_due()),
     Feature("test", "Test (ne fait rien)", "Écrit une ligne dans le journal à chaque passage. À retirer quand les vraies fonctionnalités arrivent.", _run_test),
 )
 

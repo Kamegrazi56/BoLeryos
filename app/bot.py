@@ -57,6 +57,8 @@ from .excavations import ExcavationStore
 from .excavator import ExcavationPass
 from .hacker import HackingPass
 from .hackings import HackingStore
+from .fleet_pass import FleetPass
+from .fleets import FleetStore
 from .pillar_pass import PillarPass
 from .pillars import PillarStore
 from .slots import SlotSettings
@@ -199,6 +201,8 @@ class BotSession:
         self.miner = MiningPass(self, self.minings)  # forages de planètes minières
         self.alliance = AllianceSettings(settings.data_dir)  # jetons d'alliance à donner à chaque passage (tous, 1 ou 2)
         self.token_giver = TokenPass(self, self.alliance)  # dons de jetons à la technologie prioritaire de l'alliance
+        self.fleets = FleetStore(settings.data_dir)  # retours de flottes programmés : relevé des Capteurs, rappels, marge
+        self.fleet = FleetPass(self, self.fleets)  # lecture des flottes en vol et rappel à l'heure voulue
         self.pillars = PillarStore(settings.data_dir)  # Piliers programmés : changements, état lu dans le jeu, historique
         self.pillar = PillarPass(self, self.pillars)  # ouverture / fermeture des Piliers à l'heure programmée
         self.mission_state = MissionsState(settings.data_dir)  # date de la dernière récupération des missions

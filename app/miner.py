@@ -9,7 +9,7 @@ Relevé sur le vrai jeu (2026-11-08, forage Egide → M68 18 22, 1 Foreuse + 200
   - « Missions en cours » : (1) aller « Forage · Arrivée … · compte à rebours · Origine <planète> · Destination Planete miniere
     <adresse> », (2) « Forage · Extraction en cours » (aucune heure de fin : soute pleine ou planète épuisée, retour tout seul),
     (3) « Retour · Arrivée … · Origine Inconnue <adresse minière> · Destination <planète> ».
-Une planète minière ne reçoit jamais deux forages. Le bot ne rappelle jamais une flotte.
+Une planète minière ne reçoit jamais deux forages. Le bot ne rappelle jamais un forage.
 """
 
 from __future__ import annotations

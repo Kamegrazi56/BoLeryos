@@ -115,6 +115,9 @@ class GameHandle:
     def set_exc(self, **values) -> None:
         httpx.post(self.url + "/api/_exc", json=values, timeout=5).raise_for_status()
 
+    def set_recall(self, **values) -> None:
+        httpx.post(self.url + "/api/_recall", json=values, timeout=5).raise_for_status()
+
     def set_movements(self, movements: list[dict]) -> None:
         httpx.post(self.url + "/api/_movements", json={"movements": movements}, timeout=5).raise_for_status()
 

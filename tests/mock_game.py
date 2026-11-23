@@ -157,6 +157,9 @@ def initial_state():
         # Missions actives (commun au compte, en-tête d'Opérations) : Fouilles + Piratage + Forages + explorations actives
         # + autres missions ; maximum du compte.
         "missions_max": 29,
+        # Retour d'une flotte (fenêtre supposée, NON relevée sur le vrai jeu) : « elapsed » = durée de retour égale au vol déjà
+        # fait ; « constant » = durée fixe `return_seconds` ; no_effect : la confirmation ne fait rien.
+        "recall": {"mode": "elapsed", "return_seconds": 600, "no_effect": False, "no_confirm": False, "stay_open": False},
         # Capteurs interstellaires : un déploiement du joueur, comme dans l'export (aucune attaque au départ)
         "movements": [_movement("Déploiement", ("6-79-Egide", "M69 38 06", "KameGrazi"), ("8-50-Concorde", "Z25 95 16", "KameGrazi"))],
         # Liste de la Galaxie autour de la planète active (structure de l'export du 2026-11-03)
@@ -529,10 +532,43 @@ function opsMain() {
   return `<h2>Opérations</h2><button type="button" id="gpil">Gérer les Piliers</button><div class="ops-count"><span>Missions actives : ${missionsCount()} / ${state.missions_max}</span></div><div><span>Moyen de lancement</span>` + ways + '</div><div><span>Mission</span>' + missions + '</div>' + body + pillarsDialog();
 }
 function sensors() {
-  const side = (s) => `<div><span>${s.planet}</span><button type="button">${s.coords}</button><span>${s.player}</span></div>`;
-  const rows = state.movements.map((m) => `<div class="mv"><div>${m.type}</div><div>476051 U</div><div>Arrivée: ${m.arrival}</div><div>${m.countdown}</div>`
-    + `<div><span>Origine</span>${side(m.origin)}</div><div><span>Destination</span>${side(m.destination)}</div></div>`).join('');
-  return `<div class="sensors" hidden><span>CAPTEURS INTERSTELLAIRES</span><span>Missions actives : ${state.movements.length} / 29</span>${rows}</div>`;
+  if (!ui.sensorsOpen) return '<div class="sensors" hidden></div>';
+  const now = Date.now() / 1000;
+  const clockOf = (n) => `${two(Math.floor(n / 3600))}:${two(Math.floor(n % 3600 / 60))}:${two(n % 60)}`;
+  const side = (s) => `<span>${s.planet}</span><span>${s.player}</span>`;
+  // Structure du vrai jeu : une carte .rounded-2xl avec les trois blocs fleet-radar-* et les boutons d'adresse (export 21/11)
+  // `late_ms` : la carte n'arrive que quelque temps après l'ouverture du panneau (constaté sur le vrai jeu, 23/11)
+  const rows = state.movements.map((m, i) => {
+    if (m.late_ms && Date.now() - ui.sensorsAt < m.late_ms) return '';
+    const clock = m.end ? clockOf(Math.max(0, Math.round(m.end - now))) : m.countdown;
+    const back = m.no_recall || m.type === 'Retour' ? '' : `<button type="button" class="fleet-recall" data-i="${i}" aria-label="Préparer le retour de la flotte">r</button>`;
+    return `<div class="rounded-2xl border mv"><div>${m.type}</div><div>${m.units || '476051 U'}</div><div>Arrivée: ${m.arrival}</div><div>${clock}</div>`
+      + `<div class="flex"><div data-testid="fleet-radar-left-endpoint">${side(m.origin)}</div><button type="button">${m.origin.coords}</button>`
+      + `<div data-testid="fleet-radar-route-direction"></div><div data-testid="fleet-radar-right-endpoint">${side(m.destination)}</div><button type="button">${m.destination.coords}</button></div>`
+      + `<button type="button" aria-label="Localiser dans la galaxie">l</button>${back}</div>`;
+  }).join('');
+  const dialog = ui.recallDialog == null ? '' : recallDialog();
+  return `<section id="game-utility-content-sensors" role="tabpanel" data-testid="sensors-overlay-panel"><span>CAPTEURS INTERSTELLAIRES</span>`
+    + `<button type="button">Tous</button><button type="button">Attaques</button><button type="button">Espionnage</button><button type="button">Logistique</button>${rows}</section>${dialog}`;
+}
+// Durée du retour affichée par la fenêtre (selon la règle du faux jeu : vol déjà fait, ou durée fixe)
+function returnSeconds(m) {
+  const rule = state.recall;
+  return rule.mode === 'constant' ? rule.return_seconds : Math.max(1, Math.round(Date.now() / 1000 - m.start));
+}
+const fmtClock = (n) => `${two(Math.floor(n / 3600))}:${two(Math.floor(n % 3600 / 60))}:${two(n % 60)}`;
+// Texte réel de la fenêtre (vrai jeu, 23/11) : une HEURE d'arrivée, pas une durée.
+function returnText(m) {
+  const d = new Date(Date.now() + returnSeconds(m) * 1000);
+  const when = `${two(d.getDate())}/${two(d.getMonth() + 1)}/${d.getFullYear()} ${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
+  return `Confirmer le retour. Si vous confirmez maintenant, la flotte reviendra le ${when}.`;
+}
+function recallDialog() {
+  const m = state.movements[ui.recallDialog];
+  if (!m) return '';
+  const confirm = state.recall.no_confirm ? '' : '<button type="button" id="recall-ok">Confirmer le retour</button>';
+  return `<div role="dialog" aria-label="Retour de la flotte"><p id="recall-clock">${returnText(m)}</p>`
+    + `<button type="button" id="recall-cancel">Annuler</button>${confirm}</div>`;
 }
 function render() {
   if (!state) return;
@@ -547,7 +583,7 @@ function render() {
   const planets = state.planets.map((pl, i) => `<${rowTag} class="pl" data-i="${i}"><span>${pl.name}</span><span>${pl.coords}</span>`
     + `<span>${md(pl.stocks.Fer)}</span><span>${md(pl.stocks.Cristal)}</span><span>${md(pl.stocks['Éther'])}</span></${rowTag}>`).join('');
   document.getElementById('root').innerHTML =
-    '<div class="launcher"><button id="open-planets"><span class="sr-only">Planètes / Favoris / Piliers</span></button><button hidden><span class="sr-only">Planètes</span></button><button><span class="sr-only">Capteurs</span><span class="game-utility-badge game-utility-badge--fleet">' + state.movements.length + '</span></button>'
+    '<div class="launcher"><button id="open-planets"><span class="sr-only">Planètes / Favoris / Piliers</span></button><button hidden><span class="sr-only">Planètes</span></button><button id="open-sensors"><span class="sr-only">Capteurs</span><span class="game-utility-badge game-utility-badge--fleet">' + state.movements.length + '</span></button>'
     + '<button><span class="sr-only">Chat</span></button><button><span class="sr-only">Favoris</span></button></div>'
     + `<div class="planet"><span>${p.name}</span><span>${p.coords}</span></div>`
     + `<button type="button" id="planet-btn" aria-label="Sélectionner la planète active"><span>${p.name}</span><span>${p.coords}</span></button>`
@@ -566,6 +602,18 @@ function render() {
     + (ui.bonusMsg ? `<div class="bonus-toast">${ui.bonusMsg}</div>` : '')
     + (state.popup ? '<div role="dialog"><button>Confirmer</button></div>' : '');
   document.getElementById('open-planets').onclick = () => { overlayOpen = true; render(); };
+  document.getElementById('open-sensors').onclick = async () => { ui.sensorsOpen = !ui.sensorsOpen; if (!ui.sensorsOpen) ui.recallDialog = null; ui.sensorsAt = Date.now(); await load();
+    state.movements.forEach((m) => { if (m.late_ms) setTimeout(render, m.late_ms + 50); }); };
+  document.querySelectorAll('.fleet-recall').forEach((b) => b.onclick = () => { ui.recallDialog = +b.dataset.i; render(); });
+  const rcancel = document.getElementById('recall-cancel'); if (rcancel) rcancel.onclick = () => { ui.recallDialog = null; render(); };
+  const rok = document.getElementById('recall-ok');
+  if (rok) rok.onclick = async () => {
+    const index = ui.recallDialog;
+    await fetch('/api/recall', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({index})});
+    // stay_open : constaté sur le vrai jeu (23/11), la fenêtre reste affichée alors que le rappel est pris en compte.
+    if (!state.recall.stay_open) ui.recallDialog = null;
+    await load();
+  };
   document.getElementById('close-ov').onclick = () => { overlayOpen = false; render(); };
   document.querySelectorAll('.nav').forEach((b) => b.onclick = () => { history.pushState({}, '', '/game/asterion/' + b.dataset.s); render(); });
   document.querySelectorAll('.techtab').forEach((b) => b.onclick = () => { ui.techTab = b.dataset.t; render(); });
@@ -747,6 +795,10 @@ function render() {
   });
 }
 async function load() { state = await (await fetch('/api/state')).json(); render(); }
+setInterval(() => {  // la durée de retour affichée avance en direct (le texte seul change, comme dans une page à compteur)
+  const clock = document.getElementById('recall-clock');
+  if (state && clock && state.movements[ui.recallDialog]) clock.textContent = returnText(state.movements[ui.recallDialog]);
+}, 250);
 window.addEventListener('popstate', render);
 document.getElementById('refuse').onclick = () => document.getElementById('cookies').remove();
 load();
@@ -908,6 +960,24 @@ def create_mock_game() -> FastAPI:
     @app.post("/api/_galaxy")
     async def set_galaxy(request: Request):
         app.state.game["galaxy"] = (await request.json())["rows"]
+        return {"ok": True}
+
+    @app.post("/api/_recall")
+    async def set_recall(request: Request):
+        app.state.game["recall"].update(await request.json())
+        return {"ok": True}
+
+    @app.post("/api/recall")
+    async def recall(request: Request):
+        """Confirmation du retour d'une flotte : la flotte devient un « Retour » qui arrive dans la durée affichée."""
+        g = app.state.game
+        index = int((await request.json())["index"])
+        move = g["movements"][index]
+        now = time.time()
+        seconds = g["recall"]["return_seconds"] if g["recall"]["mode"] == "constant" else max(1, round(now - move["start"]))
+        g["actions"].append({"kind": "recall", "index": index, "duration": seconds, "at": now})
+        if not g["recall"]["no_effect"]:
+            move.update({"type": "Retour", "start": now, "end": now + seconds, "origin": move["destination"], "destination": move["origin"]})
         return {"ok": True}
 
     @app.post("/api/_movements")

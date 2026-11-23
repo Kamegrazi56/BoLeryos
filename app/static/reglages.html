@@ -44,6 +44,7 @@
         <button role="tab" id="tab-hackings" data-tab="hackings" aria-controls="panel-hackings">Piratage<span class="dot" data-dot="hackings" aria-hidden="true"></span></button>
         <button role="tab" id="tab-minings" data-tab="minings" aria-controls="panel-minings">Forages<span class="dot" data-dot="minings" aria-hidden="true"></span></button>
         <button role="tab" id="tab-pillars" data-tab="pillars" aria-controls="panel-pillars">Piliers<span class="dot" data-dot="pillars" aria-hidden="true"></span></button>
+        <button role="tab" id="tab-fleets" data-tab="fleets" aria-controls="panel-fleets">Flottes<span class="dot" data-dot="fleets" aria-hidden="true"></span></button>
         <button role="tab" id="tab-spying" data-tab="spying" aria-controls="panel-spying">Espionnage</button>
         <p class="side-group" aria-hidden="true">Alliance</p>
         <button role="tab" id="tab-alliance" data-tab="alliance" aria-controls="panel-alliance">Jetons d'alliance<span class="dot" data-dot="alliance" aria-hidden="true"></span></button>
@@ -399,6 +400,36 @@
       <ol id="pil-changes" class="cons-queue"></ol>
     </section>
 
+    <section class="tabpanel card" id="panel-fleets" role="tabpanel" aria-labelledby="tab-fleets" hidden>
+      <header class="panel-head">
+        <div><p class="eyebrow">Opérations · programmé</p><h2 id="flt-title">Flottes</h2><p class="lede">Faire rentrer une flotte en vol à l'heure de votre choix.</p></div>
+        <div class="fhead-slot" data-feature-head="fleets"></div>
+      </header>
+      <details class="help-box">
+        <summary>Comment ça marche ?</summary>
+        <p>Cliquez sur « Relever les flottes en vol » : le bot ouvre les <strong>Capteurs</strong> du jeu (lecture seule) et liste chaque flotte (contenu, départ, destination, temps de vol restant). Choisissez ensuite la date et l'heure où la flotte doit être <strong>rentrée</strong> et cliquez sur « Programmer ». Le jeu ne donne la durée du retour qu'au moment du rappel : le bot ouvre « Préparer le retour de la flotte », lit la durée affichée, attend, puis <strong>confirme le rappel</strong> au bon moment, quelques secondes avant l'heure (réglable ci-dessous). La fonctionnalité doit être activée et le bot sur ON. Les flottes d'exploration, de fouille, de forage, de piratage et d'espionnage ne sont jamais proposées. Si l'heure est impossible à tenir (déjà trop tard), si la flotte est rentrée ou si la fenêtre du jeu n'est pas reconnue, le bot ne fait rien et le dit dans le résultat. <strong>Non vérifié sur le vrai jeu</strong> : commencez avec une seule flotte.</p>
+      </details>
+      <h3>Flottes en vol</h3>
+      <div class="row">
+        <button id="flt-scan" type="button" class="secondary">Relever les flottes en vol</button>
+        <span id="flt-scan-msg" class="hint" role="status" aria-live="polite"></span>
+      </div>
+      <p id="flt-status-line" class="status-line" role="status" aria-live="polite">Aucun relevé pour l'instant.</p>
+      <ul id="flt-fleets" class="cons-queue"></ul>
+      <h3>Programmer un retour</h3>
+      <div class="row add-row">
+        <label>Flotte <select id="flt-fleet" aria-label="Flotte"></select></label>
+        <label>Rentrée le <input id="flt-at" type="datetime-local" step="1" aria-label="Date et heure où la flotte doit être rentrée"></label>
+        <button id="flt-add" type="button" class="secondary">+ Programmer</button>
+      </div>
+      <div class="row">
+        <label>Marge d'avance du clic <input id="flt-margin" type="number" min="0" max="120" step="1" aria-label="Marge en secondes"> secondes</label>
+      </div>
+      <p id="flt-msg" class="msg" role="status" aria-live="polite"></p>
+      <h3>Retours programmés</h3>
+      <ol id="flt-recalls" class="cons-queue"></ol>
+    </section>
+
     <section class="tabpanel card" id="panel-spying" role="tabpanel" aria-labelledby="tab-spying" hidden>
       <header class="panel-head">
         <div><p class="eyebrow">Opérations · manuel</p><h2 id="spy-title">Espionnage des Errants</h2><p class="lede">Envoyer un drone vers chaque Errant autour d'une planète, à la demande.</p></div>
@@ -484,6 +515,7 @@
   <script src="/static/alliance.js"></script>
   <script src="/static/mining.js"></script>
   <script src="/static/pillars.js"></script>
+  <script src="/static/fleets.js"></script>
   <script src="/static/slots.js"></script>
   <script src="/static/hours.js"></script>
 </body>
