@@ -241,7 +241,9 @@ function card(p, it, kind, busy) {
   const ok = afford(p, it, busy);
   // hide_upgrade : planète sans aucun bouton « Améliorer » (vrai jeu, ex. construction en cours)
   const label = kind === 'tech' ? (ok ? 'Rechercher' : 'Ressources insuffisantes') : (p.hide_upgrade ? 'En construction' : 'Améliorer');
-  const costs = Object.entries(it.costs).map(([k, v]) => `<div><span>${k}</span><span>${cost(v)}</span></div>`).join('');
+  // Vrai jeu (23/11) : la ressource qui manque porte le texte « Ressources insuffisantes » entre son nom et sa valeur.
+  const lack = (k, v) => kind !== 'tech' && !ok && p.stocks[k] < v ? '<span>Ressources insuffisantes</span>' : '';
+  const costs = Object.entries(it.costs).map(([k, v]) => `<div><span>${k}</span>${lack(k, v)}<span>${cost(v)}</span></div>`).join('');
   const dur = kind === 'tech' ? '<div><span>Temps de recherche</span></div>' : `<div><span>Durée</span><span>${it.duration}</span></div>`;
   return `<div class="card"><div class="top"><div class="badge"><span>${it.level}</span></div><div class="abs"><h3>${it.name}</h3></div></div>`
     + `<div class="body">${costs}${dur}<button class="act" data-name="${it.name}" data-kind="${kind}" ${ok ? '' : 'disabled'}>${label}</button></div></div>`;
@@ -249,7 +251,7 @@ function card(p, it, kind, busy) {
 const kfmt = (v) => v >= 1e9 ? (v / 1e9).toFixed(3).replace('.', ',') + ' G' : v >= 1e6 ? (v / 1e6).toFixed(3).replace('.', ',') + ' M' : v >= 1000 ? (v / 1000).toFixed(3).replace('.', ',') + ' K' : String(Math.round(v));
 const ui = {tab: 'Assaut', ship: 'Assemblages', way: 'Piliers', mission: 'ATTAQUE', techTab: 'Civil', zoom: 1, windowRows: [], modelsOpen: false,
             zoomLevel: 4.64, listShown: 25, toasts: [], report: null, freeRows: [], allyTab: 'vue', allyMsg: null, missionTab: 'missions', missionMsg: null,
-            empireTab: 'dash', form: {target: '', units: {}, copies: '1', duration: '1', hours: 6, mira: false, foreuse: '1', mineur: ''}};
+            empireTab: 'dash', form: {target: '', units: {}, cargo: {}, copies: '1', duration: '1', hours: 6, mira: false, foreuse: '1', mineur: ''}};
 (() => { const q = new URLSearchParams(location.search); if (q.get('mission')) ui.mission = q.get('mission'); if (q.get('method')) ui.way = q.get('method') === 'FLEET' ? 'Flotte' : 'Piliers'; })();
 const CK = {Fer: 'F', Cristal: 'C', 'Éther': 'E'};
 // cost_labels : vrai jeu du 21/11, le coût s'affiche « Fer » puis « 899 » (deux textes) au lieu de « F: 899 »
@@ -425,6 +427,33 @@ function mineForm(p) {
     + `<section><h3>Missions en cours</h3>${mineCards() || '<p>Aucune mission disponible</p>'}</section>`
     + (ui.toasts.length ? `<div class="toasts">${ui.toasts.map((t) => `<div>${t.text}</div>`).join('')}</div>` : '');
 }
+// Opérations › Transport (relevé du vrai jeu, 23/11) : cible (liste « Vos colonies »), composition, cargaison, bouton de lancement
+// #raid-launch-btn (Flotte) ou #pillars-launch-btn (Piliers), « LANCEMENT BLOQUÉ » / « VORTEX BLOQUÉ » tant qu'il est grisé.
+const CAPACITY = {'Grand Transporteur': 1e7, 'Petit Transporteur': 1e6, 'Testo Civil Transpo Destroy Def': 1e9, '>Lentus': 1e8};
+const RES3 = ['Fer', 'Cristal', 'Éther'];
+function trForm(p) {
+  const units = p.units[METHOD()], f = ui.form, fleet = METHOD() === 'FLEET';
+  const valid = /^[A-Z]\\d{2} \\d{2} \\d{2}$/.test(f.target);
+  const cap = Object.entries(f.units).reduce((s, [n, q]) => s + (+q || 0) * (CAPACITY[n] || 0), 0);
+  const total = RES3.reduce((s, r) => s + (+f.cargo[r] || 0), 0);
+  const closed = !fleet && (state.pillars[p.name] || {closed: false}).closed;
+  const ok = valid && cap > 0 && total > 0 && total <= cap && RES3.every((r) => (+f.cargo[r] || 0) <= p.stocks[r])
+    && !closed && (!fleet || missionsCount() < state.missions_max);
+  // Vrai jeu (23/11) : « Vos colonies » = <div data-testid="raid-target-planets-list"> ; une entrée = un bouton avec deux textes (nom, adresse).
+  const colonies = '<div data-testid="raid-target-planets-list">' + state.planets.map((pl) => `<button type="button" class="colony" data-c="${pl.coords}"><span>${pl.name}</span> <span>${pl.coords}</span></button>`).join('') + '</div>';
+  const rows = Object.entries(units).map(([n, c]) => `<div><span>${n}</span><span>Disponibles : ${int(c)}</span><input type="text" placeholder="0" class="unit" data-u="${n}" aria-label="Quantité ${n}" value="${f.units[n] || ''}"></div>`).join('');
+  const cargo = RES3.map((r) => `<div><input type="text" placeholder="0" class="cargo" data-r="${r}" aria-label="Cargaison : ${r}" value="${f.cargo[r] || ''}"></div>`).join('');
+  const label = ok ? (fleet ? 'Lancer la flotte' : 'Lancer le vortex') : (fleet ? 'LANCEMENT BLOQUÉ' : 'VORTEX BLOQUÉ');
+  const dialog = ui.modelsOpen ? `<div role="dialog" aria-label="Modèles de ${ui.way}"><div class="dialog-body"><div><span>Modèles de ${ui.way}</span><button type="button" id="mclose" aria-label="Fermer">x</button></div>`
+    + '<div><span>Modèles enregistrés</span>' + state.exp.models[METHOD()].map((m, i) => `<div><div><span>${m.name}</span><span>${Object.values(m.units).reduce((s, q) => s + q, 0)} Unités</span></div>`
+      + `<button type="button" class="apply" data-i="${i}" title="Appliquer le modèle">></button><button type="button" class="del" data-i="${i}" title="Supprimer">x</button></div>`).join('') + '</div></div></div>' : '';
+  return `<div class="cible"><h3>Coordonnées</h3><label>Cible</label><input type="text" id="target" placeholder="G46 50 50" value="${f.target}">${valid ? `<span class="font-mono">${f.target}</span>` : ''}`
+    + `<button type="button" aria-label="Vos colonies">VOS COLONIES</button>${colonies}</div>`
+    + `<div><h3>2. Composition</h3><button type="button" id="models-btn">Modèles</button>${rows}</div><button type="button">Mobilisation générale</button>`
+    + `<div><h3>3. Logistique et chargement</h3><span>Capacité de soute</span><span>${int(cap)}</span>${cargo}`
+    + `<span>Temps de trajet</span><span>${ok && fleet ? '00:37:14' : '—'}</span>`
+    + `<button type="button" ${fleet ? 'id="raid-launch-btn"' : 'id="pillars-launch-btn"'} ${ok ? '' : 'disabled'}>${label}</button></div>` + dialog;
+}
 // Alliance : onglets (Vue, Territoires, Techs) ; Techs = jetons + technologies (vrai jeu, 08/11).
 function allianceMain() {
   const tabs = [['vue', 'Vue'], ['territoires', 'Territoires'], ['techs', '⚡ Techs']].map(([k, n]) =>
@@ -529,6 +558,7 @@ function opsMain() {
   if (ui.mission === 'EXCAVATION') body = excForm(state.planets[state.active]);
   if (ui.mission === 'HACKING') body = hackForm();
   if (ui.mission === 'MINING') body = mineForm(state.planets[state.active]);
+  if (ui.mission === 'TRANSPORT') body = trForm(state.planets[state.active]);
   return `<h2>Opérations</h2><button type="button" id="gpil">Gérer les Piliers</button><div class="ops-count"><span>Missions actives : ${missionsCount()} / ${state.missions_max}</span></div><div><span>Moyen de lancement</span>` + ways + '</div><div><span>Mission</span>' + missions + '</div>' + body + pillarsDialog();
 }
 function sensors() {
@@ -680,6 +710,16 @@ function render() {
     ui.form.target = fmtTarget(tgt.value); render();
   };
   document.querySelectorAll('.unit').forEach((i) => i.oninput = () => { ui.form.units[i.dataset.u] = i.value; render(); });
+  document.querySelectorAll('.cargo').forEach((i) => i.oninput = () => { ui.form.cargo[i.dataset.r] = i.value.replace(/\\s/g, ''); render(); });
+  document.querySelectorAll('.colony').forEach((b) => b.onclick = () => { ui.form.target = b.dataset.c; render(); });
+  const tl = document.getElementById('raid-launch-btn') || document.getElementById('pillars-launch-btn');
+  if (tl) tl.onclick = async () => {
+    const f = ui.form;
+    const r = await post('/api/transport', {method: METHOD(), target: f.target, cargo: Object.fromEntries(RES3.map((k) => [k, +f.cargo[k] || 0])),
+                                            units: Object.fromEntries(Object.entries(f.units).map(([k, v]) => [k, +v || 0]))});
+    if (r.ok) ui.form = {...ui.form, target: '', units: {}, cargo: {}};
+    await load();
+  };
   const cp = document.getElementById('copies'); if (cp) cp.onchange = () => { ui.form.copies = cp.value; render(); };
   const du = document.getElementById('duration'); if (du) du.onchange = () => { ui.form.duration = du.value; render(); };
   const mb = document.getElementById('models-btn'); if (mb) mb.onclick = () => { ui.modelsOpen = true; render(); };
@@ -1127,6 +1167,26 @@ def create_mock_game() -> FastAPI:
         exc["mira_busy"] = exc["mira_busy"] or bool(body["mira"])
         g["actions"].append({"kind": "excavation", "planet": planet["name"], "target": body["target"], "units": units,
                              "hours": hours, "mira": bool(body["mira"])})
+        return {"ok": True}
+
+    @app.post("/api/transport")
+    async def transport(request: Request):
+        """« Lancer » un transport : débite la planète active ; les Piliers créditent la destination tout de suite, la Flotte non."""
+        g, body = app.state.game, await request.json()
+        planet = g["planets"][g["active"]]
+        cargo = {k: int(v) for k, v in body["cargo"].items() if int(v) > 0}
+        dest = next((p for p in g["planets"] if p["coords"] == body["target"]), None)
+        closed = (g["pillars"].get(planet["name"]) or {}).get("closed")
+        if dest is None or not cargo or any(planet["stocks"][k] < v for k, v in cargo.items()) or (body["method"] == "PILLARS" and closed):
+            raise HTTPException(409, "transport refusé")
+        for k, v in cargo.items():
+            planet["stocks"][k] -= v
+            if body["method"] == "PILLARS":
+                dest["stocks"][k] += v
+        if body["method"] == "FLEET":
+            g["exc"]["other_missions"] += 1
+        g["actions"].append({"kind": "transport", "planet": planet["name"], "target": dest["name"], "method": body["method"],
+                             "cargo": cargo, "units": body["units"]})
         return {"ok": True}
 
     @app.post("/api/mine")

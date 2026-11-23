@@ -690,3 +690,11 @@ button.icon { width: 30px; height: 26px; padding: 0; }
 .planet-picker[open] > summary { border-color: var(--accent); }
 .planet-picker[open] > summary { display: inline-block; }
 .planet-picker > .planet-choice { margin-top: 8px; padding: 12px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--panel-solid); }
+
+/* Constructions : option de transport des ressources manquantes */
+.tr-body { display: flex; flex-direction: column; gap: 10px; margin: 8px 0; }
+.tr-main { font-weight: 600; }
+.tr-checks { border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px 10px; display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.tr-checks legend { color: var(--muted); font-size: 13px; padding: 0 6px; }
+.tr-check { display: inline-flex; align-items: center; gap: 6px; }
+.tr-check input[type=number] { width: 90px; }

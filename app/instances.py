@@ -32,7 +32,7 @@ INSTANCE_FILES = (
     "alliance.json", "component_counts.json", "components.json", "constructions.json", "excavations.json",
     "explorations.json", "feature_hours.json", "features.json", "hackings.json", "inventory.json", "minings.json",
     "missions.json", "pillars.json", "planning.json", "populations.json", "preferences.json", "researches.json",
-    "ships.json", "slots.json", "spying.json",
+    "ships.json", "slots.json", "spying.json", "transport.json",
 )
 
 

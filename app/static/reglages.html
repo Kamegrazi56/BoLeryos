@@ -112,6 +112,13 @@
       <h3>Liste d'objectifs</h3>
       <ol id="cons-queue" class="cons-queue"></ol>
       <p id="cons-msg" class="msg" role="status" aria-live="polite"></p>
+      <h3>Transport de ressources</h3>
+      <details class="help-box">
+        <summary>Comment ça marche ?</summary>
+        <p>Quand une construction de la liste ne peut pas être lancée faute de ressources, le bot envoie <strong>ce qui manque à cet instant</strong> (plus la marge) depuis les planètes donneuses, dans l'ordre de la liste, puis relance la construction. Par les <strong>Piliers</strong>, l'envoi est instantané ; par la <strong>Flotte</strong>, il prend une place de mission et les ressources arrivent plus tard (le bot attend le temps de vol lu dans le jeu, plus 30 s à 5 min au hasard, avant d'envoyer de nouveau vers la même planète). Si les Piliers d'une donneuse sont fermés, le bot essaie en spatial avec les modèles Flotte de secours, sinon il saute cette donneuse. Le bot <strong>dépense les ressources des donneuses</strong> : il n'y garde aucune réserve.</p>
+      </details>
+      <div id="tr-body" class="tr-body"></div>
+      <p id="tr-msg" class="msg" role="status" aria-live="polite"></p>
       <h3>Niveaux actuels</h3>
       <div class="row inv-bar">
         <p id="cons-inv-info" class="inv-info" role="status" aria-live="polite"></p>
@@ -500,6 +507,7 @@
   <script src="/static/fonctionnalites.js"></script>
   <script src="/static/planet-choice.js"></script>
   <script src="/static/constructions.js"></script>
+  <script src="/static/transport.js"></script>
   <script src="/static/recherches.js"></script>
   <script src="/static/mode-choice.js"></script>
   <script src="/static/line-table.js"></script>

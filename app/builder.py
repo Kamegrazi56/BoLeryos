@@ -20,6 +20,7 @@ from . import human, interruptions
 from .constructions import BUILDINGS
 from .numbers import norm, parse_amount
 from .planets import GameUiError, Interrupted
+from .transports import shortfall
 
 CONFIRM_SECONDS = 8.0  # attente maximale du débit des ressources après le clic
 CONFIRM_RATIO = 0.5  # le stock principal doit baisser d'au moins cette part du coût
@@ -53,7 +54,7 @@ DIAGNOSE_PLANET_LIST_JS = r"""
 
 # Entrée de la liste des planètes : le plus grand bloc visible (6 niveaux au plus) qui ne contient que les coordonnées de la
 # planète voulue. Vrai jeu (20/11) : ce n'est plus un <button>, la balise n'a donc pas d'importance. Le sélecteur de la
-# planète active (barre du haut) est écarté : il porte aussi son nom et ses coordonnées.
+# planète active (barre du haut) est écarté : il porte aussi son nom et ses coordonnées ; de même la liste « Vos colonies » (cible).
 MARK_PLANET_ENTRY_JS = r"""
 (args) => {
   const [wanted, attribute] = args;
@@ -65,6 +66,9 @@ MARK_PLANET_ENTRY_JS = r"""
   document.querySelectorAll('[' + attribute + ']').forEach((e) => e.removeAttribute(attribute));
   for (const leaf of leavesOf(document).filter((el) => norm(text(el)) === wanted)) {
     if (leaf.closest('[aria-label="Sélectionner la planète active"]')) continue;
+    // Opérations › Transport : « Vos colonies » (data-testid « raid-target-planets-list ») liste aussi les planètes, mais un clic
+    // y choisit la CIBLE de l'envoi ; il ne change pas la planète active.
+    if (leaf.closest('[data-testid*="target"]')) continue;
     let best = null;
     for (let node = leaf.parentElement, depth = 0; node && depth < 6; node = node.parentElement, depth++) {
       const leaves = leavesOf(node);
@@ -95,7 +99,12 @@ READ_CARDS_JS = """
     let duration = '';
     const start = leaves.indexOf(name);
     for (let i = start + 1; i < leaves.length - 1; i++) {
-      if (['Fer', 'Cristal', 'Éther'].includes(leaves[i])) costs[leaves[i]] = leaves[i + 1];
+      if (['Fer', 'Cristal', 'Éther'].includes(leaves[i])) {
+        // Vrai jeu (23/11) : sur une carte grisée, la ressource qui manque est suivie de « Ressources insuffisantes » avant sa valeur.
+        let j = i + 1;
+        while (j < leaves.length - 1 && /insuffisant/i.test(leaves[j])) j++;
+        costs[leaves[i]] = leaves[j];
+      }
       else if (leaves[i].toLowerCase() === 'durée') duration = leaves[i + 1];
     }
     out.push({ name, level: level === undefined ? null : Number(level), costs, duration, disabled: b.disabled });
@@ -324,7 +333,7 @@ class ConstructionPass:
                 await asyncio.sleep(0.3)
                 return
             await asyncio.sleep(0.25)
-        raise GameUiError(f"le changement vers la planète « {name} » n'a pas abouti")
+        raise GameUiError(f"le changement vers la planète « {name} » n'a pas abouti (la page affiche « {await self._current_planet()} »)")
 
     # ------------------------------------------------------------------ chiffres de la bonne planète
     async def _signature(self, read=None) -> tuple:
@@ -509,7 +518,7 @@ class ConstructionPass:
             parts.append(stop)
         return " ; ".join(parts)
 
-    async def _planet(self, planet: str, queue: list[dict]) -> str | None:
+    async def _planet(self, planet: str, queue: list[dict], after_transport: bool = False) -> str | None:
         """Retourne « Mine de Fer niveau 41 sur Egide » si une construction est lancée, sinon None."""
         tabs: list[str] = []
         for line in queue:
@@ -534,12 +543,32 @@ class ConstructionPass:
             if found is None:
                 continue
             tab, card = found
-            if card.level is None or card.level >= line["level"] or card.disabled:
+            if card.level is None or card.level >= line["level"]:
                 continue
             if self._cooldown.get((planet, line["building"]), 0.0) > time.monotonic():
                 continue
+            if card.disabled:
+                if after_transport or not await self._supplied(planet, label, card):
+                    continue
+                return await self._planet(planet, queue, after_transport=True)  # Piliers : les ressources sont déjà là
             return await self._launch(planet, label, line, tab, card)
         return None
+
+    async def _supplied(self, planet: str, label: str, card: Card) -> bool:
+        """Option « transporter les ressources manquantes » : envoie ce qui manque à cet instant pour payer la carte.
+        Vrai si des ressources sont arrivées tout de suite (Piliers) et que la construction peut être retentée."""
+        if not self.bot.transports.get()["enabled"] or self.bot.transporter.cooling(planet):
+            return False
+        missing = shortfall(card.costs, await self._stocks())
+        if not missing:
+            return False  # grisé pour une autre raison (construction en cours, énergie…) : rien à transporter
+        self.bot.log(f"Transport : il manque {', '.join(f'{round(v)} {k}' for k, v in missing.items())} pour {label} sur {planet}.", event=True)
+        result = await self.bot.transporter.supply(planet, missing)
+        if result["sent"] and not result["instant"]:
+            self.bot.log(f"Transport en route vers {planet} : la construction sera retentée au prochain passage.", event=True)
+        elif not result["sent"]:
+            self.bot.log(f"Transport : rien n'a pu être envoyé vers {planet}" + (f" ({result['note']})" if result["note"] else "") + ".", "warn", event=True)
+        return result["instant"]
 
     async def _launch(self, planet: str, label: str, line: dict, tab: str, card: Card) -> str:
         await self._open_page(tab)

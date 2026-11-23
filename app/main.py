@@ -25,6 +25,9 @@ from .instance_routing import BotProxy, InstanceScopeMiddleware
 from .config import Settings, load_settings
 from .components import COMPONENTS
 from .constructions import BUILDINGS, ConstructionError
+from .transports import MARGIN_STEP as TRANSPORT_MARGIN_STEP
+from .transports import MAX_MARGIN as TRANSPORT_MAX_MARGIN
+from .transports import TransportError
 from .populations import POPULATIONS, PopulationError
 from .researches import RESEARCHES, ResearchError
 from .features import FeaturesError
@@ -107,6 +110,15 @@ class ConstructionLine(BaseModel):
 class ConstructionsRequest(BaseModel):
     planets: list[str] = Field(default_factory=list, max_length=200)  # vide : toutes les planètes
     queue: list[ConstructionLine] = Field(default_factory=list, max_length=500)  # une ligne par bâtiment et par planète
+
+
+class TransportRequest(BaseModel):
+    enabled: bool = False
+    donors: list[str] = Field(default_factory=list, max_length=50)
+    method: str = Field(default="PILLARS", max_length=10)
+    models: list[str] = Field(default_factory=list, max_length=10)
+    fleet_models: list[str] = Field(default_factory=list, max_length=10)
+    margin: float = Field(default=0.0, ge=0, le=TRANSPORT_MAX_MARGIN)
 
 
 class ResearchLine(BaseModel):
@@ -617,6 +629,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ConstructionError as exc:
             raise HTTPException(422, detail=exc.errors) from exc
         return JSONResponse({"settings": saved}, headers=NO_STORE)
+
+    # --- Constructions : option « transporter les ressources manquantes » -------------------------------------
+    def _transport_payload() -> dict:
+        return {
+            "settings": bot.transports.get(),
+            "planets": _known_planets(),
+            "models": bot.explorations.known_models(),
+            "methods": METHODS,
+            "margin_step": TRANSPORT_MARGIN_STEP,
+            "margin_max": TRANSPORT_MAX_MARGIN,
+            "persistent": bot.transports.persistent,
+        }
+
+    @app.get("/api/transport")
+    async def api_transport():
+        return JSONResponse(_transport_payload(), headers=NO_STORE)
+
+    @app.put("/api/transport")
+    async def api_transport_put(body: TransportRequest, request: Request):
+        _check_origin(request)
+        try:
+            bot.transports.replace(body.model_dump(), _known_planets, bot.explorations.known_models)
+        except TransportError as exc:
+            raise HTTPException(422, detail=exc.errors) from exc
+        bot.transporter._unconfirmed = 0  # le joueur a revu l'option : on repart de zéro
+        return JSONResponse(_transport_payload(), headers=NO_STORE)
 
     # --- Recherches : liste d'objectifs (recherche + niveau cible) et planète chargée des recherches ----------
     @app.get("/api/researches")
