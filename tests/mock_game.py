@@ -111,6 +111,7 @@ def initial_state():
         "no_debit": False,
         "slow_build": False,  # vaisseaux et composants : l'effectif n'augmente qu'à la fin de la fabrication
         "popup_after_click": False,
+        "long_warning": False,  # vrai : encart « Production longue » dans la page (comme le vrai jeu) ; « native » : confirm() du navigateur
         "require_auth": False,  # vrai : connexion → choix de l'univers → partie, avec session qui peut expirer
         "logged_in": False,
         "login_attempts": 0,
@@ -827,8 +828,18 @@ function render() {
     const r = await (await fetch('/api/affordable', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({section: prod.dataset.section, name: prod.dataset.name})})).json();
     input.value = r.count;
   });
+  // Encart du vrai jeu (26/11) : titre « Production longue », texte, boutons ANNULER et CONFIRMER ; rien ne part sans CONFIRMER.
+  const longWarning = () => new Promise((done) => {
+    const box = document.createElement('div'); box.id = 'long-warning';
+    box.innerHTML = '<h3>Production longue</h3><p>Ce pack de production dure 1 j 10 h. Confirmez-vous son lancement ?</p><button id="lw-no">ANNULER</button><button id="lw-yes">CONFIRMER</button>';
+    document.body.appendChild(box);
+    box.querySelector('#lw-no').onclick = () => { box.remove(); done(false); };
+    box.querySelector('#lw-yes').onclick = () => { box.remove(); done(true); };
+  });
   document.querySelectorAll('.prod').forEach((b) => b.onclick = async () => {
     const input = b.parentElement.querySelector('input'); if (!input || !input.value) return;
+    if (state.long_warning === 'native' && !confirm('La file de production dépassera 1 jour. Continuer ?')) return;
+    if (state.long_warning === true && !(await longWarning())) return;
     await fetch('/api/produce', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({section: b.dataset.section, name: b.dataset.name, qty: +input.value})});
     await load();
   });
@@ -1328,7 +1339,7 @@ def create_mock_game() -> FastAPI:
         app.state.game = initial_state()
         patch = await request.json() if (await request.body()) else {}
         g = app.state.game
-        for key in ("close_on_select", "no_debit", "popup_after_click", "require_auth", "slow_build", "slow_tabs", "wipe_target", "empire_reversed", "planet_rows", "cost_labels"):
+        for key in ("close_on_select", "no_debit", "popup_after_click", "require_auth", "slow_build", "slow_tabs", "long_warning", "wipe_target", "empire_reversed", "planet_rows", "cost_labels"):
             if key in patch:
                 g[key] = patch[key]
         for index, levels in (patch.get("levels") or {}).items():  # niveaux de bâtiments imposés : {index de planète: {nom: niveau}}

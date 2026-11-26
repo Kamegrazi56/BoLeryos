@@ -17,6 +17,7 @@ import re
 import time
 
 from . import builder, human
+from .dialogs import click_launch
 from .builder import COOLDOWN_EXTRA_SECONDS, COOLDOWN_MARGIN, UNCONFIRMED_LIMIT, ConstructionPass
 from .numbers import norm
 from .planets import GameUiError, Interrupted
@@ -222,7 +223,7 @@ class QuantityPass(ConstructionPass):
                 await clear_quantity(quantity)  # sinon le jeu afficherait des coûts totaux au prochain passage
                 return None
             await self._guard()
-            await human.click(page, go, self.settings)
+            await click_launch(page, go, self.settings, self.bot.log)  # file > 1 jour : le jeu demande de confirmer
         finally:
             await page.evaluate(CLEAR_MARK_JS, TARGET_ATTRIBUTE)
         wait = (card.unit_seconds or 1.0) * qty * COOLDOWN_MARGIN + COOLDOWN_EXTRA_SECONDS

@@ -348,3 +348,32 @@ def test_costs_shown_as_a_label_then_an_amount_are_read_and_recruited(game_clien
     _set(game_client, [_line("rempart-de-fer", "fixed", 7, CONCORDE)])
     assert "7 × Rempart de Fer sur 8-50-Concorde" in _run(game_client)
     assert _recruited(game) == [(CONCORDE, "Rempart de Fer", 7)]
+
+
+def test_the_long_production_confirmation_of_the_game_is_accepted_and_logged(game_client, game):
+    """Vrai jeu (26/11) : file > 1 jour → encart « Production longue » dans la page ; sans clic sur CONFIRMER, rien n'est lancé."""
+    game.reset(long_warning=True)
+    _scan(game_client)
+    _set(game_client, [_line("rempart-de-fer", "fixed", 100, CONCORDE)])
+    assert "100 × Rempart de Fer sur 8-50-Concorde" in _run(game_client)
+    assert _recruited(game) == [(CONCORDE, "Rempart de Fer", 100)]
+    logs = [e["msg"] for e in game_client.get("/api/status?limit=200").json()["logs"]]
+    assert any("demande une confirmation" in m and "dure 1 j 10 h" in m and "confirmée" in m for m in logs)
+
+
+def test_a_native_browser_confirmation_is_still_accepted(game_client, game):
+    game.reset(long_warning="native")
+    _scan(game_client)
+    _set(game_client, [_line("rempart-de-fer", "fixed", 100, CONCORDE)])
+    assert "100 × Rempart de Fer sur 8-50-Concorde" in _run(game_client)
+    assert _recruited(game) == [(CONCORDE, "Rempart de Fer", 100)]
+
+
+def test_a_launch_under_one_day_still_works_and_no_confirmation_is_logged(game_client, game):
+    """Contre-test : file courte → pas d'encart ; le lancement reste direct et rien n'est dit sur une confirmation."""
+    _scan(game_client)
+    _set(game_client, [_line("rempart-de-fer", "fixed", 100, CONCORDE)])
+    assert "100 × Rempart de Fer sur 8-50-Concorde" in _run(game_client)
+    assert _recruited(game) == [(CONCORDE, "Rempart de Fer", 100)]
+    logs = [e["msg"] for e in game_client.get("/api/status?limit=200").json()["logs"]]
+    assert not any("demande une confirmation" in m for m in logs)

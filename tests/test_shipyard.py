@@ -248,3 +248,19 @@ def test_a_component_line_for_one_planet_leaves_the_others_alone(game_client, ga
     _set(game_client, "components", [_line("coque-des-monarques", "fixed", 4, [EGIDE])])
     _parts(game_client)
     assert _made(game, "component") == [(EGIDE, "Coque des Monarques", 4)]
+
+
+def test_the_long_production_confirmation_is_accepted_for_components(game_client, game):
+    game.reset(long_warning=True)
+    _scan(game_client)
+    _set(game_client, "components", [_line("canon-laser", "fixed", 10, [CONCORDE])])
+    assert "10 × Canon laser sur 8-50-Concorde" in _parts(game_client)
+    assert _made(game, "component") == [(CONCORDE, "Canon laser", 10)]
+
+
+def test_a_component_launch_under_one_day_still_works(game_client, game):
+    """Contre-test : file courte → pas d'encart « Production longue », le lancement reste direct."""
+    _scan(game_client)
+    _set(game_client, "components", [_line("canon-laser", "fixed", 10, [CONCORDE])])
+    assert "10 × Canon laser sur 8-50-Concorde" in _parts(game_client)
+    assert _made(game, "component") == [(CONCORDE, "Canon laser", 10)]
