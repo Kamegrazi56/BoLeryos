@@ -63,7 +63,8 @@ def test_one_token_when_two_are_asked_but_one_is_left(game_client, game):
     assert _run(game_client) == "1 jeton(s) donné(s) à Forge du Bastion"
 
 
-def test_nothing_without_a_priority_technology(game_client, game):
+def test_nothing_without_a_priority_technology(game_client, game, monkeypatch):
+    monkeypatch.setattr("app.alliance.PRIORITY_WAIT_SECONDS", 0.5)  # le test n'attend pas les 6 s réelles
     game.set_alliance(priority="")
     assert "aucune technologie n'est la priorité" in _run(game_client)
     assert _tokens(game) == [] and _forbidden(game) == []
@@ -73,3 +74,17 @@ def test_a_click_without_effect_is_reported(game_client, game):
     game_client.put("/api/alliance", json={"amount": 1})
     game.set_alliance(no_effect=True)
     assert "non confirmé" in _run(game_client)
+
+
+def test_a_member_without_rights_still_gives_to_the_priority(game_client, game):
+    """Vrai jeu (Kael, 26/11) : sans droits de chef, pas d'étoile-bouton ; la priorité n'est qu'une icône « X est la priorité… »."""
+    game.set_alliance(leader=False)
+    assert _run(game_client) == "5 jeton(s) donné(s) à Forge du Bastion"
+    assert _tokens(game) == [("Forge du Bastion", 5)] and _forbidden(game) == []
+
+
+def test_a_member_without_rights_and_without_priority_gives_nothing(game_client, game, monkeypatch):
+    monkeypatch.setattr("app.alliance.PRIORITY_WAIT_SECONDS", 0.5)
+    game.set_alliance(leader=False, priority="")
+    assert "aucune technologie n'est la priorité" in _run(game_client)
+    assert _tokens(game) == []

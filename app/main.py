@@ -196,6 +196,7 @@ class ExcavationRequest(ExcavationSend):  # durée + équipe : l'envoi commun
     delay_max: int | None = Field(default=None, ge=0, le=100_000)
     max_rt: float | None = Field(default=None, ge=0, le=2_000_000_000)  # coût maximum en RT d'une Fouille (None ou vide : aucun plafond)
     recheck_min: int = Field(default=30, ge=0, le=100_000)  # vérification de secours en minutes (0 : désactivée)
+    recheck_kept_min: int = Field(default=30, ge=0, le=100_000)  # dernier délai choisi, gardé quand elle est désactivée
 
 
 class SlotsRequest(BaseModel):

@@ -134,6 +134,18 @@ def test_the_recheck_delay_defaults_to_30_minutes_and_can_be_changed_or_disabled
     assert ExcavationStore(str(tmp_path)).get()["recheck_min"] == 0
 
 
+def test_the_last_recheck_delay_is_kept_when_the_recheck_is_disabled(tmp_path):
+    assert validate({**SETTINGS, "recheck_min": 90})["recheck_kept_min"] == 90  # activée : le délai choisi est le dernier
+    off = validate({**SETTINGS, "recheck_min": 0, "recheck_kept_min": 90})
+    assert (off["recheck_min"], off["recheck_kept_min"]) == (0, 90)  # désactivée : l'ancien délai reste mémorisé
+    for missing in (None, 0, 1441, "x"):  # absent ou illisible : 30 minutes, sans refuser l'enregistrement
+        assert validate({**SETTINGS, "recheck_min": 0, "recheck_kept_min": missing})["recheck_kept_min"] == 30
+    store = ExcavationStore(str(tmp_path))
+    store.replace({**SETTINGS, "recheck_min": 0, "recheck_kept_min": 90})
+    again = ExcavationStore(str(tmp_path)).get()  # relu après un redémarrage
+    assert (again["recheck_min"], again["recheck_kept_min"]) == (0, 90)
+
+
 # ------------------------------------------------------------------------------ suivi
 TRACKED = {"planet": EGIDE, "slot": 0, "duration": 6, "site": "M58 80 21", "end": 1000.0, "ready": 1600.0}  # délai tiré : 600 s
 

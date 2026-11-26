@@ -145,7 +145,7 @@ def initial_state():
                      {"name": "Cumuler 5 jours de connexion", "progress": 5, "goal": 5, "claimed": True, "reward": "+15 XP"}],
         "quests": [{"name": "Quête d'essai", "progress": 1, "goal": 1, "claimed": False, "reward": "+1 XP"}],
         # Alliance › Techs : jetons (6 au plus) et technologies ; une seule est la priorité de dons (vrai jeu, 08/11)
-        "alliance": {"tokens": 5, "max": 6, "priority": "Forge du Bastion", "no_effect": False,
+        "alliance": {"tokens": 5, "max": 6, "priority": "Forge du Bastion", "no_effect": False, "leader": True,
                      "techs": [{"name": "Forge du Bastion", "progress": 47, "need": 300},
                                {"name": "Canalisation Éthérique", "progress": 0, "need": 180},
                                {"name": "Veines Profondes", "progress": 0, "need": 0}]},
@@ -464,7 +464,10 @@ function allianceMain() {
     const cards = a.techs.map((t) => {
       const prio = t.name === a.priority, open = prio && t.need > 0 && a.tokens > 0;
       const star = prio ? `Retirer ${t.name} de la priorité de dons de l’alliance` : `Marquer ${t.name} comme priorité de dons de l’alliance`;
-      return `<article><button type="button" class="star" aria-label="${star}">*</button><h3>${t.name}</h3>`
+      // Membre sans droits (vrai jeu, Kael 26/11) : ni étoile ni bouton, seulement une icône sur la technologie prioritaire.
+      const mark = a.leader ? `<button type="button" class="star" aria-label="${star}">*</button>`
+        : (prio ? `<div role="img" aria-label="${t.name} est la priorité de dons de l’alliance"></div>` : '');
+      return `<article>${mark}<h3>${t.name}</h3>`
         + (t.need > 0 ? `<div><span>Progression</span><span>${t.progress} / ${t.need}</span></div>`
           + `<button type="button" class="tok" data-c="1" ${open ? '' : 'disabled'}>+1 jeton</button><button type="button" class="tok" data-c="max" ${open ? '' : 'disabled'}>Max. (+${a.tokens})</button>`
           : '<p>Technologie au niveau maximal</p>') + '</article>';
@@ -1244,7 +1247,7 @@ def create_mock_game() -> FastAPI:
     @app.post("/api/_alliance")
     async def set_alliance(request: Request):
         body, a = await request.json(), app.state.game["alliance"]
-        for key in ("tokens", "priority", "no_effect"):
+        for key in ("tokens", "priority", "no_effect", "leader"):
             if key in body:
                 a[key] = body[key]
         return {"ok": True}

@@ -5,6 +5,8 @@ fenêtre de retour est SUPPOSÉE (non relevée sur le vrai jeu)."""
 import time
 from datetime import datetime
 
+import pytest
+
 from app.planning import TIMEZONE
 
 
@@ -101,6 +103,7 @@ def test_a_far_wanted_time_waits_for_a_later_check_without_confirming(game_clien
     waiting = _state(game_client, recall["id"])
     assert waiting["state"] == "pending" and waiting["next_check"] > time.time() + 300  # écart ≈ 895 s, vitesse 2 : ~390 s
     assert _recalls(game) == [] and _bot(game_client).fleet.next_due() == waiting["next_check"]
+    assert waiting["click_at"] == pytest.approx(waiting["next_check"] + 60, abs=1)  # clic prévu = contrôle + 1 min
     assert "aucun retour de flotte à faire maintenant" in _run(game_client)  # pas encore l'heure du contrôle
 
 

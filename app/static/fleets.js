@@ -38,6 +38,14 @@
     $("flt-scan").textContent = data.scanning ? "Relevé en cours…" : "Relever les flottes en vol";
   }
 
+  /** Retour en attente : clic prévu (estimation lue dans le jeu) puis prochain contrôle du bot. */
+  const pendingText = (r) => {
+    const parts = [];
+    if (r.click_at) parts.push(`clic prévu vers le ${when(r.click_at)}`);
+    parts.push(r.next_check ? `prochain contrôle du bot le ${when(r.next_check)}` : "en attente");
+    return parts.join(" · ");
+  };
+
   function renderRecalls() {
     if (!data.recalls.length) {
       $("flt-recalls").replaceChildren(el("li", { className: "empty-state", textContent: "Aucun retour programmé." }));
@@ -51,7 +59,7 @@
         if (res.ok) { data = await res.json(); render(); say("Supprimé.", "ok"); } else say(errorText(await res.json().catch(() => ({}))), "error");
       });
       const detail = r.state === "pending"
-        ? el("span", { className: "hint", textContent: r.next_check ? `prochain contrôle du bot le ${when(r.next_check)}` : "en attente" })
+        ? el("span", { className: "hint", textContent: pendingText(r) })
         : el("span", { className: r.state === "done" ? "hint" : "warn", textContent: r.note });
       const item = el("li", { className: `flt-recall state-${r.state}` },
         el("strong", { className: "name", textContent: r.fleet.label }),

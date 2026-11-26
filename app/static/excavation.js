@@ -43,7 +43,8 @@
     planets.forEach((p) => { memory[p.name] = clone(p); });
     noneChecked = false;
     return { send: pick(s), copies: s.copies, fouilles: s.fouilles.map(pick), planets, per_slot: s.per_slot, mira: s.mira,
-             delay_min: s.delay_min, delay_max: s.delay_max, max_rt: s.max_rt ?? null, recheck_min: s.recheck_min ?? 30 };
+             delay_min: s.delay_min, delay_max: s.delay_max, max_rt: s.max_rt ?? null, recheck_min: s.recheck_min ?? 30,
+             recheck_kept: s.recheck_kept_min ?? (s.recheck_min > 0 ? s.recheck_min : 30) };
   }
 
   // ------------------------------------------------------------------------------ une Fouille : durée + équipe
@@ -154,23 +155,28 @@
     $("exc-max-rt").value = form.max_rt ?? "";
     renderRecheck();
   }
-  // Vérification de secours : case décochée = 0 (désactivée) ; le dernier délai choisi est gardé pour la recocher.
-  let lastRecheck = 30;
+  // Vérification de secours : case décochée = 0 (désactivée) ; le dernier délai choisi (form.recheck_kept) est enregistré
+  // avec les réglages, pour le retrouver en recochant la case, même après un rechargement de la page.
+  const RECHECK_BAD = "Vérification de secours : de 1 à 1440 minutes, ou 0 pour la désactiver (décochez la case).";
+  let recheckBad = false; // délai saisi illisible : l'enregistrement est refusé au lieu de garder l'ancienne valeur en silence
   function renderRecheck() {
     const on = form.recheck_min > 0;
-    if (on) lastRecheck = form.recheck_min;
+    if (on) form.recheck_kept = form.recheck_min;
+    recheckBad = false;
     $("exc-recheck-on").checked = on;
     $("exc-recheck-min").disabled = !on;
-    $("exc-recheck-min").value = on ? form.recheck_min : lastRecheck;
+    $("exc-recheck-min").value = on ? form.recheck_min : form.recheck_kept;
   }
   $("exc-recheck-on").addEventListener("change", () => {
-    form.recheck_min = $("exc-recheck-on").checked ? lastRecheck : 0;
+    form.recheck_min = $("exc-recheck-on").checked ? form.recheck_kept : 0;
     renderRecheck();
     changed();
   });
   $("exc-recheck-min").addEventListener("input", () => {
-    const n = Number($("exc-recheck-min").value);
-    if ($("exc-recheck-min").value !== "" && Number.isInteger(n) && n > 0) { form.recheck_min = n; lastRecheck = n; }
+    const text = $("exc-recheck-min").value;
+    const n = Number(text);
+    recheckBad = !(text !== "" && Number.isInteger(n) && n >= 1 && n <= 1440);
+    if (!recheckBad) { form.recheck_min = n; form.recheck_kept = n; }
     changed();
   });
   $("exc-duration").addEventListener("change", () => { form.send.duration = Number($("exc-duration").value); changed(); });
@@ -233,11 +239,12 @@
   // ------------------------------------------------------------------------------ enregistrement et relecture
   function formValue() {
     return { ...form.send, copies: form.copies, fouilles: form.fouilles, planets: form.planets, per_slot: form.per_slot, mira: form.mira,
-             delay_min: form.delay_min, delay_max: form.delay_max, max_rt: form.max_rt, recheck_min: form.recheck_min };
+             delay_min: form.delay_min, delay_max: form.delay_max, max_rt: form.max_rt, recheck_min: form.recheck_min, recheck_kept_min: form.recheck_kept };
   }
 
   $("exc-save").addEventListener("click", async () => {
     if (noneChecked) { say(NO_PLANET, "error"); return; }
+    if (recheckBad) { say(RECHECK_BAD, "error"); return; }
     say("Enregistrement…");
     try {
       const res = await fetch(api, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(formValue()) });

@@ -25,7 +25,7 @@ from playwright.async_api import Error as PlaywrightError
 
 from . import human
 from .builder import ConstructionPass
-from .fleets import (ABANDON_SECONDS, EXCLUDED, build_fleet, decide, match_fleet, parse_clock, when)
+from .fleets import (ABANDON_SECONDS, EXCLUDED, build_fleet, decide, estimated_click, match_fleet, parse_clock, when)
 from .planets import GameUiError, Interrupted
 
 PANEL = "[data-testid=sensors-overlay-panel]"
@@ -309,6 +309,9 @@ class FleetPass(ConstructionPass):
                 return self._finish(recall, "failed", "durée de retour illisible dans la fenêtre du jeu")
             reads.append([now, now + seconds])
             action, value = decide(now, seconds, recall["at"], margin + CLICK_LEAD_SECONDS, reads)
+            if action in ("wait", "hold") and not armed_once:  # clic prévu, affiché dans l'onglet Flottes
+                click_at = estimated_click(now, seconds, recall["at"], margin + CLICK_LEAD_SECONDS, reads)
+                self.store.update(recall["id"], click_at=click_at, reads=reads)
             if action == "late":
                 return self._finish(recall, "failed", f"trop tard : un rappel immédiat arriverait le {when(now + seconds)}, {int(value)} s après l'heure voulue")
             if action == "click":

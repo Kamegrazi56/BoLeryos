@@ -610,8 +610,18 @@ def test_excavation_panel_sets_departure_planets_and_the_duration_and_team_of_ea
     page.click("#exc-save")
     page.wait_for_function("document.getElementById('exc-msg').textContent === 'Enregistré.'")
     assert app.state.bot.excavations.get()["recheck_min"] == 0
+    assert app.state.bot.excavations.get()["recheck_kept_min"] == 90  # mémorisé avec les réglages
+    page.reload()  # le délai choisi survit au rechargement de la page
+    page.click("#tab-excavations")
+    page.wait_for_selector("#exc-recheck-min", state="visible")
+    assert not page.is_checked("#exc-recheck-on") and page.is_disabled("#exc-recheck-min") and page.input_value("#exc-recheck-min") == "90"
     page.check("#exc-recheck-on")
     assert page.input_value("#exc-recheck-min") == "90" and "toutes les 90 min" in page.text_content("#exc-summary")
+    page.fill("#exc-recheck-min", "0")  # délai illisible avec la case cochée : refusé, jamais remplacé en silence
+    page.click("#exc-save")
+    page.wait_for_function("document.getElementById('exc-msg').classList.contains('error')")
+    assert "Vérification de secours" in page.text_content("#exc-msg") and app.state.bot.excavations.get()["recheck_min"] == 0
+    page.fill("#exc-recheck-min", "90")
     page.click("#exc-save")
     page.wait_for_function("document.getElementById('exc-msg').textContent === 'Enregistré.'")
     assert app.state.bot.excavations.get()["recheck_min"] == 90

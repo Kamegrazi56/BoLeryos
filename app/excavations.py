@@ -18,6 +18,8 @@ Réglages :
   - le délai avant relance (minutes, tiré au hasard entre le minimum et le maximum) ;
   - `recheck_min` : vérification de secours (minutes, 30 par défaut) : délai maximal entre deux passages même quand aucune
     place n'est attendue ; 0 la désactive (le bot ne repasse alors qu'à l'heure d'une place libérée) ;
+  - `recheck_kept_min` : dernier délai choisi (1 à 1440), gardé même quand la vérification est désactivée, pour le retrouver
+    en la recochant, y compris après un rechargement de la page ;
   - `max_rt` : coût maximum en RT d'UNE Fouille (ligne « RT requis » de la page, relevée le 2026-11-22), `None` : aucun plafond.
 Le nombre de Fouilles réglées peut dépasser ce que le jeu permet à la fois (« Fouilles actives » : N / 6) ou ce que les sites
 libres d'une planète offrent : le bot traite les planètes dans l'ordre, lance ce qui est possible et laisse le reste attendre.
@@ -62,6 +64,7 @@ DEFAULT_SETTINGS: dict = {
     "delay_min": None, "delay_max": None,
     "max_rt": None,  # coût maximum en RT d'une Fouille ; None = pas de plafond
     "recheck_min": DEFAULT_RECHECK_MINUTES,  # vérification de secours, en minutes ; 0 = désactivée
+    "recheck_kept_min": DEFAULT_RECHECK_MINUTES,  # dernier délai choisi, retrouvé en recochant la case
 }
 # `tried` : planètes dont les sites ont été relevés ce jour-là ; une planète choisie après le relevé l'est au passage suivant.
 EMPTY_DAILY: dict = {"day": "", "scanned_at": None, "source": "", "error": "", "max_active": None, "sites": {}, "tried": []}
@@ -204,8 +207,11 @@ def validate(data, known_planets: list[str] | None = None) -> dict:
     if not _int_in(recheck, 0, MAX_DELAY_MINUTES):
         errors.append(f"Vérification de secours : de 1 à {MAX_DELAY_MINUTES} minutes, ou 0 pour la désactiver.")
         recheck = DEFAULT_RECHECK_MINUTES
+    kept = recheck if recheck > 0 else data.get("recheck_kept_min")  # désactivée : on garde le dernier délai choisi
+    if recheck == 0 and not _int_in(kept, 1, MAX_DELAY_MINUTES):
+        kept = DEFAULT_RECHECK_MINUTES  # absent ou illisible : 30 minutes, sans refuser l'enregistrement
     out = {**common, "copies": copies, "fouilles": fouilles, "planets": planets, "per_slot": per_slot, "mira": mira,
-           "delay_min": delay_min, "delay_max": delay_max, "max_rt": max_rt, "recheck_min": recheck}
+           "delay_min": delay_min, "delay_max": delay_max, "max_rt": max_rt, "recheck_min": recheck, "recheck_kept_min": kept}
     if not errors:  # chaque Fouille qui partira doit avoir une équipe complète
         for slot in slots(out, [] if planets else ["toutes les planètes"]):
             problem = _team_problem(slot["units"])

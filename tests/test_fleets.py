@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from app.fleets import (FleetError, FleetStore, build_fleet, decide, estimate_rate, match_fleet, parse_clock, parse_local)
+from app.fleets import (FleetError, FleetStore, build_fleet, decide, estimate_rate, estimated_click, match_fleet, parse_clock, parse_local)
 
 
 def _raw(kind="Déploiement", left=3600, o="M69 38 06", d="Z25 95 16", can_recall=True, text=""):
@@ -61,6 +61,14 @@ def test_decision_waits_holds_clicks_or_gives_up():
     assert decide(0.0, 100, 50, 5, [])[0] == "late"  # même tout de suite, ce serait 50 s après
 
 
+def test_estimated_click_matches_the_wait_decision():
+    # le clic prévu est 60 s après le prochain contrôle (CHECK_LEAD_SECONDS) quand le bot attend
+    _, check = decide(0.0, 100, 1000, 5, [])
+    assert estimated_click(0.0, 100, 1000, 5, []) == pytest.approx(check + 60) == pytest.approx(895 / 2)
+    assert estimated_click(0.0, 100, 1000, 5, [[0.0, 100.0], [100.0, 200.0]]) == pytest.approx(895)  # vitesse 1
+    assert estimated_click(0.0, 100, 90, 5, []) == 0.0  # déjà l'heure : maintenant
+
+
 def test_a_return_is_programmed_only_for_a_known_recallable_fleet(tmp_path):
     store = FleetStore(str(tmp_path))
     ok, other, shut = build_fleet(_raw(), time.time()), build_fleet(_raw(kind="Forage", d="Z25 11 11"), time.time()), build_fleet(_raw(can_recall=False, d="Z25 22 22"), time.time())
@@ -70,6 +78,7 @@ def test_a_return_is_programmed_only_for_a_known_recallable_fleet(tmp_path):
             store.add(fleet_id, at)
     recall = store.add(ok["id"], _at(600))
     assert recall["state"] == "pending" and recall["next_check"] <= time.time() and recall["fleet"]["key"] == ok["key"]
+    assert recall["click_at"] is None  # pas de clic prévu avant la première lecture de la durée de retour
     with pytest.raises(FleetError, match="déjà programmé"):
         store.add(ok["id"], _at(900))
 

@@ -11,7 +11,7 @@ Fichier `<data_dir>/fleets.json` :
   - `settings` : {"margin": secondes d'avance du clic} ;
   - `snapshot` : dernier relevé {"read_at", "fleets": [flotte]} ;
   - `recalls` : [{"id", "fleet": {"key", "label", "arrival_at"}, "at": heure de retour voulue (epoch), "state": "pending"|
-    "done"|"failed"|"abandoned", "note", "next_check": prochain contrôle (epoch), "reads": [[t, arrivée prévue]]}].
+    "done"|"failed"|"abandoned", "note", "next_check": prochain contrôle (epoch), "click_at": clic estimé (epoch, None tant que non lu), "reads": [[t, arrivée prévue]]}].
 """
 
 from __future__ import annotations
@@ -124,6 +124,13 @@ def decide(now: float, duration: float, target: float, margin: float, reads: lis
     return "wait", now + gap / rate - CHECK_LEAD_SECONDS
 
 
+def estimated_click(now: float, duration: float, target: float, margin: float, reads: list[list[float]]) -> float:
+    """Moment estimé du clic de confirmation (epoch) : même calcul que `decide`, mais renvoie l'heure au lieu de l'action.
+    Estimation seulement : elle se précise à chaque lecture de la durée de retour affichée par le jeu."""
+    gap = target - margin - (now + duration)
+    return now + max(gap, 0.0) / estimate_rate(reads)
+
+
 class FleetStore:
     """Relevé des flottes, rappels programmés et réglage de la marge, gardés dans `fleets.json`."""
 
@@ -212,7 +219,7 @@ class FleetStore:
         label = f"{fleet['kind']} {fleet['origin'].get('coords', '')} → {fleet['destination'].get('coords', '')}".strip()
         recall = {"id": secrets.token_hex(4), "fleet": {"key": fleet["key"], "label": label, "arrival_at": fleet["arrival_at"],
                                                         "units": fleet["units"]},
-                  "at": at, "state": "pending", "note": "", "next_check": now, "reads": []}
+                  "at": at, "state": "pending", "note": "", "next_check": now, "click_at": None, "reads": []}
         self._recalls.append(recall)
         self._save()
         return copy.deepcopy(recall)

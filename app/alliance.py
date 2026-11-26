@@ -5,6 +5,8 @@ N /6 » (un jeton toutes les 2 h environ) et les cartes des technologies. Seule 
 l'alliance » accepte des jetons : son étoile porte l'aria-label « Retirer <Nom> de la priorité de dons de l’alliance » et ses
 boutons « +1 jeton » et « Max. (+N) » sont actifs (grisés partout ailleurs). Un clic sur « +1 jeton » donne un jeton sans
 confirmation : message « Don effectué : 1 jeton(s). », jetons 5/6 → 4/6, progression 47 → 48/300.
+Membre sans droits (vrai jeu, 26/11, Kael) : aucun bouton d'étoile ; la priorité n'est qu'une icône (role img) « <Nom> est la
+priorité de dons de l’alliance », les autres cartes n'ont aucune étoile. Boutons de don de la carte prioritaire : à confirmer avec des jetons disponibles (Kael en avait 0 ce jour-là).
 Le bot ne clique JAMAIS sur une étoile (changer la priorité) ni sur une carte (fiche de présentation).
 Réglage (`<data_dir>/alliance.json`) : nombre de jetons à donner à chaque passage — "all" (tous), 1 ou 2.
 """
@@ -31,6 +33,8 @@ ALLIANCE_PATH = "alliance"
 PAGE_WAIT_SECONDS = 10.0
 CONFIRM_SECONDS = 6.0
 MARK = "data-bot-token"
+PRIORITY_WAIT_SECONDS = 6.0  # les cartes peuvent arriver après le compteur : on cherche la priorité avant de conclure qu'il n'y en a pas
+PRIORITY_POLL_SECONDS = 0.5
 
 
 class AllianceError(Exception):
@@ -106,10 +110,16 @@ PRIORITY_JS = (
     + _PRELUDE_JS
     + """
   document.querySelectorAll('[' + attribute + ']').forEach((e) => e.removeAttribute(attribute));
-  const star = [...document.querySelectorAll('main button[aria-label]')].find((b) => visible(b)
-    && /^Retirer .+ de la priorité de dons/i.test(b.getAttribute('aria-label')));
+  // Chef d'alliance : une étoile (bouton) « Retirer X de la priorité… ». Autre membre : pas de bouton, seulement une icône
+  // (role img) « X est la priorité de dons de l’alliance » (vrai jeu, 26/11, serveur sans droits).
+  const MARKERS = [[/^Retirer (.+?) de la priorité de dons/i, 'main button[aria-label]'],
+                   [/^(.+?) est la priorité de dons/i, '[role="img"][aria-label]']];
+  let star = null, name = '';
+  for (const [pattern, selector] of MARKERS) {
+    star = [...document.querySelectorAll(selector)].find((e) => visible(e) && pattern.test(e.getAttribute('aria-label')));
+    if (star) { name = pattern.exec(star.getAttribute('aria-label'))[1]; break; }
+  }
   if (!star) return null;
-  const name = /^Retirer (.+?) de la priorité de dons/i.exec(star.getAttribute('aria-label'))[1];
   let card = star;
   while (card && ![...card.querySelectorAll('button')].some((b) => /^\\+1 jeton$/i.test(text(b)))) card = card.parentElement;
   if (!card) return { name, button: false };
@@ -176,10 +186,19 @@ class TokenPass(ConstructionPass):
             self.bot.log(f"Alliance : {exc}.", "warn", event=True)
             return f"arrêté ({exc})"
 
+    async def _find_priority(self, kind: str) -> dict | None:
+        """Cherche la technologie prioritaire jusqu'à PRIORITY_WAIT_SECONDS : la page peut finir de s'afficher après le compteur."""
+        end = time.monotonic() + PRIORITY_WAIT_SECONDS
+        while True:
+            info = await self.page.evaluate(PRIORITY_JS, [kind, MARK])
+            if info is not None or time.monotonic() >= end:
+                return info
+            await asyncio.sleep(PRIORITY_POLL_SECONDS)
+
     async def _give(self, kind: str, expected: int, before: int) -> str:
         """Clique « +1 jeton » ou « Max. » sur la technologie prioritaire ; vérifie que le compteur baisse."""
         page = self.page
-        info = await page.evaluate(PRIORITY_JS, ["max" if kind == "max" else "one", MARK])
+        info = await self._find_priority("max" if kind == "max" else "one")
         if info is None:
             return "aucune technologie n'est la priorité de dons de l'alliance"
         self._tech = info["name"]
