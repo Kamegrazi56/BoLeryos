@@ -602,6 +602,19 @@ def test_excavation_panel_sets_departure_planets_and_the_duration_and_team_of_ea
     s = app.state.bot.excavations.get()
     assert (s["duration"], s["units"], s["mira"], s["per_slot"], s["delay_min"], s["delay_max"]) == (12, {"Scientifique": 3000, "Mineur": 2000}, egide, False, 5, 15)
     assert [(p["name"], p["copies"]) for p in s["planets"]] == [(egide, 2), (concorde, 1)]
+    # vérification de secours : 30 min par défaut, délai modifiable, case décochée = désactivée, délai gardé en recochant
+    assert s["recheck_min"] == 30 and page.is_checked("#exc-recheck-on") and page.input_value("#exc-recheck-min") == "30"
+    page.fill("#exc-recheck-min", "90")
+    page.uncheck("#exc-recheck-on")
+    assert page.is_disabled("#exc-recheck-min") and "Contrôle de secours désactivé" in page.text_content("#exc-summary")
+    page.click("#exc-save")
+    page.wait_for_function("document.getElementById('exc-msg').textContent === 'Enregistré.'")
+    assert app.state.bot.excavations.get()["recheck_min"] == 0
+    page.check("#exc-recheck-on")
+    assert page.input_value("#exc-recheck-min") == "90" and "toutes les 90 min" in page.text_content("#exc-summary")
+    page.click("#exc-save")
+    page.wait_for_function("document.getElementById('exc-msg').textContent === 'Enregistré.'")
+    assert app.state.bot.excavations.get()["recheck_min"] == 90
     # réglages différents par Fouille : chaque Fouille part de l'envoi commun, puis se modifie
     page.check("#exc-per-slot")
     where = f"{egide}, Fouille 2"

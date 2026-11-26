@@ -43,7 +43,7 @@
     planets.forEach((p) => { memory[p.name] = clone(p); });
     noneChecked = false;
     return { send: pick(s), copies: s.copies, fouilles: s.fouilles.map(pick), planets, per_slot: s.per_slot, mira: s.mira,
-             delay_min: s.delay_min, delay_max: s.delay_max, max_rt: s.max_rt ?? null };
+             delay_min: s.delay_min, delay_max: s.delay_max, max_rt: s.max_rt ?? null, recheck_min: s.recheck_min ?? 30 };
   }
 
   // ------------------------------------------------------------------------------ une Fouille : durée + équipe
@@ -152,7 +152,27 @@
     $("exc-delay-min").value = form.delay_min ?? "";
     $("exc-delay-max").value = form.delay_max ?? "";
     $("exc-max-rt").value = form.max_rt ?? "";
+    renderRecheck();
   }
+  // Vérification de secours : case décochée = 0 (désactivée) ; le dernier délai choisi est gardé pour la recocher.
+  let lastRecheck = 30;
+  function renderRecheck() {
+    const on = form.recheck_min > 0;
+    if (on) lastRecheck = form.recheck_min;
+    $("exc-recheck-on").checked = on;
+    $("exc-recheck-min").disabled = !on;
+    $("exc-recheck-min").value = on ? form.recheck_min : lastRecheck;
+  }
+  $("exc-recheck-on").addEventListener("change", () => {
+    form.recheck_min = $("exc-recheck-on").checked ? lastRecheck : 0;
+    renderRecheck();
+    changed();
+  });
+  $("exc-recheck-min").addEventListener("input", () => {
+    const n = Number($("exc-recheck-min").value);
+    if ($("exc-recheck-min").value !== "" && Number.isInteger(n) && n > 0) { form.recheck_min = n; lastRecheck = n; }
+    changed();
+  });
   $("exc-duration").addEventListener("change", () => { form.send.duration = Number($("exc-duration").value); changed(); });
   $("exc-mira").addEventListener("change", () => { form.mira = $("exc-mira").value; changed(); });
   [["exc-delay-min", "delay_min"], ["exc-delay-max", "delay_max"]].forEach(([id, key]) => $(id).addEventListener("input", () => {
@@ -177,8 +197,9 @@
     const what = allPlanets()
       ? planetText("chaque planète", form.copies, form.fouilles)
       : form.planets.map((p) => planetText(p.name, p.copies, p.fouilles)).join(" ; ");
+    const check = form.recheck_min > 0 ? ` Contrôle de secours toutes les ${form.recheck_min} min au plus.` : " Contrôle de secours désactivé.";
     const cap = form.max_rt ? ` Aucune Fouille au-dessus de ${form.max_rt} RT.` : "";
-    $("exc-summary").textContent = `En continu : ${what}.${delay}${cap}`;
+    $("exc-summary").textContent = `En continu : ${what}.${delay}${check}${cap}`;
   }
 
   // ------------------------------------------------------------------------------ relevé du jour et Fouilles suivies
@@ -212,7 +233,7 @@
   // ------------------------------------------------------------------------------ enregistrement et relecture
   function formValue() {
     return { ...form.send, copies: form.copies, fouilles: form.fouilles, planets: form.planets, per_slot: form.per_slot, mira: form.mira,
-             delay_min: form.delay_min, delay_max: form.delay_max, max_rt: form.max_rt };
+             delay_min: form.delay_min, delay_max: form.delay_max, max_rt: form.max_rt, recheck_min: form.recheck_min };
   }
 
   $("exc-save").addEventListener("click", async () => {

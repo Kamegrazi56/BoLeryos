@@ -219,9 +219,22 @@ class Scheduler:
             due = feature.next_due(self.bot) if feature.next_due else None
         except Exception:  # noqa: BLE001 - heure illisible : vérification de secours
             due = None
+        fallback = self._recheck_seconds(feature)
         if due is None:
+            # Sans heure attendue, ne jamais repasser serait définitif : on garde au moins la vérification par défaut.
+            return fallback or SELF_TIMED_FALLBACK_SECONDS
+        wait = max(due - time.time(), SELF_TIMED_MIN_SECONDS)
+        return min(wait, fallback) if fallback else wait
+
+    def _recheck_seconds(self, feature: Feature) -> float:
+        """Vérification de secours choisie par le joueur, en secondes ; 0 : désactivée. Réglage illisible : 30 minutes."""
+        try:
+            minutes = feature.recheck_minutes(self.bot) if feature.recheck_minutes else None
+        except Exception:  # noqa: BLE001 - réglage illisible : valeur par défaut
+            minutes = None
+        if not isinstance(minutes, int) or minutes < 0:
             return SELF_TIMED_FALLBACK_SECONDS
-        return min(max(due - time.time(), SELF_TIMED_MIN_SECONDS), SELF_TIMED_FALLBACK_SECONDS)
+        return minutes * 60.0
 
     async def _loop(self) -> None:
         while self._on:

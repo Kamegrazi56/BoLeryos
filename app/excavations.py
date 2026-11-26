@@ -16,6 +16,8 @@ Réglages :
     avec « toutes les planètes »). Décoché, l'envoi commun vaut pour toutes, mais les réglages par Fouille restent en mémoire ;
   - `mira` : la planète dont la Fouille 1 part avec Mira Venn (« » : aucune) ;
   - le délai avant relance (minutes, tiré au hasard entre le minimum et le maximum) ;
+  - `recheck_min` : vérification de secours (minutes, 30 par défaut) : délai maximal entre deux passages même quand aucune
+    place n'est attendue ; 0 la désactive (le bot ne repasse alors qu'à l'heure d'une place libérée) ;
   - `max_rt` : coût maximum en RT d'UNE Fouille (ligne « RT requis » de la page, relevée le 2026-11-22), `None` : aucun plafond.
 Le nombre de Fouilles réglées peut dépasser ce que le jeu permet à la fois (« Fouilles actives » : N / 6) ou ce que les sites
 libres d'une planète offrent : le bot traite les planètes dans l'ordre, lance ce qui est possible et laisse le reste attendre.
@@ -47,6 +49,7 @@ MAX_TEAM = 5000
 MAX_SLOTS = 10  # Fouilles simultanées par planète
 MAX_PLANETS = 50
 MAX_DELAY_MINUTES = 24 * 60
+DEFAULT_RECHECK_MINUTES = 30  # vérification de secours : délai maximal entre deux passages (0 = désactivée)
 MAX_RT = 1_000_000_000  # plafond de coût en RT par Fouille accepté dans les réglages
 SITES_KEPT = 10  # sites libres les plus proches gardés par planète au relevé du jour
 DEFAULT_SETTINGS: dict = {
@@ -58,6 +61,7 @@ DEFAULT_SETTINGS: dict = {
     "mira": "",
     "delay_min": None, "delay_max": None,
     "max_rt": None,  # coût maximum en RT d'une Fouille ; None = pas de plafond
+    "recheck_min": DEFAULT_RECHECK_MINUTES,  # vérification de secours, en minutes ; 0 = désactivée
 }
 # `tried` : planètes dont les sites ont été relevés ce jour-là ; une planète choisie après le relevé l'est au passage suivant.
 EMPTY_DAILY: dict = {"day": "", "scanned_at": None, "source": "", "error": "", "max_active": None, "sites": {}, "tried": []}
@@ -196,8 +200,12 @@ def validate(data, known_planets: list[str] | None = None) -> dict:
     if max_rt is not None and not _rt_limit_ok(max_rt):
         errors.append(f"Coût maximum en RT : un nombre supérieur à 0 (décimales acceptées, jusqu'à {MAX_RT}), ou vide pour aucun plafond.")
         max_rt = None
+    recheck = data.get("recheck_min", DEFAULT_RECHECK_MINUTES)  # absent (anciens réglages) : 30 minutes comme avant
+    if not _int_in(recheck, 0, MAX_DELAY_MINUTES):
+        errors.append(f"Vérification de secours : de 1 à {MAX_DELAY_MINUTES} minutes, ou 0 pour la désactiver.")
+        recheck = DEFAULT_RECHECK_MINUTES
     out = {**common, "copies": copies, "fouilles": fouilles, "planets": planets, "per_slot": per_slot, "mira": mira,
-           "delay_min": delay_min, "delay_max": delay_max, "max_rt": max_rt}
+           "delay_min": delay_min, "delay_max": delay_max, "max_rt": max_rt, "recheck_min": recheck}
     if not errors:  # chaque Fouille qui partira doit avoir une équipe complète
         for slot in slots(out, [] if planets else ["toutes les planètes"]):
             problem = _team_problem(slot["units"])

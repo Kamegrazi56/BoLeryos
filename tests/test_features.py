@@ -77,6 +77,40 @@ def test_a_feature_cannot_be_enabled_without_its_timer():
     assert validate_entry({"enabled": False}, floor=1) == {"enabled": False, "min_minutes": None, "max_minutes": None, "ignore_planning": False}
 
 
+def test_the_recheck_delay_of_a_self_timed_feature_can_be_changed_or_disabled():
+    due = {"at": None}
+    recheck = {"min": 120}
+
+    async def run(bot):
+        return "fait"
+
+    feature = Feature("f", "F", "test", run, self_timed=True, next_due=lambda bot: due["at"], recheck_minutes=lambda bot: recheck["min"])
+    sched, _bot, clock = build((feature,))
+    sched.update("f", {"enabled": True})
+
+    async def next_delay():
+        clock.now = sched._runtime["f"].next_at if sched._runtime["f"].next_at else clock.now
+        assert await sched.step() is True
+        return sched._runtime["f"].next_at - clock.now
+
+    async def scenario():
+        manual(sched)
+        due["at"] = time.time() + 5 * 3600
+        assert await next_delay() == 7200  # secours choisi : 2 h
+        due["at"] = time.time() + 600
+        assert 599 <= await next_delay() <= 600  # l'heure attendue passe avant le secours
+        recheck["min"] = 0  # secours désactivé : on attend l'heure prévue
+        due["at"] = time.time() + 5 * 3600
+        assert 17999 <= await next_delay() <= 18000
+        due["at"] = None  # rien de suivi : jamais de passage définitivement perdu
+        assert await next_delay() == 1800
+        recheck["min"] = None  # réglage illisible : 30 minutes comme avant
+        due["at"] = time.time() + 5 * 3600
+        assert await next_delay() == 1800
+
+    asyncio.run(scenario())
+
+
 def test_a_self_timed_feature_needs_no_timer_and_runs_again_when_its_mission_ends():
     due = {"at": None}
     runs = []

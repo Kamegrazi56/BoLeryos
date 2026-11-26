@@ -121,6 +121,19 @@ def test_a_file_with_old_lines_is_converted(tmp_path):
     assert saved["planets"] == [{"name": EGIDE, "copies": 2, "fouilles": [{"duration": 6, "units": TEAM}] * 2}] and saved["mira"] == EGIDE
 
 
+def test_the_recheck_delay_defaults_to_30_minutes_and_can_be_changed_or_disabled(tmp_path):
+    assert validate(SETTINGS)["recheck_min"] == 30  # anciens réglages sans ce champ : comme avant
+    assert validate({**SETTINGS, "recheck_min": 120})["recheck_min"] == 120
+    assert validate({**SETTINGS, "recheck_min": 0})["recheck_min"] == 0  # désactivée
+    for bad in (-1, 1441, 2.5, "30", True):
+        with pytest.raises(ExcavationError) as err:
+            validate({**SETTINGS, "recheck_min": bad})
+        assert "Vérification de secours" in str(err.value)
+    store = ExcavationStore(str(tmp_path))
+    store.replace({**SETTINGS, "recheck_min": 0})
+    assert ExcavationStore(str(tmp_path)).get()["recheck_min"] == 0
+
+
 # ------------------------------------------------------------------------------ suivi
 TRACKED = {"planet": EGIDE, "slot": 0, "duration": 6, "site": "M58 80 21", "end": 1000.0, "ready": 1600.0}  # délai tiré : 600 s
 

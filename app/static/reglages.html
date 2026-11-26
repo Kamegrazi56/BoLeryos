@@ -312,6 +312,12 @@
         <label>Délai avant relance : de <input id="exc-delay-min" type="number" min="0" step="1" aria-label="Délai minimum avant relance (minutes)"></label>
         <label>à <input id="exc-delay-max" type="number" min="0" step="1" aria-label="Délai maximum avant relance (minutes)"> minutes</label>
       </div>
+      <h3>Vérification de secours</h3>
+      <div class="row">
+        <label><input id="exc-recheck-on" type="checkbox" aria-label="Activer la vérification de secours"> Repasser au plus tard toutes les</label>
+        <label><input id="exc-recheck-min" type="number" min="1" max="1440" step="1" aria-label="Délai de la vérification de secours (minutes)"> minutes</label>
+        <span class="hint">Le bot repasse aussi à l'heure où une place se libère. Ce contrôle de secours relit « Missions en cours » (Fouilles lancées à la main, retards). Décoché : il ne repasse qu'à l'heure prévue (30 min si aucune Fouille n'est suivie).</span>
+      </div>
       <h3>Garde-fou</h3>
       <div class="row">
         <label>Coût maximum en RT par Fouille <input id="exc-max-rt" type="number" min="0" step="any" placeholder="aucun plafond" aria-label="Coût maximum en RT par Fouille"></label>

@@ -33,6 +33,8 @@ class Feature:
     # l'heure renvoyée par `next_due(bot)` (fin de mission + délai du joueur), avec une vérification de secours.
     self_timed: bool = False
     next_due: Callable[[object], float | None] | None = None
+    # Délai de la vérification de secours choisi par le joueur, en minutes (0 = désactivée) ; None : 30 minutes.
+    recheck_minutes: Callable[[object], int | None] | None = None
 
 
 async def _run_constructions(bot) -> str:
@@ -98,7 +100,8 @@ FEATURES: tuple[Feature, ...] = (
     Feature("explorations", "Explorations", "Envoie des explorations (onglet Exploration) vers la brèche la plus proche de chaque planète choisie : Piliers ou Flotte, modèle du jeu ou quantités, copies et durée au choix. Relève brèches et modèles une fois par jour, respecte les quotas quotidien et d'explorations actives, et saute une planète à qui il manque quelque chose.", _run_explorations,
             timer_label="Vague d'explorations toutes les"),
     Feature("excavations", "Fouilles", "Lance les Fouilles réglées (onglet Fouilles) : planètes de départ, Fouilles simultanées, durée et équipe (1 à 5 000 unités) de chaque Fouille, Mira Venn. Vise le site libre le plus proche sans Fouille en cours, relève les sites une fois par jour, et relance chaque Fouille à l'identique à sa fin plus le délai choisi.", _run_excavations,
-            self_timed=True, next_due=lambda bot: bot.excavator.next_due()),
+            self_timed=True, next_due=lambda bot: bot.excavator.next_due(),
+            recheck_minutes=lambda bot: bot.excavations.get()["recheck_min"]),
     Feature("hackings", "Piratage (expérience de Naël)", "Fait pirater en boucle par Naël Soryn l'Errant le plus proche de la planète choisie (onglet Piratage), pour son expérience : relance dès que le piratage précédent est fini et que le délai choisi est passé, et passe à l'Errant suivant si le jeu refuse la cible. Relève les Errants une fois par jour.", _run_hackings,
             self_timed=True, next_due=lambda bot: bot.hacker.next_due()),
     Feature("minings", "Forages de planètes minières", "Envoie des forages (onglet Forages) depuis les planètes choisies vers la planète minière la plus proche de la ressource voulue (Fer, Cristal, Éther), sans jamais deux forages sur la même : 1 Foreuse orbitale et le nombre de Mineurs réglé, autant de forages que de places. La flotte revient seule (soute pleine ou planète épuisée) ; la place est relancée au retour plus le délai choisi, sur la même planète minière si elle existe encore.", _run_minings,
