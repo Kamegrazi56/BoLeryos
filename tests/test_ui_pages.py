@@ -302,11 +302,16 @@ def test_constructions_panel_raises_targets_from_the_levels_table(ui, game):
     assert [line["level"] for line in caserne] == [level + 1 for level in before]
     assert [line["planet"] for line in caserne] == ["8-50-Concorde", "6-79-Egide", "9-169-Strate"]
     assert page.locator("#cons-queue li[data-building]").count() == 4  # la liste montre une ligne par bâtiment et par planète
-    assert page.locator("#cons-queue li[data-building='caserne'] .where").evaluate_all("w => w.map(x => x.textContent)") == ["8-50-Concorde", "6-79-Egide", "9-169-Strate"]
-    page.click("button[aria-label='Monter : Caserne (8-50-Concorde)']")
+    # la liste est regroupée par planète (ordre du scan), un titre par planète, et la priorité se règle au sein de chaque planète
+    assert page.locator("#cons-queue li[data-planet]").evaluate_all("l => l.map(x => x.dataset.planet)") == ["6-79-Egide", "6-79-Egide", "8-50-Concorde", "9-169-Strate"]
+    assert page.locator("#cons-queue li.group-head").evaluate_all("h => h.map(x => x.textContent)") == ["6-79-Egide · 2", "8-50-Concorde · 1", "9-169-Strate · 1"]
+    assert page.locator("button[aria-label='Monter : Caserne (8-50-Concorde)']").is_disabled()  # seule ligne de sa planète
+    assert page.locator("button[aria-label='Monter : Mine de Fer (6-79-Egide)']").is_disabled()  # première de sa planète
+    page.click("button[aria-label='Monter : Caserne (6-79-Egide)']")
     page.wait_for_function("document.querySelector('#cons-msg').textContent.includes('Enregistré')", timeout=5000)
     first = app.state.bot.constructions.get()["queue"][0]
-    assert (first["building"], first["planet"]) == ("caserne", "8-50-Concorde")
+    assert (first["building"], first["planet"]) == ("caserne", "6-79-Egide")
+    assert page.locator("#cons-queue li[data-planet='6-79-Egide']").evaluate_all("l => l.map(x => x.dataset.building)") == ["caserne", "mine-de-fer"]
     page.wait_for_function("document.querySelectorAll('#cons-planets .planet-grid input').length === 3", timeout=10000)
     assert page.is_checked("#cons-planets input[value='all']")
     page.check("#cons-planets input[value='some']")

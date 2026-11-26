@@ -1,4 +1,4 @@
-// Liste d'objectifs de construction : lignes « bâtiment + niveau cible » (l'ordre = la priorité), sur toutes les
+// Liste d'objectifs de construction : lignes « bâtiment + niveau cible » (l'ordre = la priorité), affichées par planète, sur toutes les
 // planètes ou sur les planètes cochées (choix commun : planet-choice.js).
 (() => {
   const { el } = window.ui;
@@ -63,35 +63,54 @@
     $("cons-planets").replaceChildren(planetBox.node);
   }
 
+  /** Lignes regroupées par planète, en gardant leur rang dans la liste enregistrée (la priorité d'une planète = l'ordre de ses lignes).
+   * Ordre des groupes : « toutes les planètes » d'abord, puis les planètes dans l'ordre du scan, puis les planètes inconnues. */
+  function groupQueue() {
+    const groups = new Map();
+    state.queue.forEach((line, index) => {
+      const key = line.planet || "";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({ line, index });
+    });
+    const rank = (key) => (key === "" ? -1 : planets.includes(key) ? planets.indexOf(key) : planets.length);
+    return [...groups.entries()].sort((x, y) => rank(x[0]) - rank(y[0]));
+  }
+
   function renderQueue() {
     const list = $("cons-queue");
     if (!state.queue.length) {
       list.replaceChildren(el("li", { className: "empty-state", textContent: "Aucune ligne : cliquez sur « +1 » dans le tableau ci-dessous." }));
       return;
     }
-    list.replaceChildren(...state.queue.map((line, i) => {
-      const where = line.planet || "toutes les planètes";
-      const name = `${label(line.building)} (${where})`;
-      const level = el("input", { type: "number", min: "1", max: String(MAX_LEVEL), step: "1", value: line.level, ariaLabel: `Niveau cible de ${name}` });
-      level.addEventListener("input", () => { if (level.value !== "") { line.level = Number(level.value); renderInventory(); scheduleSave(); } });
-      const button = (text, title, onClick, disabled = false) => {
-        const b = el("button", { type: "button", className: "secondary small", textContent: text, title, ariaLabel: `${title} : ${name}`, disabled });
-        b.addEventListener("click", onClick);
-        return b;
-      };
-      const swap = (j) => { [state.queue[i], state.queue[j]] = [state.queue[j], state.queue[i]]; renderQueue(); scheduleSave(); };
-      const item = el("li", {},
-        el("span", { className: "rank", textContent: String(i + 1) }),
-        el("strong", { className: "name", textContent: label(line.building) }),
-        el("span", { className: line.planet ? "where" : "where common", textContent: where }),
-        el("label", {}, "niveau ", level),
-        button("↑", "Monter", () => swap(i - 1), i === 0),
-        button("↓", "Descendre", () => swap(i + 1), i === state.queue.length - 1),
-        button("Supprimer", "Supprimer", () => { state.queue.splice(i, 1); renderAll(); scheduleSave(); }));
-      item.dataset.building = line.building;
-      item.dataset.planet = line.planet || "";
-      return item;
-    }));
+    const swap = (i, j) => { [state.queue[i], state.queue[j]] = [state.queue[j], state.queue[i]]; renderQueue(); scheduleSave(); };
+    const items = [];
+    groupQueue().forEach(([planet, members]) => {
+      items.push(el("li", { className: "group-head", textContent: `${planet || "Toutes les planètes"} · ${members.length}` }));
+      members.forEach(({ line, index }, pos) => {
+        const where = line.planet || "toutes les planètes";
+        const name = `${label(line.building)} (${where})`;
+        const level = el("input", { type: "number", min: "1", max: String(MAX_LEVEL), step: "1", value: line.level, ariaLabel: `Niveau cible de ${name}` });
+        level.addEventListener("input", () => { if (level.value !== "") { line.level = Number(level.value); renderInventory(); scheduleSave(); } });
+        const button = (text, title, onClick, disabled = false) => {
+          const b = el("button", { type: "button", className: "secondary small", textContent: text, title, ariaLabel: `${title} : ${name}`, disabled });
+          b.addEventListener("click", onClick);
+          return b;
+        };
+        const before = members[pos - 1]; // on ne monte / descend qu'au sein de la planète : la priorité est propre à chaque planète
+        const after = members[pos + 1];
+        const item = el("li", {},
+          el("span", { className: "rank", textContent: String(pos + 1) }),
+          el("strong", { className: "name", textContent: label(line.building) }),
+          el("label", {}, "niveau ", level),
+          button("↑", "Monter", () => swap(index, before.index), !before),
+          button("↓", "Descendre", () => swap(index, after.index), !after),
+          button("Supprimer", "Supprimer", () => { state.queue.splice(index, 1); renderAll(); scheduleSave(); }));
+        item.dataset.building = line.building;
+        item.dataset.planet = line.planet || "";
+        items.push(item);
+      });
+    });
+    list.replaceChildren(...items);
   }
 
   const inScope = (planet) => !state.planets.length || state.planets.includes(planet);
