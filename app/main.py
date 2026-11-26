@@ -110,6 +110,7 @@ class ConstructionLine(BaseModel):
 class ConstructionsRequest(BaseModel):
     planets: list[str] = Field(default_factory=list, max_length=200)  # vide : toutes les planètes
     queue: list[ConstructionLine] = Field(default_factory=list, max_length=500)  # une ligne par bâtiment et par planète
+    modes: dict[str, str] = Field(default_factory=dict, max_length=500)  # planète (« » = toutes) → « any » (première possible) ou « order » (ordre de la liste)
 
 
 class TransportRequest(BaseModel):
@@ -623,7 +624,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def api_constructions_put(body: ConstructionsRequest, request: Request):
         _check_origin(request)
         def with_inventory() -> list[str]:  # le tableau propose les planètes de l'inventaire, même si le scan est vide ou en retard
-            saved = [ln["planet"] for ln in bot.constructions.get()["queue"] if ln.get("planet")]  # une ligne déjà enregistrée ne bloque pas l'enregistrement suivant
+            current = bot.constructions.get()
+            saved = [ln["planet"] for ln in current["queue"] if ln.get("planet")] + [p for p in current.get("modes", {}) if p]  # une ligne ou un mode déjà enregistré ne bloque pas l'enregistrement suivant
             return list(dict.fromkeys(_known_planets() + [p["name"] for p in bot.inventory.get()["planets"]] + saved))
 
         try:

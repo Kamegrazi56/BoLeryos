@@ -7,7 +7,7 @@
 
   let buildings = [];
   let planets = [];
-  let state = { planets: [], queue: [] };
+  let state = { planets: [], queue: [], modes: {} };
   let planetBox = null; // choix des planètes affiché
   let shown = null; // planètes qu'il affiche (JSON)
   let saveTimer = null;
@@ -20,7 +20,12 @@
   const HIDDEN_KEY = "boleryos.constructions.hidden"; // catégories repliées, retenues d'une visite à l'autre (confort : sans stockage, tout est déplié)
   const hidden = new Set((() => { try { return JSON.parse(localStorage.getItem(HIDDEN_KEY)) || []; } catch { return []; } })());
   const remember = () => { try { localStorage.setItem(HIDDEN_KEY, JSON.stringify([...hidden])); } catch { /* stockage indisponible */ } };
+  const MODES = [["any", "Dès que les ressources suffisent"], ["order", "Ordre de la liste"]]; // « any » : comportement d'origine, donc par défaut
+  const modeOf = (planet) => (state.modes[planet] || (planet ? state.modes[""] : "") || "any");
+  const groupKey = (planet) => `queue:${planet}`; // même mémoire que les catégories du tableau : une planète repliée le reste d'une visite à l'autre
   const label = (id) => (buildings.find((b) => b.id === id) || { label: id }).label;
+
+  const withModes = (settings) => ({ ...settings, modes: { ...(settings.modes || {}) } });
 
   function say(text, kind) {
     $("cons-msg").textContent = text;
@@ -32,7 +37,7 @@
     saveTimer = null;
     saving = true;
     try {
-      const res = await fetch("/api/constructions", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state) });
+      const res = await fetch("/api/constructions", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state) }); // « modes » est ignoré par le serveur s'il est vide
       if (res.ok) { failed = false; say("Enregistré.", "ok"); return; }
       failed = true; // la liste affichée n'est pas celle du bot : le rafraîchissement automatique ne doit pas effacer la modification refusée
       say(errorText(await res.json().catch(() => ({}))), "error");
@@ -76,6 +81,24 @@
     return [...groups.entries()].sort((x, y) => rank(x[0]) - rank(y[0]));
   }
 
+  /** Titre d'une planète : un bouton qui plie / déplie ses lignes, et le choix du mode de lancement de cette planète. */
+  function groupHead(planet, count, open) {
+    const name = planet || "Toutes les planètes";
+    const toggle = el("button", { type: "button", className: "group-toggle", textContent: `${open ? "▾" : "▸"} ${name} · ${count}`, ariaExpanded: String(open), ariaLabel: `${open ? "Masquer" : "Afficher"} les constructions de ${name}` });
+    toggle.addEventListener("click", () => {
+      if (hidden.has(groupKey(planet))) hidden.delete(groupKey(planet)); else hidden.add(groupKey(planet));
+      remember();
+      renderQueue();
+    });
+    const select = el("select", { className: "mode", ariaLabel: `Mode de lancement : ${name}`, title: "Ordre de la liste : on attend les ressources de la première ligne avant de lancer la suivante. Dès que les ressources suffisent : on lance la première ligne que l'on peut payer." },
+      ...MODES.map(([value, text]) => el("option", { value, textContent: text })));
+    select.value = modeOf(planet);
+    select.addEventListener("change", () => { state.modes[planet] = select.value; scheduleSave(); });
+    const head = el("li", { className: "group-head" }, toggle, select);
+    head.dataset.groupPlanet = planet;
+    return head;
+  }
+
   function renderQueue() {
     const list = $("cons-queue");
     if (!state.queue.length) {
@@ -85,7 +108,9 @@
     const swap = (i, j) => { [state.queue[i], state.queue[j]] = [state.queue[j], state.queue[i]]; renderQueue(); scheduleSave(); };
     const items = [];
     groupQueue().forEach(([planet, members]) => {
-      items.push(el("li", { className: "group-head", textContent: `${planet || "Toutes les planètes"} · ${members.length}` }));
+      const open = !hidden.has(groupKey(planet));
+      items.push(groupHead(planet, members.length, open));
+      if (!open) return; // planète repliée : ses lignes en attente sont masquées (elles restent dans la liste du bot)
       members.forEach(({ line, index }, pos) => {
         const where = line.planet || "toutes les planètes";
         const name = `${label(line.building)} (${where})`;
@@ -221,7 +246,7 @@
       buildings = data.buildings;
       planets = data.planets;
       inventory = data.inventory;
-      if (!saveTimer) state = data.settings;
+      if (!saveTimer) state = withModes(data.settings);
       renderAll();
     } catch { /* le bot redémarre : on réessaie */ }
   }
@@ -234,7 +259,8 @@
       const idle = at === rev && !saveTimer && !saving && !failed && !$("cons-queue").contains(document.activeElement);
       const inventoryChanged = JSON.stringify(data.inventory) !== JSON.stringify(inventory);
       if (!refreshing) inventory = data.inventory; // pendant un relevé demandé, c'est la réponse du bouton qui fait foi
-      if (idle && JSON.stringify(data.settings.queue) !== JSON.stringify(state.queue)) { state = data.settings; renderAll(); } else { renderPlanets(); if (inventoryChanged) renderInventory(); }
+      const changed = JSON.stringify([data.settings.queue, data.settings.modes || {}]) !== JSON.stringify([state.queue, state.modes]);
+      if (idle && changed) { state = withModes(data.settings); renderAll(); } else { renderPlanets(); if (inventoryChanged) renderInventory(); }
     } catch { /* idem */ }
   }, 5000);
 })();

@@ -56,6 +56,41 @@ def test_each_planet_gets_its_first_affordable_line_and_only_one(game_client, ga
     assert "2 construction(s) lancée(s)" in summary and "1 planète(s) sans rien à lancer" in summary
 
 
+def _set_modes(client, queue, planet, modes):
+    body = {"planets": [planet], "queue": queue, "modes": modes}
+    assert client.put("/api/constructions", json=body).status_code == 200
+
+
+def test_the_default_mode_launches_the_first_line_the_planet_can_pay(game_client, game):
+    _scan(game_client)
+    _set_modes(game_client, [MINE, CENTRALE], "8-50-Concorde", {})  # Concorde ne peut pas payer la Mine, mais la Centrale
+    _run(game_client)
+    assert _launched(game) == [("8-50-Concorde", "Centrale Énergétique", 28)]
+
+
+def test_the_order_mode_waits_for_the_first_line_instead_of_skipping_it(game_client, game):
+    _scan(game_client)
+    _set_modes(game_client, [MINE, CENTRALE], "8-50-Concorde", {"8-50-Concorde": "order"})
+    summary = _run(game_client)
+    assert _launched(game) == []  # la Mine est en tête et n'est pas payable : on l'attend, la Centrale ne passe pas devant
+    assert "0 construction(s) lancée(s)" in summary
+
+
+def test_the_order_mode_still_launches_the_first_line_when_it_is_payable(game_client, game):
+    _scan(game_client)
+    _set_modes(game_client, [CENTRALE, MINE], "8-50-Concorde", {"8-50-Concorde": "order"})
+    _run(game_client)
+    assert _launched(game) == [("8-50-Concorde", "Centrale Énergétique", 28)]
+
+
+def test_a_mode_only_applies_to_its_own_planet(game_client, game):
+    _scan(game_client)
+    _set(game_client, [MINE, CENTRALE])  # toutes les planètes
+    assert game_client.put("/api/constructions", json={"queue": [MINE, CENTRALE], "modes": {"8-50-Concorde": "order"}}).status_code == 200
+    _run(game_client)
+    assert _launched(game) == [("6-79-Egide", "Mine de Fer", 41)]  # Egide : première possible ; Concorde : en attente de la Mine
+
+
 def test_priority_order_decides_which_building_goes_first(game_client, game):
     _scan(game_client)
     _set(game_client, [CASERNE, MINE], scope="one", planet="6-79-Egide")  # la Caserne est avant la Mine

@@ -22,6 +22,12 @@ FILE_NAME = "constructions.json"
 MAX_LINES = 500  # une ligne par bâtiment et par planète : 16 bâtiments × une vingtaine de planètes
 MAX_LEVEL = 500
 MAX_PLANET_LENGTH = 60
+# Mode de lancement d'une planète : « any » = la première ligne dont le bouton est actif (les ressources suffisent) ;
+# « order » = strictement l'ordre de la liste : si la première ligne à faire n'est pas payable, on attend ses ressources.
+MODE_ANY = "any"
+MODE_ORDER = "order"
+MODES = (MODE_ANY, MODE_ORDER)
+DEFAULT_MODE = MODE_ANY  # comportement d'avant l'ajout des modes : les fichiers existants ne changent pas
 
 
 @dataclass(frozen=True)
@@ -77,9 +83,41 @@ def where(planets: list[str]) -> str:
     return ", ".join(planets) or "toutes les planètes"
 
 
+def _clean_modes(raw, known_planets: list[str] | None, errors: list[str]) -> dict[str, str]:
+    """Mode par planète (clé « » = lignes « toutes les planètes »). Planète inconnue : refusée seulement si on connaît le scan."""
+    if raw in (None, {}):
+        return {}
+    if not isinstance(raw, dict) or len(raw) > MAX_LINES:
+        errors.append("Modes : un mode par planète au plus.")
+        return {}
+    modes: dict[str, str] = {}
+    for planet, mode in raw.items():
+        name = planet.strip() if isinstance(planet, str) else None
+        if name is None or len(name) > MAX_PLANET_LENGTH:
+            errors.append("Modes : planète invalide.")
+        elif name and known_planets and name not in known_planets:
+            errors.append(f"Modes : planète inconnue ({name}).")
+        elif mode not in MODES:
+            errors.append(f"Modes : le mode de {name or 'toutes les planètes'} doit être « ordre de la liste » ou « première possible ».")
+        else:
+            modes[name] = mode
+    return modes
+
+
+def mode_of(modes: dict[str, str], planet: str) -> str:
+    """Mode d'une planète : le sien, sinon celui des lignes « toutes les planètes », sinon le mode par défaut.
+    Les noms se comparent sans tenir compte de la casse ni des espaces en trop."""
+    wanted = " ".join(planet.split()).casefold()
+    for key, mode in modes.items():
+        if " ".join(key.split()).casefold() == wanted and key:
+            return mode
+    return modes.get("", DEFAULT_MODE)
+
+
 def validate(data: dict, known_planets: list[str] | None = None) -> dict:
     """Réglages complets et valides, ou ConstructionError avec la liste des problèmes (en français)."""
     errors: list[str] = []
+    modes = _clean_modes(data.get("modes"), known_planets, errors)
     planets, problem = _clean_planets(_planets_of(data), known_planets)
     if planets is None:
         errors.append(f"Planètes : {problem}")
@@ -110,7 +148,8 @@ def validate(data: dict, known_planets: list[str] | None = None) -> dict:
             queue.append({"building": building, "level": level, **({"planet": planet.strip()} if planet.strip() else {})})
     if errors:
         raise ConstructionError(errors)
-    return {"planets": planets, "queue": queue}
+    # « modes » n'est écrit que s'il y en a un : les anciens fichiers et réglages restent identiques
+    return {"planets": planets, "queue": queue, **({"modes": modes} if modes else {})}
 
 
 class ConstructionSettings:
@@ -167,4 +206,6 @@ def describe(settings: dict) -> str:
     if not settings["queue"]:
         return "aucune ligne de construction réglée"
     lines = ", ".join(f"{labels[line['building']]} niveau {line['level']}" + (f" ({line['planet']})" if line.get("planet") else "") for line in settings["queue"])
-    return f"{len(settings['queue'])} ligne(s) sur {where(settings['planets'])} : {lines}"
+    ordered = sorted(p or "toutes les planètes" for p, m in settings.get("modes", {}).items() if m == MODE_ORDER)
+    note = f" ; ordre strict de la liste : {', '.join(ordered)}" if ordered else ""
+    return f"{len(settings['queue'])} ligne(s) sur {where(settings['planets'])} : {lines}{note}"

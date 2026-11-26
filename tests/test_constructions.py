@@ -8,7 +8,7 @@ from dataclasses import replace
 import pytest
 from fastapi.testclient import TestClient
 
-from app.constructions import BUILDINGS, ConstructionError, ConstructionSettings, describe, validate
+from app.constructions import BUILDINGS, ConstructionError, ConstructionSettings, describe, mode_of, validate
 from app.features import FEATURES
 from app.main import create_app
 
@@ -153,6 +153,37 @@ def test_a_corrupt_file_gives_an_empty_list(tmp_path):
     assert ConstructionSettings(str(tmp_path)).get() == {"planets": [], "queue": []}
 
 
+# ------------------------------------------------------------------------------ modes de lancement par planète
+def test_modes_are_kept_only_when_set_and_default_to_the_first_payable_line():
+    assert "modes" not in validate({"queue": [LINE]})  # anciens réglages : strictement inchangés
+    saved = validate({"queue": [LINE], "modes": {"Egide": "order", "": "any"}})
+    assert saved["modes"] == {"Egide": "order", "": "any"}
+    assert mode_of({}, "Egide") == "any"
+    assert mode_of({"Egide": "order"}, "  egide ") == "order"
+    assert mode_of({"": "order"}, "Concorde") == "order"  # la planète sans mode propre suit celui des lignes « toutes les planètes »
+    assert mode_of({"": "order", "Concorde": "any"}, "Concorde") == "any"
+
+
+@pytest.mark.parametrize("modes", [{"Egide": "vite"}, {"Egide": 3}, {"X" * 61: "order"}, ["Egide"]])
+def test_a_bad_mode_is_refused_in_french(modes):
+    with pytest.raises(ConstructionError) as exc:
+        validate({"queue": [LINE], "modes": modes})
+    assert any(e.startswith("Modes :") for e in exc.value.errors)
+
+
+def test_the_mode_of_an_unknown_planet_is_refused_once_the_scan_is_known():
+    with pytest.raises(ConstructionError, match="planète inconnue"):
+        validate({"modes": {"Fantôme": "order"}}, known_planets=["Egide"])
+    assert validate({"modes": {"Fantôme": "order"}})["modes"] == {"Fantôme": "order"}  # acceptée au chargement
+
+
+def test_modes_survive_a_restart_and_show_in_the_summary(tmp_path):
+    store = ConstructionSettings(str(tmp_path))
+    store.replace({"queue": [LINE], "modes": {"Egide": "order"}})
+    assert ConstructionSettings(str(tmp_path)).get()["modes"] == {"Egide": "order"}
+    assert "ordre strict de la liste : Egide" in describe(store.get())
+
+
 # ------------------------------------------------------------------------------ API
 @pytest.fixture
 def api(settings, tmp_path):
@@ -210,3 +241,9 @@ def test_chosen_planets_must_come_from_the_scan(game_client):
 def test_the_construction_feature_with_an_empty_list_does_nothing(api):
     feature = next(f for f in FEATURES if f.id == "constructions")
     assert "rien à faire" in asyncio.run(feature.run(api.app.state.bot))
+
+
+def test_api_saves_and_returns_the_mode_of_a_planet(game_client):
+    res = game_client.put("/api/constructions", json={"queue": [LINE], "modes": {"": "order"}})
+    assert res.status_code == 200 and game_client.get("/api/constructions").json()["settings"]["modes"] == {"": "order"}
+    assert game_client.put("/api/constructions", json={"queue": [LINE], "modes": {"": "rapide"}}).status_code == 422

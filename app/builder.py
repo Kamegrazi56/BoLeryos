@@ -17,7 +17,7 @@ import re
 import time
 
 from . import human, interruptions
-from .constructions import BUILDINGS
+from .constructions import BUILDINGS, MODE_ORDER, mode_of
 from .numbers import norm, parse_amount
 from .planets import GameUiError, Interrupted
 from .transports import shortfall
@@ -427,7 +427,7 @@ class ConstructionPass:
                     self._mark_reached(planet, mine)
                     skipped += 1
                     continue
-                outcome = await self._planet(planet, mine)
+                outcome = await self._planet(planet, mine, strict=mode_of(settings.get("modes", {}), planet) == MODE_ORDER)
                 await self._remember(planet)
                 if outcome is None:
                     waiting += 1
@@ -518,8 +518,9 @@ class ConstructionPass:
             parts.append(stop)
         return " ; ".join(parts)
 
-    async def _planet(self, planet: str, queue: list[dict], after_transport: bool = False) -> str | None:
-        """Retourne « Mine de Fer niveau 41 sur Egide » si une construction est lancée, sinon None."""
+    async def _planet(self, planet: str, queue: list[dict], after_transport: bool = False, strict: bool = False) -> str | None:
+        """Retourne « Mine de Fer niveau 41 sur Egide » si une construction est lancée, sinon None.
+        `strict` (mode « ordre de la liste ») : si la première ligne à faire n'est pas payable, on n'en lance pas une autre."""
         tabs: list[str] = []
         for line in queue:
             tab = self._pages[line["building"]]
@@ -549,8 +550,10 @@ class ConstructionPass:
                 continue
             if card.disabled:
                 if after_transport or not await self._supplied(planet, label, card):
+                    if strict:
+                        return None  # on attend les ressources de cette ligne : les suivantes ne passent pas devant
                     continue
-                return await self._planet(planet, queue, after_transport=True)  # Piliers : les ressources sont déjà là
+                return await self._planet(planet, queue, after_transport=True, strict=strict)  # Piliers : les ressources sont déjà là
             return await self._launch(planet, label, line, tab, card)
         return None
 

@@ -304,7 +304,18 @@ def test_constructions_panel_raises_targets_from_the_levels_table(ui, game):
     assert page.locator("#cons-queue li[data-building]").count() == 4  # la liste montre une ligne par bâtiment et par planète
     # la liste est regroupée par planète (ordre du scan), un titre par planète, et la priorité se règle au sein de chaque planète
     assert page.locator("#cons-queue li[data-planet]").evaluate_all("l => l.map(x => x.dataset.planet)") == ["6-79-Egide", "6-79-Egide", "8-50-Concorde", "9-169-Strate"]
-    assert page.locator("#cons-queue li.group-head").evaluate_all("h => h.map(x => x.textContent)") == ["6-79-Egide · 2", "8-50-Concorde · 1", "9-169-Strate · 1"]
+    assert page.locator("#cons-queue li.group-head .group-toggle").evaluate_all("h => h.map(x => x.textContent)") == ["▾ 6-79-Egide · 2", "▾ 8-50-Concorde · 1", "▾ 9-169-Strate · 1"]
+    # menu déroulant par planète : un clic masque (puis réaffiche) les lignes de cette planète seulement
+    page.click("#cons-queue .group-toggle:has-text('6-79-Egide')")
+    assert page.locator("#cons-queue li[data-planet='6-79-Egide']").count() == 0 and page.locator("#cons-queue li[data-building]").count() == 2
+    assert page.get_attribute("#cons-queue .group-toggle:has-text('6-79-Egide')", "aria-expanded") == "false"
+    page.click("#cons-queue .group-toggle:has-text('6-79-Egide')")
+    assert page.locator("#cons-queue li[data-building]").count() == 4
+    # deux modes de lancement par planète, « dès que les ressources suffisent » par défaut ; le choix est enregistré pour cette planète
+    assert page.locator("#cons-queue select.mode").evaluate_all("s => s.map(x => x.value)") == ["any", "any", "any"]
+    page.select_option("#cons-queue select[aria-label='Mode de lancement : 8-50-Concorde']", "order")
+    page.wait_for_function("document.querySelector('#cons-msg').textContent.includes('Enregistré')", timeout=5000)
+    assert app.state.bot.constructions.get()["modes"] == {"8-50-Concorde": "order"}
     assert page.locator("button[aria-label='Monter : Caserne (8-50-Concorde)']").is_disabled()  # seule ligne de sa planète
     assert page.locator("button[aria-label='Monter : Mine de Fer (6-79-Egide)']").is_disabled()  # première de sa planète
     page.click("button[aria-label='Monter : Caserne (6-79-Egide)']")

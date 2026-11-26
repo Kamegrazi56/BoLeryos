@@ -131,6 +131,11 @@ table.cons-levels .group-toggle:focus-visible { outline: 2px solid var(--accent)
 .cons-queue .where.common { color: var(--muted); }
 .cons-queue li.group-head { padding: 4px 2px; border: 0; background: none; color: var(--accent); font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
 .cons-queue li.group-head:not(:first-child) { margin-top: 6px; }
+.cons-queue li.group-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cons-queue li.group-head .group-toggle { padding: 4px 6px; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; cursor: pointer; }
+.cons-queue li.group-head .group-toggle:hover { background: rgba(79, 216, 255, 0.08); }
+.cons-queue li.group-head .group-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cons-queue li.group-head select.mode { font-size: 12px; text-transform: none; letter-spacing: normal; font-weight: 400; }
 
 /* Recherches : tableau affiché en entier (ni hauteur maximale, ni barre de défilement) ; l'en-tête et la colonne ne sont donc pas collants */
 .res-wrap { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
