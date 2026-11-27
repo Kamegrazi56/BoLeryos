@@ -444,9 +444,9 @@ class ExcavationPass(ExplorationPass):
         if room <= 0:
             return f"plus de place de mission ({why})", None
         planet = slot["planet"]
-        site = next((x["address"] for x in self.store.daily()["sites"].get(planet, []) if x["address"] not in busy), None)
+        site = await self._free_site(planet, busy)
         if site is None:
-            self._skip(planet, "aucun site libre connu sans Fouille en cours")
+            await self._open_excavations()  # le relevé a laissé le bot sur la carte : la planète suivante lit les compteurs
             return "", None
         sentence = await self._launch(slot, site)
         if sentence is None:
@@ -456,6 +456,21 @@ class ExcavationPass(ExplorationPass):
         self.store.set_tracked(tracked)
         busy.add(site)
         return "", sentence
+
+    async def _free_site(self, planet: str, busy: set[str]) -> str | None:
+        """Relève les emplacements libres de la planète juste avant le lancement (le relevé du jour peut être périmé : un site
+        a pu être pris entre-temps) et renvoie le plus proche sans Fouille en cours. None : rien à lancer, la raison est au journal."""
+        try:
+            sites = await self._find_sites(planet)
+            await self._remember(planet)
+        except GameUiError as exc:
+            self._skip(planet, f"relevé des emplacements libres impossible : {exc}")
+            return None
+        self.store.add_sites({planet: sites}, [planet])  # le relevé du jour garde le dernier état connu
+        site = next((x["address"] for x in sites if x["address"] not in busy), None)
+        if site is None:
+            self._skip(planet, "aucun emplacement libre sans Fouille en cours")
+        return site
 
     @staticmethod
     def _report(launched: list[str], waiting: int, stop: str) -> str:

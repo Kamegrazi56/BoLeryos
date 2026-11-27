@@ -162,6 +162,17 @@ def test_an_unreadable_list_is_reported_instead_of_claiming_there_is_no_free_sit
     assert _launched(game) == []
 
 
+def test_free_sites_are_scanned_again_before_each_launch(game_client, game):
+    """Demande du joueur (GRAZI-53) : le relevé du jour peut être périmé ; le bot relève les positions libres avant chaque lancement."""
+    _scan(game_client)
+    _set(game_client, mira="", planets=[{"name": EGIDE, "copies": 2}])
+    stale = [{"address": "A00 00 00", "distance": 1.0, "source": "carte"}]  # site qui n'existe plus sur la carte
+    _bot(game_client).excavations.set_daily({EGIDE: stale}, 6, "test", tried=[EGIDE])
+    summary = _run(game_client)
+    assert [a["target"] for a in _launched(game)] == ["M58 80 21", "M68 75 95"], summary
+    assert [s["address"] for s in _bot(game_client).excavations.daily()["sites"][EGIDE]][:1] == ["M58 80 21"]
+
+
 def test_more_excavations_than_free_sites_go_planet_by_planet_until_the_game_is_full(game_client, game):
     """Demande du joueur (2026-11-22) : chaque planète lance autant de Fouilles que de sites trouvés, une planète sans site est
     sautée, et le bot s'arrête quand le jeu est plein."""
