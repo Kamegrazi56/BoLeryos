@@ -109,6 +109,10 @@ class GameHandle:
     def set_hack(self, **values) -> None:
         httpx.post(self.url + "/api/_hack", json=values, timeout=5).raise_for_status()
 
+    def set_room(self, planet: str, **room: int) -> None:
+        """Place restante des entrepôts de `planet` (par ressource) : au-delà, le jeu affiche « ne peut pas accueillir »."""
+        httpx.post(self.url + "/api/_room", json={"planet": planet, "room": room}, timeout=5).raise_for_status()
+
     def set_pillars(self, **values) -> None:
         httpx.post(self.url + "/api/_pillars", json=values, timeout=5).raise_for_status()
 

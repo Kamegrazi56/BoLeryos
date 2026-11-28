@@ -445,6 +445,10 @@ function trForm(p) {
   const colonies = '<div data-testid="raid-target-planets-list">' + state.planets.map((pl) => `<button type="button" class="colony" data-c="${pl.coords}"><span>${pl.name}</span> <span>${pl.coords}</span></button>`).join('') + '</div>';
   const rows = Object.entries(units).map(([n, c]) => `<div><span>${n}</span><span>Disponibles : ${int(c)}</span><input type="text" placeholder="0" class="unit" data-u="${n}" aria-label="Quantité ${n}" value="${f.units[n] || ''}"></div>`).join('');
   const cargo = RES3.map((r) => `<div><input type="text" placeholder="0" class="cargo" data-r="${r}" aria-label="Cargaison : ${r}" value="${f.cargo[r] || ''}"></div>`).join('');
+  // Vrai jeu (28/11) : encadré rouge au-dessus du bouton, qui reste cliquable ; ici le serveur refuse le lancement (409).
+  const dest = state.planets.find((pl) => pl.coords === f.target), room = (dest && dest.room) || {};
+  const full = RES3.some((r) => room[r] !== undefined && (+f.cargo[r] || 0) > room[r]);
+  const warning = full ? '<div role="alert"><span>La planète cible ne peut pas accueillir autant de ressources.</span></div>' : '';
   const label = ok ? (fleet ? 'Lancer la flotte' : 'Lancer le vortex') : (fleet ? 'LANCEMENT BLOQUÉ' : 'VORTEX BLOQUÉ');
   const dialog = ui.modelsOpen ? `<div role="dialog" aria-label="Modèles de ${ui.way}"><div class="dialog-body"><div><span>Modèles de ${ui.way}</span><button type="button" id="mclose" aria-label="Fermer">x</button></div>`
     + '<div><span>Modèles enregistrés</span>' + state.exp.models[METHOD()].map((m, i) => `<div><div><span>${m.name}</span><span>${Object.values(m.units).reduce((s, q) => s + q, 0)} Unités</span></div>`
@@ -454,7 +458,7 @@ function trForm(p) {
     + `<div><h3>2. Composition</h3><button type="button" id="models-btn">Modèles</button>${rows}</div><button type="button">Mobilisation générale</button>`
     + `<div><h3>3. Logistique et chargement</h3><span>Capacité de soute</span><span>${int(cap)} m³</span><span>Espace libre : ${int(cap - 480 * crew)} m³</span>${cargo}`
     + `<span>Temps de trajet</span><span>${ok && fleet ? '00:37:14' : '—'}</span>`
-    + `<button type="button" ${fleet ? 'id="raid-launch-btn"' : 'id="pillars-launch-btn"'} ${ok ? '' : 'disabled'}>${label}</button></div>` + dialog;
+    + warning + `<button type="button" ${fleet ? 'id="raid-launch-btn"' : 'id="pillars-launch-btn"'} ${ok ? '' : 'disabled'}>${label}</button></div>` + dialog;
 }
 // Alliance : onglets (Vue, Territoires, Techs) ; Techs = jetons + technologies (vrai jeu, 08/11).
 function allianceMain() {
@@ -925,6 +929,13 @@ def create_mock_game() -> FastAPI:
         st["pending"] = {"to": body["to"], "end": time.time() + 3600}
         return {"ok": True}
 
+    @app.post("/api/_room")
+    async def set_room(request: Request):
+        """Crochet de test : place restante des entrepôts d'une planète ({"planet", "room": {ressource: quantité}})."""
+        body = await request.json()
+        next(p for p in app.state.game["planets"] if p["name"] == body["planet"])["room"] = body["room"]
+        return {"ok": True}
+
     @app.post("/api/_pillars")
     async def set_pillars(request: Request):
         """Crochet de test : état des Piliers ({planète: {"closed", "pending_to", "end_in"}}) et clic sans effet."""
@@ -1192,7 +1203,9 @@ def create_mock_game() -> FastAPI:
         cargo = {k: int(v) for k, v in body["cargo"].items() if int(v) > 0}
         dest = next((p for p in g["planets"] if p["coords"] == body["target"]), None)
         closed = (g["pillars"].get(planet["name"]) or {}).get("closed")
-        if dest is None or not cargo or any(planet["stocks"][k] < v for k, v in cargo.items()) or (body["method"] == "PILLARS" and closed):
+        room = (dest or {}).get("room") or {}  # place restante des entrepôts de la cible (crochet /api/_room)
+        if dest is None or not cargo or any(planet["stocks"][k] < v for k, v in cargo.items()) or (body["method"] == "PILLARS" and closed) \
+                or any(v > room.get(k, v) for k, v in cargo.items()):
             raise HTTPException(409, "transport refusé")
         for k, v in cargo.items():
             planet["stocks"][k] -= v

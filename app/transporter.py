@@ -36,6 +36,13 @@ HUMAN_EXTRA_SECONDS = (30.0, 300.0)  # délai variable ajouté au temps de vol (
 RETRY_COOLDOWN_SECONDS = 600.0  # après un envoi par les Piliers qui n'a pas suffi : pas de nouvel essai tout de suite
 LAUNCH_IDS = {"PILLARS": "#pillars-launch-btn", "FLEET": "#raid-launch-btn"}
 BLOCK_GAP_SECONDS = 0.3
+TARGET_CHECK_SECONDS = 0.8  # le jeu calcule l'avertissement de capacité juste après la saisie de la cargaison
+MAX_HALVINGS = 6  # cargaison réduite de moitié au plus 6 fois (jusqu'à 1/64) quand l'entrepôt de la cible est trop plein
+TARGET_FULL_WHY = "la planète cible ne peut pas accueillir ces ressources (entrepôt plein)"
+# Vrai jeu (capture du 28/11, Aurore-Bis) : encadré rouge « La planète cible ne peut pas accueillir autant de ressources. »
+# au-dessus du bouton de lancement, qui reste cliquable : c'est donc à nous de lire l'avertissement avant de cliquer.
+TARGET_FULL_JS = """() => [...document.querySelectorAll('main *')].some(
+  (e) => e.children.length === 0 && e.getClientRects().length > 0 && /ne peut pas accueillir/i.test(e.textContent || ''))"""
 SENT_NOTE = "arrivée immédiate"
 # Valeur qui suit « Temps de trajet » sur la page (relevé du vrai jeu : « — » tant que la mission n'est pas valide).
 TRAVEL_TIME_JS = """() => {
@@ -214,9 +221,26 @@ class TransportPass(ExplorationPass):
             if not await self._apply_model(model):
                 continue
             await self._fill_cargo(wanted)
-            if await wait_enabled(go, LAUNCH_WAIT_SECONDS):
-                return wanted, ""
+            ready, why = await self._ready(wanted, go)
+            if ready or why:
+                return ready, why  # la capacité de la cible ne dépend pas du modèle : inutile d'en essayer un autre
         return {}, await self._blocked_reason()
+
+    async def _ready(self, wanted: dict[str, int], go) -> tuple[dict[str, int], str]:
+        """Attend que le lancement soit possible, sans l'avertissement « la planète cible ne peut pas accueillir autant de
+        ressources » (le bouton reste actif : on le lit nous-mêmes). Avertissement : cargaison réduite de moitié, jusqu'à
+        MAX_HALVINGS fois. Retourne (cargaison prête, raison) ; ({}, "") = lancement grisé pour une autre raison."""
+        for _ in range(MAX_HALVINGS + 1):
+            await asyncio.sleep(TARGET_CHECK_SECONDS)
+            if await self.page.evaluate(TARGET_FULL_JS):
+                wanted = {k: v // 2 for k, v in wanted.items() if v // 2 > 0}
+                if not wanted:
+                    break
+                self.bot.log("Transport : la planète cible ne peut pas accueillir autant de ressources, cargaison réduite de moitié.", event=True)
+                await self._fill_cargo(wanted)
+                continue
+            return (wanted, "") if await wait_enabled(go, LAUNCH_WAIT_SECONDS) else ({}, "")
+        return {}, TARGET_FULL_WHY
 
     async def _blocked_reason(self) -> str:
         state = await self.page.evaluate(LAUNCH_STATE_JS)
@@ -239,9 +263,8 @@ class TransportPass(ExplorationPass):
             await self._set_quantity(name, count)
         wanted = fit_cargo(wanted, room)
         await self._fill_cargo(wanted)
-        if await wait_enabled(go, LAUNCH_WAIT_SECONDS):
-            return wanted, ""
-        return {}, await self._blocked_reason()
+        ready, why = await self._ready(wanted, go)
+        return (ready, "") if ready else ({}, why or await self._blocked_reason())
 
     async def _set_quantity(self, name: str, count: int) -> None:
         field = self.page.get_by_label(f"Quantité {name}", exact=True)

@@ -278,3 +278,29 @@ def test_a_ship_never_scanned_is_measured_on_the_page_before_the_send(game_clien
     _run(game_client)
     [sent] = _transports(game)
     assert sent["units"] == {TESTO: 1}
+
+
+# ------------------------------------------------------------------------------ entrepôt de la planète cible plein
+def test_the_cargo_is_halved_until_the_target_warehouse_can_take_it(game_client, game):
+    """Concorde ne peut plus recevoir que 80 M de Fer : 143,8 M → 71,9 M (une seule réduction de moitié)."""
+    _scan(game_client)
+    assert game_client.put("/api/constructions", json={"planets": [], "queue": [MINE_CONCORDE]}).status_code == 200
+    game.set_room(CONCORDE, Fer=80_000_000)
+    _set(game_client)
+    _run(game_client)
+    [sent] = _transports(game)
+    assert 0 < sent["cargo"]["Fer"] <= 80_000_000
+    events = " ".join(e["msg"] for e in game_client.get("/api/events").json())
+    assert "ne peut pas accueillir autant de ressources, cargaison réduite de moitié" in events
+
+
+def test_a_full_target_warehouse_sends_nothing_and_says_why(game_client, game):
+    _scan(game_client)
+    assert game_client.put("/api/constructions", json={"planets": [], "queue": [MINE_CONCORDE]}).status_code == 200
+    game.set_room(CONCORDE, Fer=0, Cristal=0)
+    _set(game_client)
+    _run(game_client)
+    assert _transports(game) == [] and _built(game) == []
+    events = " ".join(e["msg"] for e in game_client.get("/api/events").json())
+    assert "entrepôt plein" in events and "rien n'a pu être envoyé" in events
+    assert _bot(game_client).transporter.cooling(CONCORDE)  # pas de nouvel essai à chaque boucle
