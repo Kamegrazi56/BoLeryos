@@ -35,6 +35,8 @@ class DiscordState:
     edits: list[dict] = field(default_factory=list)  # contenus de « @original »
     dm_refused: bool = False  # messages privés fermés : la création du salon répond 403
     dms: list[dict] = field(default_factory=list)  # messages privés reçus : {"to", "content"}
+    channel_messages: dict[str, list[dict]] = field(default_factory=dict)  # messages d'un salon : {"id", "author", "content", "components"}
+    refused_channels: set[str] = field(default_factory=set)  # salons qui répondent 403 (droits manquants)
 
 
 def create_mock_discord(state: DiscordState) -> FastAPI:
@@ -84,8 +86,35 @@ def create_mock_discord(state: DiscordState) -> FastAPI:
 
     @app.post("/channels/{channel_id}/messages")
     async def send_message(channel_id: str, request: Request):
-        state.dms.append({"to": channel_id.removeprefix("dm-"), "content": (await request.json())["content"]})
-        return {}
+        body = await request.json()
+        if channel_id.startswith("dm-"):
+            state.dms.append({"to": channel_id.removeprefix("dm-"), "content": body["content"]})
+            return {}
+        if channel_id in state.refused_channels:
+            return _missing_access()
+        messages = state.channel_messages.setdefault(channel_id, [])
+        message = {"id": f"9000000000000000{len(messages) + 1:02d}", "author": {"id": APP_ID}, **body}
+        messages.append(message)
+        return message
+
+    @app.get("/channels/{channel_id}/messages")
+    async def list_messages(channel_id: str):
+        if channel_id in state.refused_channels:
+            return _missing_access()
+        return list(reversed(state.channel_messages.get(channel_id, [])))
+
+    @app.get("/channels/{channel_id}/messages/{message_id}")
+    async def read_message(channel_id: str, message_id: str):
+        found = next((m for m in state.channel_messages.get(channel_id, []) if m["id"] == message_id), None)
+        return found if found is not None else JSONResponse({"message": "Unknown Message", "code": 10008}, status_code=404)
+
+    @app.patch("/channels/{channel_id}/messages/{message_id}")
+    async def edit_message(channel_id: str, message_id: str, request: Request):
+        found = next((m for m in state.channel_messages.get(channel_id, []) if m["id"] == message_id), None)
+        if found is None:
+            return JSONResponse({"message": "Unknown Message", "code": 10008}, status_code=404)
+        found.update(await request.json())
+        return found
 
     @app.websocket("/gw/")
     async def gateway_socket(ws: WebSocket):
@@ -115,6 +144,10 @@ def create_mock_discord(state: DiscordState) -> FastAPI:
             closing.cancel()
 
     return app
+
+
+def _missing_access():
+    return JSONResponse({"message": "Missing Access", "code": 50001}, status_code=403)
 
 
 def _unauthorized():

@@ -25,6 +25,7 @@ class DiscordRequest(BaseModel):
     enabled: bool | None = None
     token: SecretStr | None = Field(default=None, max_length=200)
     confirm: bool | None = None
+    panel_channel: str | None = Field(default=None, max_length=40)  # "" : retire le panneau
 
 
 def build_discord(data_dir: str | None, manager: InstanceManager) -> tuple[DiscordStore, DiscordService]:

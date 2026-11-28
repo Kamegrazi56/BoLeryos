@@ -6,7 +6,8 @@ Pas à pas :
   1. lire l'application (identifiant et propriétaire) et les serveurs où le bot est invité ; y déclarer les commandes ;
   2. ouvrir la passerelle (WebSocket), s'identifier, battre le « cœur » à la cadence demandée ; déclarer aussi les
      commandes sur tout serveur où le bot est invité plus tard ;
-  3. à chaque commande : vérifier que l'auteur est le propriétaire de l'application (ou membre de son équipe), répondre
+  3. publier (ou remettre à jour) le panneau de boutons dans le salon choisi, une seule fois (`discord_panel.py`) ;
+  4. à chaque commande ou clic : vérifier que l'auteur est le propriétaire de l'application (ou membre de son équipe), répondre
      « en cours », exécuter (`CommandRunner`), puis remplacer la réponse par le résultat — visible de lui seul.
 """
 
@@ -20,6 +21,7 @@ import httpx
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, WebSocketException
 
+from . import discord_panel as panel_mod
 from .discord_commands import COMMAND_DEFINITIONS, CommandRunner, Reply
 from .discord_store import DiscordStore
 
@@ -58,6 +60,9 @@ class DiscordClient:
         self._owners: set[str] = set()  # seuls ces comptes peuvent commander : le propriétaire de l'application
         self._guilds: set[str] = set()  # serveurs où les commandes sont déclarées
         self._notice = ""  # remarque à montrer au joueur (ex. bot invité nulle part), sans couper la connexion
+        self._panel = panel_mod.Panel(runner)
+        self._panel_lock = asyncio.Lock()  # deux synchronisations en même temps publieraient deux panneaux
+        self._panel_error = ""
         self._seq: int | None = None
         self._session_id = ""
         self._resume_url = ""
@@ -139,7 +144,10 @@ class DiscordClient:
             self._notice = "Le bot n'est invité sur aucun serveur Discord : invitez-le sur votre serveur privé."
         elif self._guilds:
             self._notice = ""
-        self.error = self._notice
+        self.error = self._shown()
+
+    def _shown(self) -> str:
+        return " ".join(t for t in (self._notice, self._panel_error) if t)
 
     # ------------------------------------------------------------------ passerelle
     async def _pump(self, ws) -> None:
@@ -189,9 +197,10 @@ class DiscordClient:
     def _dispatch(self, event: str | None, data: dict) -> None:
         if event == "READY":
             self._session_id, self._resume_url = data.get("session_id", ""), data.get("resume_gateway_url", "")
-            self.state, self.error = "connected", self._notice
+            self.state, self.error = "connected", self._shown()
+            self._spawn(self._sync_panel())
         elif event == "RESUMED":
-            self.state, self.error = "connected", self._notice
+            self.state, self.error = "connected", self._shown()
         elif event == "GUILD_CREATE" and data.get("id"):
             self._spawn(self._register_guild(str(data["id"])))
         elif event == "INTERACTION_CREATE":
@@ -242,6 +251,9 @@ class DiscordClient:
 
     async def _on_button(self, data: dict) -> None:
         action = str(data["data"].get("custom_id", ""))
+        if panel_mod.is_panel(action):
+            await self._on_panel(data, action)
+            return
         await self._callback(data, 6, None)  # met à jour le message d'origine (sans nouveau message)
         if not action.startswith("ok:"):
             await self._edit_original(data, Reply("Annulé."))
@@ -250,8 +262,8 @@ class DiscordClient:
         reply = await self._runner.execute((command, sub), {"instance": instance} if instance else {}, True)
         await self._edit_original(data, reply)
 
-    async def _edit_original(self, data: dict, reply: Reply) -> None:
-        body: dict = {"content": reply.text, "components": []}
+    async def _edit_original(self, data: dict, reply: Reply, rows: list[dict] | None = None) -> None:
+        body: dict = {"content": reply.text, "components": rows or []}
         if reply.confirm:
             body["components"] = [{"type": 1, "components": [
                 {"type": 2, "style": 4, "label": "Confirmer", "custom_id": f"ok:{reply.confirm}"},
@@ -263,6 +275,72 @@ class DiscordClient:
         if payload is not None:
             body["data"] = payload
         await self._call("POST", f"/interactions/{data['id']}/{data['token']}/callback", json=body)
+
+    # ------------------------------------------------------------------ panneau de boutons
+    async def _on_panel(self, data: dict, custom_id: str) -> None:
+        """Clic dans le panneau : réservé au salon choisi (le propriétaire est déjà vérifié par `_handle`)."""
+        channel, _ = self._store.panel()
+        if not channel or data.get("channel_id") != channel:
+            await self._callback(data, 4, {"content": "Ce panneau ne fonctionne que dans son salon.", "flags": EPHEMERAL})
+            return
+        if panel_mod.is_update(custom_id):
+            outcome = await self._panel.handle(data)
+            await self._callback(data, 7, outcome.update)  # redessine le panneau : le choix y reste inscrit
+            return
+        ephemeral = bool((data.get("message") or {}).get("flags", 0) & EPHEMERAL)
+        if ephemeral:
+            await self._callback(data, 6, None)  # clic dans une réponse déjà privée : on la remplace
+        else:
+            await self._callback(data, 5, {"flags": EPHEMERAL})
+        outcome = await self._panel.handle(data)
+        await self._edit_original(data, outcome.reply or Reply("Rien à faire."), outcome.rows)
+
+    async def _sync_panel(self) -> None:
+        """Publie le panneau s'il n'existe pas, sinon le remet à jour sur place. Jamais deux panneaux."""
+        channel, message_id = self._store.panel()
+        if not channel:
+            self._panel_error = ""
+            return
+        async with self._panel_lock:
+            try:
+                await self._publish_panel(channel, message_id)
+                self._panel_error = ""
+            except DiscordRefused:
+                self._panel_error = ("Panneau non publié : le bot manque de droits dans le salon "
+                                     "(voir le salon, envoyer des messages, lire l'historique).")
+            except (httpx.HTTPError, DiscordFatal, KeyError, ValueError):
+                self._panel_error = "Panneau non publié : Discord n'a pas répondu, nouvel essai à la prochaine connexion."
+            if self.state == "connected":
+                self.error = self._shown()
+
+    async def _publish_panel(self, channel: str, message_id: str) -> None:
+        current = await self._panel_message(channel, message_id) if message_id else None
+        if current is None:  # message effacé ou jamais publié : un panneau déjà là (donnée perdue) est repris, pas doublé
+            current = await self._find_panel(channel)
+        if current is None:
+            body = self._panel.message()
+            created = (await self._call("POST", f"/channels/{channel}/messages", json=body)).json()
+            self._store.set_panel_message(str(created["id"]))
+            return
+        picked = panel_mod.chosen(current)  # on garde le choix de l'instance et de la fonction
+        body = self._panel.message(picked.get(panel_mod.PREFIX + "inst", panel_mod.ALL), picked.get(panel_mod.PREFIX + "fn", ""))
+        await self._call("PATCH", f"/channels/{channel}/messages/{current['id']}", json=body)
+        self._store.set_panel_message(str(current["id"]))
+
+    async def _panel_message(self, channel: str, message_id: str) -> dict | None:
+        try:
+            return (await self._call("GET", f"/channels/{channel}/messages/{message_id}")).json()
+        except DiscordRefused:
+            return None  # introuvable : la recherche qui suit dira si c'est un vrai manque de droits
+
+    async def _find_panel(self, channel: str) -> dict | None:
+        messages = (await self._call("GET", f"/channels/{channel}/messages", params={"limit": 50})).json()
+        for message in messages:
+            mine = str((message.get("author") or {}).get("id", "")) == self._app_id
+            if mine and any(str(c.get("custom_id", "")).startswith(panel_mod.PREFIX)
+                            for row in message.get("components") or [] for c in row.get("components") or []):
+                return message
+        return None
 
     # ------------------------------------------------------------------ messages envoyés sans qu'on les ait demandés
     async def notify_owners(self, text: str) -> bool:

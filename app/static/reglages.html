@@ -513,11 +513,13 @@
       <details class="help-box">
         <summary>Comment ça marche ?</summary>
         <p>Vous créez votre propre bot Discord (portail développeurs de Discord), vous l'invitez sur votre serveur privé, puis vous collez ici son jeton : rien d'autre à saisir. Seul le <strong>propriétaire du bot Discord</strong> (vous) peut commander, et vous seul voyez les réponses. Commandes : <code>/bot statut|demarrer|arreter</code>, <code>/instance liste|statut|demarrer|arreter</code>, <code>/fonction activer|desactiver</code>, <code>/journal</code>.</p>
+        <p><strong>Panneau de boutons</strong> : indiquez l'identifiant d'un salon (clic droit sur le salon › Copier l'identifiant, mode développeur de Discord activé) ; le bot y publie un message avec menus et boutons, une seule fois, et le remet à jour à chaque connexion. Il doit avoir le droit de voir le salon, d'y écrire et de lire l'historique. Laissez vide pour ne pas en avoir.</p>
         <p>Le jeton donne le contrôle de votre bot Discord : il est gardé à part dans le dossier de données, jamais affiché ni exporté.</p>
       </details>
       <p id="dc-status" class="status-line" role="status" aria-live="polite">Chargement…</p>
       <div class="fields">
         <label>Jeton du bot Discord <input id="dc-token" type="password" autocomplete="off" aria-label="Jeton du bot Discord"></label>
+        <label>Salon du panneau de boutons (identifiant) <input id="dc-panel" type="text" inputmode="numeric" autocomplete="off" aria-label="Identifiant du salon du panneau Discord"></label>
       </div>
       <div class="row">
         <label><input id="dc-confirm" type="checkbox"> Demander une confirmation avant d'arrêter</label>

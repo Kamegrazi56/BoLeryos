@@ -14,7 +14,8 @@ from pathlib import Path
 
 FILE_NAME = "discord.json"
 TOKEN_RE = re.compile(r"^[A-Za-z0-9._-]{40,120}$")
-DEFAULTS: dict = {"enabled": False, "token": "", "confirm": True}
+ID_RE = re.compile(r"^[0-9]{15,25}$")  # identifiant Discord (salon, message)
+DEFAULTS: dict = {"enabled": False, "token": "", "confirm": True, "panel_channel": "", "panel_message": ""}
 
 
 class DiscordSettingsError(Exception):
@@ -53,6 +54,11 @@ class DiscordStore:
         out["confirm"] = raw.get("confirm") is not False
         token = raw.get("token")
         out["token"] = token if isinstance(token, str) and TOKEN_RE.match(token) else ""
+        for key in ("panel_channel", "panel_message"):
+            value = raw.get(key)
+            out[key] = value if isinstance(value, str) and ID_RE.match(value) else ""
+        if not out["panel_channel"]:
+            out["panel_message"] = ""
         return out
 
     def token(self) -> str:
@@ -63,12 +69,22 @@ class DiscordStore:
         d = self._data
         return bool(d["enabled"] and d["token"])
 
+    def panel(self) -> tuple[str, str]:
+        """(salon du panneau, message du panneau) ; salon vide : pas de panneau."""
+        return self._data["panel_channel"], self._data["panel_message"]
+
+    def set_panel_message(self, message_id: str) -> None:
+        """Retient le message du panneau publié, pour le modifier (jamais le republier) après un redémarrage."""
+        if ID_RE.match(message_id) and self._data["panel_message"] != message_id:
+            self._data = {**self._data, "panel_message": message_id}
+            self._save()
+
     def get(self) -> dict:
         """Les réglages sans le jeton (voir l'en-tête du module)."""
         d = self._data
         hint = d["token"][-4:] if d["token"] else ""
         return {"enabled": d["enabled"], "has_token": bool(d["token"]), "token_hint": hint,
-                "confirm": d["confirm"], "persistent": self.persistent}
+                "confirm": d["confirm"], "panel_channel": d["panel_channel"], "persistent": self.persistent}
 
     def update(self, patch: dict) -> dict:
         """Applique les clés présentes ; un jeton vide laisse le jeton actuel. Lève `DiscordSettingsError`."""
@@ -82,6 +98,12 @@ class DiscordStore:
         for key in ("enabled", "confirm"):
             if key in patch:
                 merged[key] = bool(patch[key])
+        if "panel_channel" in patch:
+            channel = str(patch["panel_channel"] or "").strip()
+            if channel and not ID_RE.match(channel):
+                errors.append("Salon du panneau : identifiant numérique attendu (clic droit sur le salon › Copier l'identifiant).")
+            elif channel != merged["panel_channel"]:
+                merged["panel_channel"], merged["panel_message"] = channel, ""  # autre salon : un autre panneau
         if merged["enabled"] and not errors:
             if not merged["token"]:
                 errors.append("Jeton manquant.")

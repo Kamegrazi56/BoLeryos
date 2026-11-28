@@ -115,6 +115,10 @@ class CommandRunner:
         wanted = norm(typed)
         return [{"name": label[:100], "value": value} for label, value in pairs if wanted in norm(label) or wanted in value][:25]
 
+    def instances(self) -> list[dict]:
+        """Les instances (nom, univers, démarrée ou non) : de quoi dessiner les menus du panneau."""
+        return self._infos()
+
     # ------------------------------------------------------------------ outils
     def _infos(self) -> list[dict]:
         return self._manager.summary()["instances"]
