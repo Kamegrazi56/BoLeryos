@@ -5,8 +5,8 @@ par une ou plusieurs planètes « donneuses », par les Piliers (arrivée imméd
 choix fixe ; si les Piliers d'une donneuse sont fermés, le bot essaie le spatial, puis saute cette donneuse.
 
 Fichier `<data_dir>/transport.json` : {"enabled", "donors": [planètes], "method": "PILLARS"|"FLEET",
-"models": [modèles du moyen choisi, dans l'ordre d'essai], "fleet_models": [modèles Flotte du secours spatial, utilisés
-seulement quand la voie est « Piliers »], "margin": pourcentage par pas de 0,5}.
+"models": [modèles Piliers, dans l'ordre d'essai ; vide en voie Flotte], "ships": [vaisseaux relevés sur la planète donneuse,
+dans l'ordre d'emploi : la voie Flotte, ou le secours spatial quand la voie est « Piliers »], "margin": pourcentage par pas de 0,5}.
 Ce module ne clique sur rien : l'envoi est dans transporter.py.
 """
 
@@ -28,12 +28,13 @@ MARGIN_STEP = 0.5
 MAX_MARGIN = 50.0
 MAX_DONORS = 50
 MAX_MODELS = 10
+MAX_SHIPS = 20
 MAX_NAME_LENGTH = 80
 # L'en-tête du jeu arrondit les stocks (« 104,334 M » : au millier près, davantage en G) : sans cette petite avance, un envoi
 # « juste ce qui manque » peut rester quelques unités en dessous du coût et la construction resterait grisée.
 DISPLAY_SLACK = 1000
 
-DEFAULTS: dict = {"enabled": False, "donors": [], "method": "PILLARS", "models": [], "fleet_models": [], "margin": 0.0}
+DEFAULTS: dict = {"enabled": False, "donors": [], "method": "PILLARS", "models": [], "ships": [], "margin": 0.0}
 
 
 class TransportError(Exception):
@@ -69,7 +70,8 @@ def _clean_margin(raw, errors: list[str]) -> float:
     return round(steps) * MARGIN_STEP
 
 
-def validate(data: dict, known_planets: list[str] | None = None, known_models: dict | None = None) -> dict:
+def validate(data: dict, known_planets: list[str] | None = None, known_models: dict | None = None,
+             known_ships: list[str] | None = None) -> dict:
     """Réglages complets et valides, ou TransportError avec la liste des problèmes (en français)."""
     errors: list[str] = []
     merged = {**DEFAULTS, **{k: data[k] for k in DEFAULTS if k in data}}
@@ -80,19 +82,31 @@ def validate(data: dict, known_planets: list[str] | None = None, known_models: d
         errors.append("Voie : Piliers ou Flotte.")
         method = DEFAULTS["method"]
     donors = _clean_names(merged["donors"], "Planètes donneuses", MAX_DONORS, errors, known_planets)
-    known = known_models.get(method) if known_models else None
-    models = _clean_names(merged["models"], "Modèles", MAX_MODELS, errors, known)
-    fleet_models = _clean_names(merged["fleet_models"], "Modèles Flotte de secours", MAX_MODELS, errors, known_models.get("FLEET") if known_models else None)
+    # Les modèles ne servent qu'aux Piliers : en voie Flotte, ce sont les vaisseaux de la planète qui composent l'envoi.
+    models = _clean_names(merged["models"], "Modèles", MAX_MODELS, errors, known_models.get("PILLARS") if known_models else None) if method == "PILLARS" else []
+    ships = _clean_names(merged["ships"], "Vaisseaux", MAX_SHIPS, errors, known_ships)
     margin = _clean_margin(merged["margin"], errors)
     if merged["enabled"] is True and not errors:
         if not donors:
             errors.append("Choisissez au moins une planète donneuse.")
-        if not models:
+        if method == "PILLARS" and not models:
             errors.append("Choisissez au moins un modèle.")
+        if method == "FLEET" and not ships:
+            errors.append("Choisissez au moins un vaisseau (relevez d'abord ceux des planètes donneuses).")
     if errors:
         raise TransportError(errors)
-    return {"enabled": merged["enabled"], "donors": donors, "method": method, "models": models,
-            "fleet_models": fleet_models if method == "PILLARS" else [], "margin": margin}
+    return {"enabled": merged["enabled"], "donors": donors, "method": method, "models": models, "ships": ships, "margin": margin}
+
+
+def _migrated(saved: dict) -> dict:
+    """Ancien fichier (avant le relevé des vaisseaux) : les modèles Flotte ne sont plus utilisés. Une option réglée en voie
+    Flotte n'a plus de vaisseaux choisis : elle est désactivée plutôt que de partir avec une composition devinée."""
+    if "ships" in saved:
+        return saved
+    kept = {k: v for k, v in saved.items() if k != "fleet_models"}
+    if kept.get("method") == "FLEET":
+        kept["enabled"] = False
+    return kept
 
 
 class TransportSettings:
@@ -104,7 +118,7 @@ class TransportSettings:
             try:
                 saved = json.loads(self._path.read_text(encoding="utf8"))
                 if isinstance(saved, dict):
-                    self._data = validate(saved)  # planètes et modèles inconnus : acceptés au chargement
+                    self._data = validate(_migrated(saved))  # planètes, modèles et vaisseaux inconnus : acceptés au chargement
             except (OSError, ValueError, TransportError):
                 self._data = copy.deepcopy(DEFAULTS)  # fichier illisible ou refusé : option désactivée
 
@@ -116,8 +130,9 @@ class TransportSettings:
         return copy.deepcopy(self._data)
 
     def replace(self, data: dict, known_planets: Callable[[], list[str]] | None = None,
-                known_models: Callable[[], dict] | None = None) -> dict:
-        self._data = validate(data, known_planets() if known_planets else None, known_models() if known_models else None)
+                known_models: Callable[[], dict] | None = None, known_ships: Callable[[], list[str]] | None = None) -> dict:
+        self._data = validate(data, known_planets() if known_planets else None, known_models() if known_models else None,
+                              known_ships() if known_ships else None)
         self._save()
         return self.get()
 
@@ -152,6 +167,7 @@ def describe(settings: dict) -> str:
     """Phrase de résumé pour le journal."""
     if not settings["enabled"]:
         return "transport désactivé"
-    spare = f" ; secours spatial : {', '.join(settings['fleet_models'])}" if settings["fleet_models"] else ""
+    models = f"modèles : {', '.join(settings['models'])}" if settings["models"] else "sans modèle"
+    ships = f" ; vaisseaux : {', '.join(settings['ships'])}" if settings["ships"] else ""
     return (f"transport par {METHODS[settings['method']]} depuis {', '.join(settings['donors'])} "
-            f"(modèles : {', '.join(settings['models'])}{spare} ; marge {settings['margin']:g} %)")
+            f"({models}{ships} ; marge {settings['margin']:g} %)")

@@ -1,11 +1,12 @@
 // Option des constructions « Transporter les ressources manquantes » : planètes donneuses, voie (Piliers ou Flotte),
-// modèles du jeu, marge par pas de 0,5 %. Enregistrement automatique, comme la liste des constructions.
+// modèles Piliers du jeu ou vaisseaux relevés sur les planètes donneuses (avec leur soute), marge par pas de 0,5 %.
+// Enregistrement automatique, comme la liste des constructions.
 (() => {
   const { el } = window.ui;
   const $ = (id) => document.getElementById(id);
   const WAIT_MS = 500;
 
-  let data = { settings: null, planets: [], models: { PILLARS: [], FLEET: [] }, methods: { PILLARS: "Piliers", FLEET: "Flotte" }, margin_step: 0.5, margin_max: 50 };
+  let data = { settings: null, planets: [], models: { PILLARS: [], FLEET: [] }, ships: { planets: {}, names: [] }, methods: { PILLARS: "Piliers", FLEET: "Flotte" }, margin_step: 0.5, margin_max: 50 };
   let state = null; // réglages affichés (modifiés par le joueur)
   let saveTimer = null;
   let saving = false;
@@ -37,7 +38,7 @@
   }
 
   /** Liste de cases à cocher : `chosen` est la liste de noms retenus (modifiée sur place). */
-  function checks(title, names, chosen, empty) {
+  function checks(title, names, chosen, empty, detail) {
     const box = el("fieldset", { className: "tr-checks" }, el("legend", { textContent: title }));
     const shown = [...new Set([...names, ...chosen])].sort((a, b) => a.localeCompare(b, "fr", { numeric: true, sensitivity: "base" }));
     if (!shown.length) box.append(el("span", { className: "muted", textContent: empty }));
@@ -49,9 +50,43 @@
         if (!input.checked && at >= 0) chosen.splice(at, 1);
         change();
       });
-      box.append(el("label", { className: "tr-check" }, input, " " + name));
+      box.append(el("label", { className: "tr-check" }, input, " " + name + (detail ? detail(name) : "")));
     });
     return box;
+  }
+
+  const number = (n) => Number(n).toLocaleString("fr-FR");
+
+  /** Soute d'un vaisseau, d'après le dernier relevé (« — soute 2 968 928 m³ par vaisseau »). */
+  function shipDetail(name) {
+    for (const info of Object.values(data.ships.planets || {})) {
+      const ship = info.ships.find((s) => s.name === name && s.cargo);
+      if (ship) return ` — soute ${number(ship.cargo)} m³ par vaisseau`;
+    }
+    return " — soute inconnue";
+  }
+
+  /** Tableau du dernier relevé : pour chaque planète donneuse cochée, ses vaisseaux disponibles et leur soute. */
+  function roster() {
+    const box = el("div", { className: "tr-roster" });
+    state.donors.forEach((planet) => {
+      const info = (data.ships.planets || {})[planet];
+      const list = info ? info.ships.map((s) => `${s.name} : ${number(s.available)} dispo` + (s.cargo ? `, soute ${number(s.cargo)} m³` : "")).join(" · ") : "pas encore relevée";
+      box.append(el("p", { className: "muted", textContent: `${planet} — ${list || "aucun vaisseau"}` }));
+    });
+    return box;
+  }
+
+  async function scanShips() {
+    say("Relevé des vaisseaux en cours…");
+    try {
+      const res = await fetch("/api/transport/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ planets: state.donors }) });
+      const body = await res.json();
+      if (!res.ok) { say(errorText(body), "error"); return; }
+      data = body;
+      render();
+      say(body.error || "Vaisseaux relevés.", body.error ? "error" : "ok");
+    } catch { say("Relevé impossible : le bot ne répond pas.", "error"); }
   }
 
   function render() {
@@ -68,22 +103,19 @@
       way.append(el("label", { className: "tr-check" }, radio, ` ${text}${id === "FLEET" ? " (spatial)" : ""}`));
     });
     parts.push(way);
-    const none = "Aucun modèle relevé : utilisez « Relever les modèles » ci-dessous.";
-    parts.push(checks(`Modèles ${data.methods[state.method]} à utiliser (essayés dans l'ordre où ils sont cochés)`, data.models[state.method] || [], state.models, none));
     if (state.method === "PILLARS") {
-      parts.push(checks("Modèles Flotte de secours si les Piliers sont fermés", data.models.FLEET || [], state.fleet_models, none));
+      parts.push(checks("Modèles Piliers à utiliser (essayés dans l'ordre où ils sont cochés)", data.models.PILLARS || [], state.models, "Aucun modèle relevé : lancez le relevé des modèles de l'onglet Exploration."));
     }
+    const none = "Aucun vaisseau relevé : utilisez « Relever les vaisseaux » ci-dessous.";
+    const shipTitle = state.method === "PILLARS" ? "Vaisseaux de secours si les Piliers sont fermés" : "Vaisseaux à envoyer";
+    parts.push(checks(`${shipTitle} (utilisés dans l'ordre où ils sont cochés)`, data.ships.names || [], state.ships, none, shipDetail));
     const margin = el("input", { type: "number", min: "0", max: String(data.margin_max), step: String(data.margin_step), value: state.margin, ariaLabel: "Marge en pourcentage" });
     margin.addEventListener("input", () => { if (margin.value !== "") { state.margin = Number(margin.value); change(); } });
     parts.push(el("label", { className: "tr-check" }, "Marge à ajouter au manque : ", margin, " %"));
-    const scan = el("button", { type: "button", className: "secondary small", textContent: "Relever les modèles", title: "Relit les modèles Piliers et Flotte du jeu (le bot doit être dans une partie)" });
-    scan.addEventListener("click", async () => {
-      scan.disabled = true;
-      say("Relevé des modèles en cours…");
-      try { await fetch("/api/explorations/scan", { method: "POST" }); await load(true); say("Modèles relevés.", "ok"); } catch { say("Relevé impossible : le bot ne répond pas.", "error"); }
-      scan.disabled = false;
-    });
-    parts.push(scan);
+    const scan = el("button", { type: "button", className: "secondary small", textContent: "Relever les vaisseaux", title: "Lit les vaisseaux disponibles et leur soute sur chaque planète donneuse cochée (lecture seule ; le bot doit être dans une partie)" });
+    scan.addEventListener("click", scanShips);
+    scan.disabled = !state.donors.length;
+    parts.push(scan, roster());
     const focused = root.contains(document.activeElement) ? document.activeElement.getAttribute("aria-label") : null;
     root.replaceChildren(...parts);
     if (focused) { const again = [...root.querySelectorAll("[aria-label]")].find((n) => n.getAttribute("aria-label") === focused); if (again) again.focus(); }
@@ -100,5 +132,5 @@
     } catch { /* le bot redémarre : on réessaie */ }
   }
   load();
-  setInterval(load, 5000); // les planètes et les modèles arrivent après le scan
+  setInterval(load, 5000); // les planètes et les vaisseaux arrivent après le scan
 })();

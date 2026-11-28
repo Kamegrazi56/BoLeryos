@@ -436,9 +436,10 @@ function trForm(p) {
   const units = p.units[METHOD()], f = ui.form, fleet = METHOD() === 'FLEET';
   const valid = /^[A-Z]\\d{2} \\d{2} \\d{2}$/.test(f.target);
   const cap = Object.entries(f.units).reduce((s, [n, q]) => s + (+q || 0) * (CAPACITY[n] || 0), 0);
+  const crew = Object.values(f.units).reduce((s, q) => s + (+q || 0), 0);  // vrai jeu (28/11) : 480 m³ de soute pris par vaisseau
   const total = RES3.reduce((s, r) => s + (+f.cargo[r] || 0), 0);
   const closed = !fleet && (state.pillars[p.name] || {closed: false}).closed;
-  const ok = valid && cap > 0 && total > 0 && total <= cap && RES3.every((r) => (+f.cargo[r] || 0) <= p.stocks[r])
+  const ok = valid && cap > 0 && total > 0 && total <= cap - 480 * crew && RES3.every((r) => (+f.cargo[r] || 0) <= p.stocks[r])
     && !closed && (!fleet || missionsCount() < state.missions_max);
   // Vrai jeu (23/11) : « Vos colonies » = <div data-testid="raid-target-planets-list"> ; une entrée = un bouton avec deux textes (nom, adresse).
   const colonies = '<div data-testid="raid-target-planets-list">' + state.planets.map((pl) => `<button type="button" class="colony" data-c="${pl.coords}"><span>${pl.name}</span> <span>${pl.coords}</span></button>`).join('') + '</div>';
@@ -451,7 +452,7 @@ function trForm(p) {
   return `<div class="cible"><h3>Coordonnées</h3><label>Cible</label><input type="text" id="target" placeholder="G46 50 50" value="${f.target}">${valid ? `<span class="font-mono">${f.target}</span>` : ''}`
     + `<button type="button" aria-label="Vos colonies">VOS COLONIES</button>${colonies}</div>`
     + `<div><h3>2. Composition</h3><button type="button" id="models-btn">Modèles</button>${rows}</div><button type="button">Mobilisation générale</button>`
-    + `<div><h3>3. Logistique et chargement</h3><span>Capacité de soute</span><span>${int(cap)}</span>${cargo}`
+    + `<div><h3>3. Logistique et chargement</h3><span>Capacité de soute</span><span>${int(cap)} m³</span><span>Espace libre : ${int(cap - 480 * crew)} m³</span>${cargo}`
     + `<span>Temps de trajet</span><span>${ok && fleet ? '00:37:14' : '—'}</span>`
     + `<button type="button" ${fleet ? 'id="raid-launch-btn"' : 'id="pillars-launch-btn"'} ${ok ? '' : 'disabled'}>${label}</button></div>` + dialog;
 }

@@ -119,8 +119,12 @@ class TransportRequest(BaseModel):
     donors: list[str] = Field(default_factory=list, max_length=50)
     method: str = Field(default="PILLARS", max_length=10)
     models: list[str] = Field(default_factory=list, max_length=10)
-    fleet_models: list[str] = Field(default_factory=list, max_length=10)
+    ships: list[str] = Field(default_factory=list, max_length=20)
     margin: float = Field(default=0.0, ge=0, le=TRANSPORT_MAX_MARGIN)
+
+
+class TransportScanRequest(BaseModel):
+    planets: list[str] | None = Field(default=None, max_length=50)  # planètes cochées à l'écran, pas encore enregistrées ; absent : les donneuses enregistrées
 
 
 class ResearchLine(BaseModel):
@@ -646,6 +650,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "settings": bot.transports.get(),
             "planets": _known_planets(),
             "models": bot.explorations.known_models(),
+            "ships": bot.transport_ships.get(),
+            "scanning": bot.transporter.scanning,
             "methods": METHODS,
             "margin_step": TRANSPORT_MARGIN_STEP,
             "margin_max": TRANSPORT_MAX_MARGIN,
@@ -660,11 +666,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def api_transport_put(body: TransportRequest, request: Request):
         _check_origin(request)
         try:
-            bot.transports.replace(body.model_dump(), _known_planets, bot.explorations.known_models)
+            bot.transports.replace(body.model_dump(), _known_planets, bot.explorations.known_models, bot.transport_ships.known_names)
         except TransportError as exc:
             raise HTTPException(422, detail=exc.errors) from exc
         bot.transporter._unconfirmed = 0  # le joueur a revu l'option : on repart de zéro
         return JSONResponse(_transport_payload(), headers=NO_STORE)
+
+    @app.post("/api/transport/scan")
+    async def api_transport_scan(request: Request, body: TransportScanRequest | None = None):
+        """Relève les vaisseaux (et leur soute) de chaque planète donneuse cochée. Lecture seule, rien n'est lancé."""
+        _check_origin(request)
+        asked = body.planets if body and body.planets is not None else bot.transports.get()["donors"]
+        known = _known_planets()
+        planets = [p for p in dict.fromkeys(asked) if p in known]  # seulement des planètes connues du scan
+        result = await bot.transporter.scan_ships(planets, "manuel")
+        return JSONResponse({**_transport_payload(), "error": result["error"]}, headers=NO_STORE)
 
     # --- Recherches : liste d'objectifs (recherche + niveau cible) et planète chargée des recherches ----------
     @app.get("/api/researches")

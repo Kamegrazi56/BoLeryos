@@ -6,6 +6,7 @@ Relevé sur le vrai jeu (2026-11-23, Asterion, lecture seule) :
     bloc 3 « Logistique et chargement » (« Capacité de soute », champs « Cargaison : Fer|Cristal|Éther ») ;
   - bouton de lancement `#raid-launch-btn` (Flotte, « LANCEMENT BLOQUÉ » tant qu'il est grisé) ou `#pillars-launch-btn`
     (Piliers, « VORTEX BLOQUÉ »). Par les Piliers l'envoi est instantané ; par la Flotte il prend une place de mission.
+Par la Flotte, la composition se fait vaisseau par vaisseau (voir transport_ships.py), pas par modèle enregistré.
 Le bot ne touche jamais à « Mobilisation générale », « Réinitialiser » ni aux boutons de Piliers ou de champ de force.
 """
 
@@ -25,6 +26,7 @@ from .explorer import CLEAR_MARK_JS, LAUNCH_STATE_JS, MARK_TARGET_JS, TARGET_ATT
 from .numbers import parse_amount
 from .planets import GameUiError, Interrupted
 from .slots import MISSIONS_COUNT_JS, allowance
+from .transport_ships import HOLD_JS, SHIP_ROWS_JS, fit_cargo, parse_available, parse_volume, pick_ships
 from .transports import RESOURCES, with_margin
 
 PAGE_WAIT_SECONDS = 10.0
@@ -140,28 +142,29 @@ class TransportPass(ExplorationPass):
     async def _from_donor(self, donor: str, target: str, coords: str, remaining: dict[str, int], s: dict,
                           reasons: list[str]) -> tuple[str, dict[str, int]] | None:
         """Essaie la voie choisie, puis le secours spatial si les Piliers sont fermés ou refusent. None : donneuse sautée."""
-        attempts = [(s["method"], s["models"])]
+        attempts = [(s["method"], s["ships"] if s["method"] == "FLEET" else s["models"])]
         if s["method"] == "PILLARS":
             if _closed_piliers(self.bot, donor):
                 self.bot.log(f"Transport : Piliers fermés sur {donor}, essai en spatial.", event=True)
                 attempts = []
-            if s["fleet_models"]:
-                attempts.append(("FLEET", s["fleet_models"]))
-        for method, models in attempts:
-            sent, why = await self._send(donor, target, coords, remaining, method, models)
+            if s["ships"]:
+                attempts.append(("FLEET", s["ships"]))
+        for method, choice in attempts:
+            sent, why = await self._send(donor, target, coords, remaining, method, choice)
             if sent:
                 return method, sent
             reasons.append(f"{donor} ({METHODS[method]}) : {why}")
             if method == "PILLARS":
                 self.bot.log(f"Transport : envoi par les Piliers impossible depuis {donor} ({why})"
-                             + (", essai en spatial." if s["fleet_models"] else "."), event=True)
+                             + (", essai en spatial." if s["ships"] else "."), event=True)
         if not attempts:
-            reasons.append(f"{donor} : Piliers fermés et aucun modèle Flotte de secours choisi")
+            reasons.append(f"{donor} : Piliers fermés et aucun vaisseau de secours choisi")
         return None
 
     async def _send(self, donor: str, target: str, coords: str, remaining: dict[str, int], method: str,
-                    models: list[str]) -> tuple[dict[str, int], str]:
-        """Prépare et lance un envoi depuis `donor`. Retourne (quantités envoyées, raison de l'échec)."""
+                    choice: list[str]) -> tuple[dict[str, int], str]:
+        """Prépare et lance un envoi depuis `donor`. `choice` : modèles (Piliers) ou vaisseaux (Flotte), dans l'ordre d'essai.
+        Retourne (quantités envoyées, raison de l'échec)."""
         page = self.page
         if method == "FLEET":
             room, why = await self._room()
@@ -176,18 +179,9 @@ class TransportPass(ExplorationPass):
         if not await self._pick_target(target, coords):
             return {}, f"destination {target} refusée par le jeu"
         go = page.locator(LAUNCH_IDS[method])
-        ready = False
-        for model in models:
-            if not await self._apply_model(model):
-                continue
-            await self._fill_cargo(wanted)
-            if await wait_enabled(go, LAUNCH_WAIT_SECONDS):
-                ready = True
-                break
-        if not ready:
-            state = await page.evaluate(LAUNCH_STATE_JS)
-            shown = " ; ".join(state["buttons"] + state["facts"]) or "rien de lisible"
-            return {}, f"lancement impossible avec les modèles choisis ; la page affiche : {shown}"
+        wanted, why = await self._compose(donor, method, choice, wanted, go)
+        if not wanted:
+            return {}, why
         sent = await self._cargo_values(wanted)
         self._travel = parse_travel(await page.evaluate(TRAVEL_TIME_JS)) if method == "FLEET" else None
         before, rates, at = await self._stocks_timed()
@@ -195,6 +189,9 @@ class TransportPass(ExplorationPass):
         await human.think(self.settings)
         await human.click(page, go.first, self.settings)
         sentence = ", ".join(f"{qty} {name}" for name, qty in sent.items()) + f" de {donor} vers {target} ({METHODS[method]})"
+        return await self._confirm_send(before, rates, at, sent, sentence)
+
+    async def _confirm_send(self, before: dict, rates: dict, at: float, sent: dict[str, int], sentence: str) -> tuple[dict[str, int], str]:
         if await self._stock_debited(before, rates, at, sent):
             self._unconfirmed = 0
             self.bot.log(f"Transport lancé : {sentence}.", event=True, kind="launch")
@@ -206,6 +203,118 @@ class TransportPass(ExplorationPass):
             self.bot.log("Transport désactivé : deux envois de suite non confirmés. Vérifiez à l'écran avant de le réactiver.", "error", event=True, kind="attention")
             raise Interrupted("transport désactivé après deux envois non confirmés")
         return {}, "envoi non confirmé"
+
+    async def _compose(self, donor: str, method: str, choice: list[str], wanted: dict[str, int],
+                       go) -> tuple[dict[str, int], str]:
+        """Compose l'envoi et remplit la cargaison jusqu'à ce que le lancement soit possible.
+        Retourne (cargaison prête, raison d'échec) ; cargaison vide = échec."""
+        if method == "FLEET":
+            return await self._compose_ships(donor, choice, wanted, go)
+        for model in choice:
+            if not await self._apply_model(model):
+                continue
+            await self._fill_cargo(wanted)
+            if await wait_enabled(go, LAUNCH_WAIT_SECONDS):
+                return wanted, ""
+        return {}, await self._blocked_reason()
+
+    async def _blocked_reason(self) -> str:
+        state = await self.page.evaluate(LAUNCH_STATE_JS)
+        shown = " ; ".join(state["buttons"] + state["facts"]) or "rien de lisible"
+        return f"lancement impossible avec la composition choisie ; la page affiche : {shown}"
+
+    async def _compose_ships(self, donor: str, chosen: list[str], wanted: dict[str, int], go) -> tuple[dict[str, int], str]:
+        """Voie Flotte : le nombre de vaisseaux est calculé pour porter la cargaison (soute lue sur le jeu), dans la limite de
+        ceux qui sont disponibles sur la planète à cet instant ; si la soute ne suffit pas, la cargaison est réduite d'autant."""
+        page = self.page
+        available = parse_available(await page.evaluate(SHIP_ROWS_JS))
+        hold: dict[str, int] = {}
+        for name in chosen:
+            if available.get(name, 0) > 0:
+                hold[name] = self.bot.transport_ships.hold_of(name) or await self._measure(name) or 0
+        counts, room = pick_ships(chosen, available, hold, sum(wanted.values()))
+        if not counts:
+            return {}, "aucun des vaisseaux choisis n'est disponible sur la planète (ou leur soute est inconnue)"
+        for name, count in counts.items():
+            await self._set_quantity(name, count)
+        wanted = fit_cargo(wanted, room)
+        await self._fill_cargo(wanted)
+        if await wait_enabled(go, LAUNCH_WAIT_SECONDS):
+            return wanted, ""
+        return {}, await self._blocked_reason()
+
+    async def _set_quantity(self, name: str, count: int) -> None:
+        field = self.page.get_by_label(f"Quantité {name}", exact=True)
+        if not await field.count():
+            raise GameUiError(f"champ « Quantité {name} » introuvable")
+        await self._guard()
+        await human.click(self.page, field.first, self.settings)
+        await field.first.fill(str(count) if count else "")
+
+    async def _measure_ship(self, name: str) -> tuple[int | None, int | None]:
+        """(capacité de soute, espace libre) d'UN vaisseau : on en met un dans la composition, on lit la page, on le retire."""
+        await self._set_quantity(name, 1)
+        try:
+            end = time.monotonic() + LAUNCH_WAIT_SECONDS
+            while time.monotonic() < end:
+                hold = await self.page.evaluate(HOLD_JS)
+                cargo, free = parse_volume(hold["capacity"]), parse_volume(hold["free"])
+                if cargo:
+                    return cargo, free
+                await asyncio.sleep(0.25)
+            return None, None
+        finally:
+            await self._set_quantity(name, 0)
+
+    async def _measure(self, name: str) -> int | None:
+        cargo, free = await self._measure_ship(name)
+        return free or cargo
+
+    # ------------------------------------------------------------------ relevé des vaisseaux des planètes donneuses
+    async def scan_ships(self, planets: list[str], source: str) -> dict:
+        """Relève, planète par planète, les vaisseaux disponibles et la soute d'un vaisseau (lecture seule : rien n'est lancé).
+        Ne lève jamais : renvoie {"error": raison} (vide si tout s'est bien passé)."""
+        if self.scanning:
+            return {"error": "relevé déjà en cours"}
+        if not planets:
+            return {"error": "Choisissez d'abord au moins une planète donneuse."}
+        busy = "une fonctionnalité est en cours, réessayez dans un instant" if self.bot.work.locked() else None
+        reason = self.bot.supervisor.game_blocker() or busy
+        if reason:
+            return {"error": reason[0].upper() + reason[1:]}
+        self.scanning = True
+        try:
+            async with self.bot.work:  # jamais en même temps qu'un passage de fonctionnalité
+                await self.bot.claim_bonus()
+                problems = await self._scan_each(planets)
+            self.bot.log(f"Transport : vaisseaux relevés ({source}) sur {len(planets) - len(problems)} planète(s)"
+                         + (f" — {' ; '.join(problems)}" if problems else "") + ".", "warn" if problems else "info", event=True)
+            return {"error": " ; ".join(problems)}
+        except (Interrupted, GameUiError) as exc:
+            self.bot.log(f"Transport : relevé des vaisseaux impossible ({exc}).", "warn", event=True)
+            return {"error": f"Relevé impossible : {exc}"}
+        finally:
+            self.scanning = False
+
+    async def _scan_each(self, planets: list[str]) -> list[str]:
+        problems: list[str] = []
+        for planet in planets:
+            try:
+                self.bot.transport_ships.set_planet(planet, await self._read_ships(planet))
+            except GameUiError as exc:
+                problems.append(f"{planet} : {exc}")  # l'ancien relevé de cette planète est gardé
+        return problems
+
+    async def _read_ships(self, planet: str) -> list[dict]:
+        await self._open_transport("FLEET")
+        await self._select_planet(planet)
+        await self._settle(planet)
+        available = parse_available(await self.page.evaluate(SHIP_ROWS_JS))
+        ships = []
+        for name, count in available.items():
+            cargo, free = await self._measure_ship(name) if count > 0 else (None, None)  # sans vaisseau, le jeu ne laisse rien saisir
+            ships.append({"name": name, "available": count, "cargo": cargo, "free": free})
+        return ships
 
     # ------------------------------------------------------------------ page Opérations › Transport
     async def _open_transport(self, method: str) -> None:

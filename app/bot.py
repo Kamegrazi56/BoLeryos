@@ -47,6 +47,7 @@ from .shipyard import ComponentPass, ShipPass
 from .explorations import ExplorationStore
 from .explorer import ExplorationPass
 from .transporter import TransportPass
+from .transport_ships import ShipRoster
 from .transports import TransportSettings
 from .features import FEATURES, FeatureStore
 from . import bonus, planning, recovery
@@ -197,6 +198,7 @@ class BotSession:
         self.explorations = ExplorationStore(settings.data_dir)  # réglages d'exploration + relevé du jour (brèches, modèles)
         self.explorer = ExplorationPass(self, self.explorations)  # explorations vers la brèche la plus proche de chaque planète
         self.transports = TransportSettings(settings.data_dir)  # option « transporter les ressources manquantes » des constructions
+        self.transport_ships = ShipRoster(settings.data_dir)  # vaisseaux relevés sur les planètes donneuses (avec leur soute)
         self.transporter = TransportPass(self)  # envoi des ressources manquantes depuis les planètes donneuses
         self.excavations = ExcavationStore(settings.data_dir)  # Fouilles : lignes, délai, relevé du jour, Fouilles suivies
         self.excavator = ExcavationPass(self, self.excavations)  # Fouilles vers le site libre le plus proche
