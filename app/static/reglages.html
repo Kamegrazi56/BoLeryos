@@ -31,6 +31,7 @@
         <button role="tab" id="tab-account" data-tab="account" aria-controls="panel-account">Compte et univers</button>
         <button role="tab" id="tab-features" data-tab="features" aria-controls="panel-features">Fonctionnalités</button>
         <button role="tab" id="tab-planning" data-tab="planning" aria-controls="panel-planning">Planning</button>
+        <button role="tab" id="tab-discord" data-tab="discord" aria-controls="panel-discord">Discord</button>
         <p class="side-group" aria-hidden="true">Économie</p>
         <button role="tab" id="tab-constructions" data-tab="constructions" aria-controls="panel-constructions">Constructions<span class="dot" data-dot="constructions" aria-hidden="true"></span></button>
         <button role="tab" id="tab-researches" data-tab="researches" aria-controls="panel-researches">Recherches<span class="dot" data-dot="researches" aria-hidden="true"></span></button>
@@ -505,6 +506,32 @@
       </div>
       <div class="row actions"><button id="ally-save" type="button">Enregistrer</button><p id="ally-msg" class="msg" role="status" aria-live="polite"></p></div>
     </section>
+    <section class="tabpanel card" id="panel-discord" role="tabpanel" aria-labelledby="tab-discord" hidden>
+      <header class="panel-head">
+        <div><p class="eyebrow">Bot</p><h2 id="dc-title">Discord</h2><p class="lede">Piloter le bot et chaque instance depuis Discord, avec des commandes. Réglage commun à toutes les instances.</p></div>
+      </header>
+      <details class="help-box">
+        <summary>Comment ça marche ?</summary>
+        <p>Vous créez votre propre bot Discord (portail développeurs de Discord), vous l'invitez sur votre serveur, puis vous collez ici son jeton et vos numéros Discord. Seul <strong>vous</strong> pouvez commander, et vous seul voyez les réponses. Commandes : <code>/bot statut|demarrer|arreter</code>, <code>/instance liste|statut|demarrer|arreter</code>, <code>/fonction activer|desactiver</code>, <code>/journal</code>.</p>
+        <p>Le jeton donne le contrôle de votre bot Discord : il est gardé à part dans le dossier de données, jamais affiché ni exporté. Les numéros se copient dans Discord avec le « mode développeur » (clic droit › Copier l'identifiant).</p>
+      </details>
+      <p id="dc-status" class="status-line" role="status" aria-live="polite">Chargement…</p>
+      <div class="fields">
+        <label>Jeton du bot Discord <input id="dc-token" type="password" autocomplete="off" aria-label="Jeton du bot Discord"></label>
+        <label>Votre identifiant Discord <input id="dc-owner" type="text" inputmode="numeric" autocomplete="off" aria-label="Votre identifiant Discord"></label>
+        <label>Numéro du serveur Discord <input id="dc-guild" type="text" inputmode="numeric" autocomplete="off" aria-label="Numéro du serveur Discord"></label>
+        <label>Numéro du salon (facultatif) <input id="dc-channel" type="text" inputmode="numeric" autocomplete="off" aria-label="Numéro du salon"></label>
+      </div>
+      <div class="row">
+        <label><input id="dc-confirm" type="checkbox"> Demander une confirmation avant d'arrêter</label>
+        <label><input id="dc-enabled" type="checkbox"> Pilotage par Discord activé</label>
+      </div>
+      <div class="row actions">
+        <button id="dc-save" type="button">Enregistrer</button>
+        <button id="dc-forget" type="button" class="secondary">Oublier le jeton</button>
+        <p id="dc-msg" class="msg" role="status" aria-live="polite"></p>
+      </div>
+    </section>
     </div>
   </main>
   <script src="/static/instance.js"></script>
@@ -527,6 +554,7 @@
   <script src="/static/week-grid.js"></script>
   <script src="/static/planning.js"></script>
   <script src="/static/alliance.js"></script>
+  <script src="/static/discord.js"></script>
   <script src="/static/mining.js"></script>
   <script src="/static/pillars.js"></script>
   <script src="/static/fleets.js"></script>

@@ -105,7 +105,7 @@ def test_the_removed_features_have_no_settings_and_no_routes(ui):
     page, _, _ = ui
     page.goto(page.base + "/reglages")
     tabs = [t.strip().lower() for t in page.locator("[role=tab]").all_inner_texts()]
-    assert tabs == ["compte et univers", "fonctionnalités", "planning", "constructions", "recherches", "population", "assemblages", "composants", "places de mission", "exploration", "fouilles", "piratage", "forages", "piliers", "espionnage", "jetons d'alliance"]
+    assert tabs == ["compte et univers", "fonctionnalités", "planning", "discord", "constructions", "recherches", "population", "assemblages", "composants", "places de mission", "exploration", "fouilles", "piratage", "forages", "piliers", "flottes", "espionnage", "jetons d'alliance"]
     for tab in tabs:  # aucune section supprimée ne réapparaît, quel que soit l'onglet
         page.click(f'[role=tab]:has-text("{tab}")', strict=False)
         # titres seulement : « Expéditions simultanées » (Exploration) est un réglage, pas l'ancienne section Expéditions
@@ -544,12 +544,12 @@ def test_slots_panel_saves_the_places_kept_free_and_the_priority(ui):
     assert errors == []
 
 
-def test_settings_page_has_seventeen_tabs_and_only_one_panel_shows_at_a_time(ui):
+def test_settings_page_has_eighteen_tabs_and_only_one_panel_shows_at_a_time(ui):
     page, errors, _ = ui
     page.goto(page.base + "/reglages")
     # ordre du menu latéral : Bot, Économie, Opérations, Alliance
-    ids = ["account", "features", "planning", "constructions", "researches", "populations", "ships", "components", "slots", "explorations", "excavations", "hackings", "minings", "pillars", "fleets", "spying", "alliance"]
-    assert page.locator("[role=tab]").count() == 17
+    ids = ["account", "features", "planning", "discord", "constructions", "researches", "populations", "ships", "components", "slots", "explorations", "excavations", "hackings", "minings", "pillars", "fleets", "spying", "alliance"]
+    assert page.locator("[role=tab]").count() == 18
     for tab in ids:
         page.click(f"#tab-{tab}")
         assert page.get_attribute(f"#tab-{tab}", "aria-selected") == "true"
@@ -923,3 +923,20 @@ def test_a_line_removed_by_the_bot_disappears_from_the_page(ui):
     app.state.bot.components.replace({"queue": []})  # le bot retire la ligne atteinte
     page.wait_for_function("document.querySelectorAll('#cmp-queue li.empty-state').length === 1", timeout=8000)
     assert errors == []
+
+
+def test_discord_panel_saves_without_ever_showing_the_token(ui):
+    """Onglet Discord : le jeton se saisit mais ne se relit pas ; « Oublier le jeton » le retire."""
+    page, errors, _ = ui
+    token = "T" * 24 + "." + "u" * 6 + "." + "v" * 27
+    page.goto(page.base + "/reglages#discord")
+    page.fill("#dc-token", token)
+    page.fill("#dc-owner", "222222222222222222")
+    page.fill("#dc-guild", "333333333333333333")
+    page.click("#dc-save")
+    page.wait_for_function("document.querySelector('#dc-msg').textContent.includes('Enregistré')", timeout=5000)
+    assert page.input_value("#dc-token") == "" and "vvvv" in page.get_attribute("#dc-token", "placeholder")
+    assert token not in page.content() and page.is_enabled("#dc-forget")
+    page.click("#dc-forget")
+    page.wait_for_function("document.querySelector('#dc-forget').disabled", timeout=5000)
+    assert not errors

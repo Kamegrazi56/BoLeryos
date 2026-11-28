@@ -14,7 +14,7 @@ Interface au style inspiré d'Aleryos (espace profond, panneaux translucides, ac
 |---|---|
 | `/` **Accueil** | **Compte** (identifiant et mot de passe), **serveurs** du compte, **instances** (un bot par serveur : créer, démarrer, arrêter, supprimer), puis, pour l'instance affichée : **planètes scannées** (nom, coordonnées, stocks) et derniers événements. |
 | `/ecran` **Écran** | Vue en direct du navigateur du bot, contrôle manuel (jouer soi-même dans la même vue), choix d'univers et exploration de la structure du site. |
-| `/reglages` **Réglages** | 7 onglets : **Compte et univers** (délai entre les clics, moteur de lecture, scan des planètes ; plus de choix d'univers : il se choisit sur l'Accueil), **Fonctionnalités** (interrupteur, case **« Fonctionner hors planning »**, **minuteur entre X et Y minutes**, prochain passage en direct et ordre de **priorité** de chaque fonctionnalité) **Constructions** (liste ordonnée « bâtiment + niveau cible », toutes les planètes ou une seule, option **Transport de ressources** et tableau **Niveaux actuels** de chaque bâtiment sur chaque planète) et **Recherches** (liste ordonnée « recherche + niveau cible » des 23 recherches du Laboratoire, et **planète chargée des recherches** : une seule recherche à la fois, payée par cette planète ; lancement non vérifié sur le vrai jeu) et **Population** (tableau **Effectifs actuels** de chaque population sur chaque planète, avec, au-dessus, le choix Max / Quantité définie / Nombre à atteindre et l'interrupteur une fois / à chaque passage, appliqués par un bouton sur chaque case et en début de ligne ; une ligne par population recrutable : quantité fixe ou MAX, **à chaque passage ou une seule fois** (une fois par planète ; modifier la ligne la remet à zéro), ou effectif à atteindre ; planète au choix ou toutes, chacune traitée séparément ; liste ordonnée = priorité ; recrutement non vérifié sur le vrai jeu), **Assemblages** (bouton **Scanner les modèles** + une ligne par modèle de vaisseau : quantité fixe ou MAX, à chaque passage ou une seule fois, ou effectif à atteindre ; planètes : toutes, une seule ou plusieurs ; construit **uniquement avec des ressources**, mode Construction ; non vérifié sur le vrai jeu) et **Composants** (même principe que Population : tableau **Effectifs actuels** des 37 composants, en 6 catégories repliables, sur chaque planète, avec Max / Quantité définie / Nombre à atteindre, interrupteur une fois / à chaque passage et un bouton par case et en début de ligne ; une ligne par composant et par planète ; non vérifié sur le vrai jeu). Enregistrement automatique. |
+| `/reglages` **Réglages** | 7 onglets : **Compte et univers** (délai entre les clics, moteur de lecture, scan des planètes ; plus de choix d'univers : il se choisit sur l'Accueil), **Fonctionnalités** (interrupteur, case **« Fonctionner hors planning »**, **minuteur entre X et Y minutes**, prochain passage en direct et ordre de **priorité** de chaque fonctionnalité) **Constructions** (liste ordonnée « bâtiment + niveau cible », toutes les planètes ou une seule, option **Transport de ressources** et tableau **Niveaux actuels** de chaque bâtiment sur chaque planète) et **Recherches** (liste ordonnée « recherche + niveau cible » des 23 recherches du Laboratoire, et **planète chargée des recherches** : une seule recherche à la fois, payée par cette planète ; lancement non vérifié sur le vrai jeu) et **Population** (tableau **Effectifs actuels** de chaque population sur chaque planète, avec, au-dessus, le choix Max / Quantité définie / Nombre à atteindre et l'interrupteur une fois / à chaque passage, appliqués par un bouton sur chaque case et en début de ligne ; une ligne par population recrutable : quantité fixe ou MAX, **à chaque passage ou une seule fois** (une fois par planète ; modifier la ligne la remet à zéro), ou effectif à atteindre ; planète au choix ou toutes, chacune traitée séparément ; liste ordonnée = priorité ; recrutement non vérifié sur le vrai jeu), **Assemblages** (bouton **Scanner les modèles** + une ligne par modèle de vaisseau : quantité fixe ou MAX, à chaque passage ou une seule fois, ou effectif à atteindre ; planètes : toutes, une seule ou plusieurs ; construit **uniquement avec des ressources**, mode Construction ; non vérifié sur le vrai jeu) et **Composants** (même principe que Population : tableau **Effectifs actuels** des 37 composants, en 6 catégories repliables, sur chaque planète, avec Max / Quantité définie / Nombre à atteindre, interrupteur une fois / à chaque passage et un bouton par case et en début de ligne ; une ligne par composant et par planète ; non vérifié sur le vrai jeu). Enregistrement automatique. L'onglet **Discord** pilote le bot à distance (voir « Piloter le bot par Discord »). |
 | `/suivi` **Suivi** | **Journal** lisible (événements importants ; détails techniques en option). |
 
 Les anciennes adresses `/vision` et `/actions` redirigent vers `/ecran` et `/reglages`. Des pastilles **?** expliquent les réglages moins évidents.
@@ -61,7 +61,35 @@ Une **instance** est un bot sur un serveur du jeu : elle a son univers, ses rég
 - **Redémarrage du conteneur** : les instances qui tournaient reprennent leur connexion (une après l'autre, à quelques secondes d'écart), avec le bot sur **OFF** : rien ne se lance tant qu'on ne l'a pas remis sur ON (`AUTOSTART=0` pour désactiver la reprise).
 - **Suppression** : le dossier de l'instance est déplacé dans `/data/instances/.corbeille/`, jamais effacé.
 - Adresses : `/api/i/<instance>/…` et `/ws/i/<instance>/…` visent une instance ; sans préfixe, c'est la première. `compte` désigne la session de connexion (identifiants et liste des serveurs, sans instance). La gestion est sous `/api/instances`.
-- Disposition de `/data` : `account.json`, `account.key`, `browser-state.json` et `instances.json` à la racine ; `instances/<id>/` pour tout ce qui est propre à un serveur.
+- Disposition de `/data` : `account.json`, `account.key`, `browser-state.json`, `discord.json` et `instances.json` à la racine ; `instances/<id>/` pour tout ce qui est propre à un serveur.
+
+## Piloter le bot par Discord (Réglages › Discord)
+
+Le bot peut recevoir des ordres depuis Discord, par des commandes « slash ». C'est **votre** bot Discord (vous le créez, vous le gardez) ; le bot de jeu s'y connecte de lui-même, **aucun port à ouvrir**.
+
+**Mise en place** (une seule fois) :
+1. Portail développeurs de Discord : créer une application, y ajouter un **bot**, copier son **jeton**.
+2. Inviter le bot sur votre serveur Discord avec les portées `bot` et `applications.commands` (aucun droit particulier, aucune « intention » privilégiée).
+3. Dans Discord, activer le **mode développeur** et copier avec un clic droit : votre identifiant, le numéro du serveur et, si vous voulez limiter les commandes à un salon, celui du salon.
+4. Réglages › **Discord** : coller le jeton et les numéros, cocher **Pilotage par Discord activé**, **Enregistrer**. L'état de la connexion s'affiche en haut du panneau.
+
+**Qui peut commander** : seulement l'identifiant saisi, sur le serveur saisi (et le salon, s'il est fixé). Toute autre personne reçoit « Commande réservée ». Les réponses ne sont visibles que de la personne qui commande.
+
+| Commande | Effet |
+|---|---|
+| `/bot statut` | État de toutes les instances : connexion, bot ON/OFF, activité |
+| `/bot demarrer [instance]` | Bot sur **ON** (toutes les instances démarrées, ou celle nommée) |
+| `/bot arreter [instance]` | Bot sur **OFF** (le passage en cours se termine) ; sans nom d'instance, demande confirmation |
+| `/instance liste` · `/instance statut <instance>` | Liste des instances ; détail d'une instance (fonctionnalités actives comprises) |
+| `/instance demarrer <instance>` · `/instance arreter <instance>` | Démarre ou arrête la session d'une instance ; l'arrêt demande confirmation |
+| `/fonction activer\|desactiver <fonction> [instance]` | Interrupteur d'une fonctionnalité (le bot doit être sur ON pour qu'elle tourne) |
+| `/journal [instance]` | Derniers événements |
+
+- Le nom d'une instance se tape en entier ou en partie (la saisie propose la liste) ; une instance arrêtée est refusée par `/bot` et `/fonction` avec un message clair.
+- **Confirmation** : par défaut, arrêter tout (`/bot arreter` sans instance) ou arrêter une instance demande de cliquer sur **Confirmer**. La case « Demander une confirmation avant d'arrêter » la retire.
+- Chaque ordre exécuté laisse une ligne dans le journal de l'instance concernée (« … par une commande Discord »).
+- Stockage : `/data/discord.json` (droits 0600). Le jeton n'est jamais renvoyé par l'interface (seulement ses 4 derniers caractères), jamais écrit dans le journal ni exporté ; **Oublier le jeton** le supprime et coupe le pilotage. API : `GET/PUT /api/discord`, `DELETE /api/discord/token` (réglages communs à toutes les instances).
+- Les tests utilisent un faux Discord local (`tests/mock_discord.py`) : la validation finale se fait avec un vrai jeton sur un vrai serveur Discord.
 
 ## Connexion automatique et scan des planètes
 

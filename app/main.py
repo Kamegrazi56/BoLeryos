@@ -23,6 +23,7 @@ from .browser_host import BrowserHost
 from .instance_manager import InstanceError, InstanceManager
 from .instance_routing import BotProxy, InstanceScopeMiddleware
 from .config import Settings, load_settings
+from .discord_routes import build_discord, install_discord
 from .components import COMPONENTS
 from .constructions import BUILDINGS, ConstructionError
 from .transports import MARGIN_STEP as TRANSPORT_MARGIN_STEP
@@ -330,12 +331,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Les routes ci-dessous parlent à `bot`, un mandataire vers l'instance visée par la requête (voir instance_routing.py).
     manager = InstanceManager(settings, host, account)
     bot = BotProxy(manager)
+    discord_store, discord = build_discord(settings.data_dir, manager)  # pilotage par Discord (réglages de l'application)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         await manager.startup()
+        await discord.apply()
         yield
         try:
+            await discord.shutdown()
             await manager.shutdown()
         finally:
             await host.shutdown()
@@ -407,6 +411,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def _check_origin(request: Request) -> None:
         if not _same_origin(request.headers, request.headers.get("host")):
             raise HTTPException(403, "Origine refusée.")
+
+    install_discord(app, discord_store, discord, _check_origin)
 
     @app.post("/api/explore/recording")
     async def api_explore_recording(body: RecordingRequest, request: Request):
