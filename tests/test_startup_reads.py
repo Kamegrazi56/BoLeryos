@@ -6,7 +6,7 @@ def _bot(client):
     return client.app.state.bot
 
 
-def test_population_and_exploration_models_are_read_at_startup_once_per_connection(game_client, game):
+def test_population_and_exploration_models_are_read_at_startup_once_per_connection(game_client, game, monkeypatch):
     bot = _bot(game_client)
     runner = bot.supervisor
     assert bot.inventory.get()["read_at"] is None and not any(bot.explorations.known_models().values())
@@ -24,8 +24,12 @@ def test_population_and_exploration_models_are_read_at_startup_once_per_connecti
     read_at = inventory["read_at"]
     game_client.portal.call(runner.ensure_ready)
     assert bot.inventory.get()["read_at"] == read_at  # pas de second relevé pour la même connexion
-    runner._inventory_done_session, runner._inventory_attempts = False, 0  # nouvelle connexion
+    runner._inventory_done_session, runner._inventory_attempts = False, 0  # nouvelle connexion, relevé encore récent
     runner._explo_models_done_session, runner._explo_models_attempts = False, 0
+    game_client.portal.call(runner.ensure_ready)
+    assert bot.inventory.get()["read_at"] == read_at  # récent : gardé, pas relu
+    monkeypatch.setattr("app.supervisor.INVENTORY_MAX_AGE", -1.0)  # plus récent : il faut le relire
+    runner._inventory_done_session, runner._inventory_attempts = False, 0
     game_client.portal.call(runner.ensure_ready)
     assert bot.inventory.get()["read_at"] > read_at
     assert [a for a in game.actions() if a["kind"] != "view"] == []  # lecture seule : aucune action sur le jeu

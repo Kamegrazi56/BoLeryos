@@ -76,11 +76,22 @@ def test_the_bot_scans_by_itself_once_when_it_enters_the_game(game_client):
     assert _runner(game_client).scan_summary()["scanned_at"] == data["scanned_at"]  # pas de second scan pour la même connexion
 
 
-def test_the_bot_scans_again_after_a_new_connection(game_client):
+def test_a_recent_scan_is_kept_after_a_new_connection(game_client):
     runner = _runner(game_client)
     _ensure_ready(game_client)
     first_scan = runner.scan_summary()["scanned_at"]
     runner._scan_done_session, runner._scan_attempts = False, 0  # ce que fait la supervision en revoyant la page de connexion
+    _ensure_ready(game_client)
+    assert runner.scan_summary()["scanned_at"] == first_scan  # récent : pas relu
+    assert runner._scan_done_session
+
+
+def test_an_old_scan_is_redone_after_a_new_connection(game_client, monkeypatch):
+    runner = _runner(game_client)
+    _ensure_ready(game_client)
+    first_scan = runner.scan_summary()["scanned_at"]
+    monkeypatch.setattr("app.supervisor.PLANETS_MAX_AGE", -1.0)  # le scan gardé est devenu trop vieux
+    runner._scan_done_session, runner._scan_attempts = False, 0
     _ensure_ready(game_client)
     assert runner.scan_summary()["scanned_at"] > first_scan
 

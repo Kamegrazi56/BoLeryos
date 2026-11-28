@@ -14,6 +14,7 @@ from .numbers import norm
 from .planets import GameUiError, Interrupted, PlanetsReader
 from .shipyard import ModelScanner
 from .preferences import Preferences
+from .scan_cache import ScanCache, age_of, describe_age, is_fresh, scope_of
 
 SCAN_AUTO_ATTEMPTS = 3  # tentatives du scan de démarrage par connexion (pas d'acharnement si le jeu change)
 NO_UNIVERSE_WAIT = "sur la page des serveurs, aucun univers choisi"  # attente normale : ni alerte ni événement
@@ -21,6 +22,11 @@ UNIVERSE_ATTEMPTS = 4  # entrées dans l'univers sans résultat avant de demande
 UNKNOWN_SCREEN_SECONDS = 45  # écran non reconnu pendant ce temps : retour à la page de départ
 LOGIN_FAILURES_BEFORE_BLOCK = 3
 LOGIN_RETRY_DELAYS = (60, 300)  # secondes avant la 2e et la 3e tentative de connexion
+# Âge au-delà duquel une lecture gardée est refaite au démarrage. Les planètes et les modèles changent rarement (un
+# achat de colonie, un nouveau modèle) ; l'inventaire est de toute façon relu au début de chaque passage qui en a besoin.
+PLANETS_MAX_AGE = 24 * 3600.0
+MODELS_MAX_AGE = 24 * 3600.0
+INVENTORY_MAX_AGE = 3600.0
 
 
 class ConnectionSupervisor:
@@ -34,6 +40,8 @@ class ConnectionSupervisor:
         self.scan_source = ""
         self.scan_error = ""
         self.scanning = False
+        self.cache = ScanCache(bot._settings.data_dir)  # scans gardés d'un démarrage à l'autre (planètes, modèles)
+        self._scope_seen: str | None = None  # univers + compte pour lesquels les scans en mémoire ont été lus
         self._scan_done_session = False  # le scan de démarrage a réussi pour cette connexion
         self._scan_attempts = 0  # tentatives automatiques pour cette connexion
         # Scan des modèles de vaisseaux (onglet Assemblages du Chantier spatial) : même principe que les planètes.
@@ -136,6 +144,7 @@ class ConnectionSupervisor:
             self.scan_at, self.scan_source, self.scan_error = time.time(), source, ""
             self._scan_done_session = True
             self.prefs.add_catalog("planets", [p.name for p in planets])
+            self._remember("planets", self.scanned_planets, self.scan_at, source)
             self.bot.log(f"Scan des planètes ({source}) : {len(planets)} planète(s) trouvée(s).", event=True)
         finally:
             self.scanning = False
@@ -181,6 +190,7 @@ class ConnectionSupervisor:
             self.models_scan_at, self.models_scan_source, self.models_scan_error = time.time(), source, ""
             self._models_done_session = True
             self.prefs.set_catalog("models", [m["name"] for m in models])
+            self._remember("models", self.scanned_models, self.models_scan_at, source)
             self.bot.log(f"Scan des modèles ({source}) : {len(models)} modèle(s) trouvé(s).", event=True)
         finally:
             self.scanning_models = False
@@ -248,11 +258,53 @@ class ConnectionSupervisor:
             await b._page.goto(b._settings.login_url, wait_until="domcontentloaded", timeout=30_000)
         return "écran du site non reconnu"
 
+    # ------------------------------------------------------------ scans gardés d'un démarrage à l'autre
+    def _scope(self) -> str:
+        """Univers + compte courants ; vide tant qu'ils ne sont pas connus (rien n'est alors gardé ni réutilisé)."""
+        creds = self.bot._creds if self.bot.has_credentials() else None
+        return scope_of(self.prefs.get()["universe"], creds[0] if creds else "")
+
+    def _remember(self, kind: str, items: list[dict], read_at: float | None, source: str) -> None:
+        if read_at is not None:
+            self.cache.save(kind, self._scope(), items, read_at, source)
+
+    def _sync_scope(self) -> None:
+        """Si l'univers ou le compte a changé (ou au premier passage), remplace les scans en mémoire par ceux gardés pour
+        cette portée, sinon par rien : on ne réutilise jamais les planètes d'un autre univers."""
+        scope = self._scope()
+        if scope == self._scope_seen:
+            return
+        self._scope_seen = scope
+        planets, models = self.cache.load("planets", scope), self.cache.load("models", scope)
+        self.scanned_planets = list(planets["items"]) if planets else []
+        self.scan_at, self.scan_source = (planets["read_at"], planets["source"]) if planets else (None, "")
+        self.scanned_models = list(models["items"]) if models else []
+        self.models_scan_at, self.models_scan_source = (models["read_at"], models["source"]) if models else (None, "")
+
+    def _keep_if_fresh(self, kind: str, read_at: float | None, max_age: float, has_data: bool) -> bool:
+        """Vrai si la lecture gardée est assez récente pour ne pas être refaite ; le dit une fois au journal."""
+        if not has_data or not is_fresh(read_at, max_age):
+            return False
+        self._note(f"keep-{kind}", f"{kind} : lecture d'il y a {describe_age(age_of(read_at) or 0)} gardée, pas de nouveau scan "
+                                   "(le bouton « Scanner » ou /scan la refait à la demande).", event=True)
+        return True
+
+    def _inventory_matches_planets(self) -> bool:
+        """L'inventaire gardé concerne bien les planètes connues (sinon : autre univers ou compte, il faut le relire)."""
+        known = {p["name"] for p in self.scanned_planets}
+        stored = self.bot.inventory.get()["planets"]
+        return bool(known) and known == {p["name"] for p in stored}
+
     async def _startup_reads(self) -> None:
         """Lectures faites une fois par connexion, dans l'ordre : planètes, modèles de vaisseaux, Piliers, effectifs
         (population, bâtiments) et modèles d'exploration. Chacune est tentée au plus SCAN_AUTO_ATTEMPTS fois ; les
         suivantes attendent que les planètes soient connues, car les fonctionnalités s'appuient sur ces données."""
         b = self.bot
+        self._sync_scope()
+        if not self._scan_done_session and self._keep_if_fresh("Planètes", self.scan_at, PLANETS_MAX_AGE, bool(self.scanned_planets)):
+            self._scan_done_session = True
+        if not self._models_done_session and self._keep_if_fresh("Modèles de vaisseaux", self.models_scan_at, MODELS_MAX_AGE, bool(self.scanned_models)):
+            self._models_done_session = True
         if not self._scan_done_session and self._scan_attempts < SCAN_AUTO_ATTEMPTS and not b.work.locked():
             self._scan_attempts += 1
             await self.scan_planets("démarrage")  # une fois par connexion
@@ -265,6 +317,10 @@ class ConnectionSupervisor:
             self._pillars_attempts += 1
             result = await pillar.scan("démarrage")  # une fois par connexion, après les modèles (lecture seule)
             self._pillars_done_session = not result.get("error")
+        inventory = getattr(b, "inventory", None)
+        if (inventory is not None and self._scan_done_session and not self._inventory_done_session
+                and self._keep_if_fresh("Inventaire", inventory.get()["read_at"], INVENTORY_MAX_AGE, self._inventory_matches_planets())):
+            self._inventory_done_session = True
         reader = getattr(b, "inventory_reader", None)
         if (reader is not None and self._scan_done_session and not self._inventory_done_session
                 and self._inventory_attempts < SCAN_AUTO_ATTEMPTS and not b.work.locked()):
