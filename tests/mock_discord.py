@@ -11,7 +11,7 @@ import asyncio
 from dataclasses import dataclass, field
 
 from fastapi import FastAPI, Request, WebSocket
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 APP_ID = "111111111111111111"
 OWNER_ID = "222222222222222222"  # propriétaire de l'application
@@ -33,6 +33,7 @@ class DiscordState:
     outbox: list[dict] = field(default_factory=list)  # interactions à envoyer au bot
     callbacks: list[dict] = field(default_factory=list)  # {"id", "body"}
     edits: list[dict] = field(default_factory=list)  # contenus de « @original »
+    deleted: list[str] = field(default_factory=list)  # jetons dont la réponse « @original » a été effacée
     dm_refused: bool = False  # messages privés fermés : la création du salon répond 403
     dms: list[dict] = field(default_factory=list)  # messages privés reçus : {"to", "content"}
     channel_messages: dict[str, list[dict]] = field(default_factory=dict)  # messages d'un salon : {"id", "author", "content", "components"}
@@ -77,6 +78,11 @@ def create_mock_discord(state: DiscordState) -> FastAPI:
     async def edit(app_id: str, token: str, request: Request):
         state.edits.append({"token": token, "body": await request.json()})
         return {}
+
+    @app.delete("/webhooks/{app_id}/{token}/messages/@original")
+    async def delete_reply(app_id: str, token: str):
+        state.deleted.append(token)
+        return Response(status_code=204)
 
     @app.post("/users/@me/channels")
     async def open_dm(request: Request):

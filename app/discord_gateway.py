@@ -29,6 +29,10 @@ API = "https://discord.com/api/v10"
 EPHEMERAL = 64  # message visible de son seul destinataire
 MAX_MESSAGE = 1900  # Discord refuse plus de 2000 caractères par message
 INTERACTION_COMMAND, INTERACTION_BUTTON, INTERACTION_AUTOCOMPLETE = 2, 3, 4
+# Une réponse privée du panneau s'efface seule (Discord ne laisse pas remonter un message : c'est ce qui garde le panneau
+# visible). Sans bouton : brève ; avec boutons (confirmation, « Actualiser… », menu de pause) : le temps de s'en servir.
+# Le jeton d'une interaction n'est valable que 15 min : au-delà, Discord refuse de toucher à la réponse.
+REPLY_LIFETIME, REPLY_LIFETIME_WITH_BUTTONS = 120.0, 600.0
 INTENT_GUILDS = 1  # non privilégiée : prévient quand le bot est invité sur un serveur
 RECONNECT_MIN, RECONNECT_MAX = 5.0, 120.0
 # Codes de fermeture après lesquels réessayer ne sert à rien (jeton refusé, intentions interdites…).
@@ -68,6 +72,7 @@ class DiscordClient:
         self._resume_url = ""
         self._acked = True
         self._tasks: set[asyncio.Task] = set()
+        self._replies: dict[str, tuple[str, asyncio.Task]] = {}  # propriétaire → (jeton, minuterie) de sa dernière réponse du panneau
         self.state, self.error = "off", ""
 
     def status(self) -> dict:
@@ -206,10 +211,11 @@ class DiscordClient:
         elif event == "INTERACTION_CREATE":
             self._spawn(self._on_interaction(data))
 
-    def _spawn(self, job) -> None:
+    def _spawn(self, job) -> asyncio.Task:
         task = asyncio.create_task(job)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+        return task
 
     async def _shutdown_tasks(self) -> None:
         for task in list(self._tasks):
@@ -287,13 +293,43 @@ class DiscordClient:
             outcome = await self._panel.handle(data)
             await self._callback(data, 7, outcome.update)  # redessine le panneau : le choix y reste inscrit
             return
+        owner = str(((data.get("member") or {}).get("user") or {}).get("id", ""))
         ephemeral = bool((data.get("message") or {}).get("flags", 0) & EPHEMERAL)
         if ephemeral:
             await self._callback(data, 6, None)  # clic dans une réponse déjà privée : on la remplace
         else:
             await self._callback(data, 5, {"flags": EPHEMERAL})
+            self._drop_reply(owner)  # une seule réponse sous le panneau : la précédente disparaît
         outcome = await self._panel.handle(data)
-        await self._edit_original(data, outcome.reply or Reply("Rien à faire."), outcome.rows)
+        reply = outcome.reply or Reply("Rien à faire.")
+        await self._edit_original(data, reply, outcome.rows)
+        self._remember_reply(owner, data["token"], bool(outcome.rows or reply.confirm), replaced=ephemeral)
+
+    def _remember_reply(self, owner: str, token: str, with_buttons: bool, replaced: bool) -> None:
+        """Programme l'effacement de la réponse qui vient d'être affichée (et annule celui de la précédente si c'est la même)."""
+        previous = self._replies.pop(owner, None)
+        if previous and replaced:
+            previous[1].cancel()  # même message remplacé sur place : une seule minuterie
+        delay = REPLY_LIFETIME_WITH_BUTTONS if with_buttons else REPLY_LIFETIME
+        self._replies[owner] = (token, self._spawn(self._expire_reply(owner, token, delay)))
+
+    def _drop_reply(self, owner: str) -> None:
+        previous = self._replies.pop(owner, None)
+        if previous:
+            previous[1].cancel()
+            self._spawn(self._delete_reply(previous[0]))
+
+    async def _expire_reply(self, owner: str, token: str, delay: float) -> None:
+        await asyncio.sleep(delay)
+        if self._replies.get(owner, ("",))[0] == token:
+            del self._replies[owner]
+        await self._delete_reply(token)
+
+    async def _delete_reply(self, token: str) -> None:
+        try:
+            await self._call("DELETE", f"/webhooks/{self._app_id}/{token}/messages/@original")
+        except (httpx.HTTPError, DiscordFatal):
+            pass  # déjà effacée par le joueur, ou jeton périmé (15 min) : elle ne gêne plus rien
 
     async def _sync_panel(self) -> None:
         """Publie le panneau s'il n'existe pas, sinon le remet à jour sur place. Jamais deux panneaux."""

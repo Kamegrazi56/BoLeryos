@@ -324,3 +324,57 @@ def test_the_panel_channel_is_part_of_the_settings_api(web):
     assert web.put("/api/discord", json={"panel_channel": "abc"}).status_code == 422
     saved = web.put("/api/discord", json={"token": TOKEN, "enabled": True, "panel_channel": PANEL})
     assert saved.status_code == 200 and saved.json()["settings"]["panel_channel"] == PANEL
+
+
+# ------------------------------------------------------------------ réponses qui ne s'accumulent pas sous le panneau (GRAZI-65)
+def test_a_new_action_erases_the_previous_private_answer(settings, tmp_path, fake_discord):
+    async def steps(manager, client):
+        fake_discord.outbox.append(_click("pn:do:nx", _panel_of(client)))
+        await _wait(lambda: len(fake_discord.edits) == 1)
+        fake_discord.outbox.append(_click("pn:do:jr", _panel_of(client)))
+        await _wait(lambda: len(fake_discord.edits) == 2)
+        await _wait(lambda: fake_discord.deleted)
+
+    _drive(settings, tmp_path, fake_discord, steps, panel_channel=PANEL)
+    assert fake_discord.deleted == [fake_discord.edits[0]["token"]]  # seule la première est effacée, la seconde reste lisible
+
+
+def test_a_click_inside_the_private_answer_replaces_it_without_erasing_it(settings, tmp_path, fake_discord):
+    async def steps(manager, client):
+        fake_discord.outbox.append(_click("pn:do:fl", _panel_of(client)))
+        await _wait(lambda: len(fake_discord.edits) == 1)
+        fake_discord.outbox.append(_click("pn:go:fl:*", private=True))
+        await _wait(lambda: len(fake_discord.edits) == 2)
+        await asyncio.sleep(0.3)
+
+    _drive(settings, tmp_path, fake_discord, steps, panel_channel=PANEL)
+    assert not fake_discord.deleted
+
+
+def test_a_private_answer_erases_itself_and_a_confirmation_lasts_longer(settings, tmp_path, fake_discord, monkeypatch):
+    monkeypatch.setattr("app.discord_gateway.REPLY_LIFETIME", 0.2)
+    monkeypatch.setattr("app.discord_gateway.REPLY_LIFETIME_WITH_BUTTONS", 30.0)
+
+    async def steps(manager, client):
+        fake_discord.outbox.append(_click("pn:do:nx", _panel_of(client)))
+        await _wait(lambda: fake_discord.deleted)
+        assert not client._replies  # plus rien à retenir
+        fake_discord.outbox.append(_click("pn:do:off", _panel_of(client)))  # « Toutes » : demande confirmation
+        await _wait(lambda: len(fake_discord.edits) == 2)
+        await asyncio.sleep(0.5)
+
+    _drive(settings, tmp_path, fake_discord, steps, panel_channel=PANEL)
+    assert fake_discord.deleted == [fake_discord.edits[0]["token"]]  # la confirmation en attente est toujours là
+
+
+def test_erasing_an_answer_already_gone_is_harmless(settings, tmp_path, fake_discord, monkeypatch):
+    monkeypatch.setattr("app.discord_gateway.REPLY_LIFETIME", 0.1)
+
+    async def steps(manager, client):
+        fake_discord.outbox.append(_click("pn:do:nx", _panel_of(client)))
+        await _wait(lambda: fake_discord.deleted)
+        fake_discord.outbox.append(_click("pn:do:jr", _panel_of(client)))
+        await _wait(lambda: len(fake_discord.edits) == 2)
+        assert client.state == "connected"
+
+    _drive(settings, tmp_path, fake_discord, steps, panel_channel=PANEL)

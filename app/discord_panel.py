@@ -22,7 +22,7 @@ PAUSE_CHOICES = (15, 30, 60, 120, 240, 480, 720)
 
 CONTENT = ("**Panneau de commande Boleryos**\n"
            "1. Choisissez une instance (ou « Toutes les instances »).\n"
-           "2. Cliquez sur une action : la réponse n'est visible que de vous.\n"
+           "2. Cliquez sur une action : la réponse n'est visible que de vous et s'efface d'elle-même.\n"
            "Pour activer, désactiver ou lancer une fonctionnalité, choisissez-la d'abord dans le second menu.\n"
            "Réservé au propriétaire du bot ; les commandes « / » marchent toujours.")
 
