@@ -30,7 +30,9 @@ class DiscordRequest(BaseModel):
 def build_discord(data_dir: str | None, manager: InstanceManager) -> tuple[DiscordStore, DiscordService]:
     store = DiscordStore(data_dir)
     runner = CommandRunner(manager, lambda: store.get()["confirm"])
-    return store, DiscordService(store, runner)
+    service = DiscordService(store, runner)
+    manager.report_sink = service.notify  # le bilan de fin de journée part par message privé
+    return store, service
 
 
 def install_discord(app: FastAPI, store: DiscordStore, service: DiscordService, check_origin: Callable[[Request], None]) -> None:

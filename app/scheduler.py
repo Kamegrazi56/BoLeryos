@@ -208,6 +208,9 @@ class Scheduler:
             rt.running = False
         rt.last_at, rt.last_result, rt.last_ok = time.time(), result, ok
         self.bot.log(f"Fonctionnalité « {feature.label} » : {result}.", "info" if ok else "error", event=True)
+        report = getattr(self.bot, "day_report", None)
+        if report is not None:
+            report.record(feature.label, ok, result)  # bilan de fin de journée
         # Le minuteur repart de la FIN du passage (laisse des créneaux aux fonctionnalités moins prioritaires).
         delay = self._self_timed_delay(feature) if feature.self_timed else self._draw_delay(feature.id)
         rt.next_at = self._clock() + delay if self.store.get(feature.id)["enabled"] else None

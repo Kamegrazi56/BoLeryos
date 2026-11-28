@@ -33,6 +33,8 @@ class DiscordState:
     outbox: list[dict] = field(default_factory=list)  # interactions à envoyer au bot
     callbacks: list[dict] = field(default_factory=list)  # {"id", "body"}
     edits: list[dict] = field(default_factory=list)  # contenus de « @original »
+    dm_refused: bool = False  # messages privés fermés : la création du salon répond 403
+    dms: list[dict] = field(default_factory=list)  # messages privés reçus : {"to", "content"}
 
 
 def create_mock_discord(state: DiscordState) -> FastAPI:
@@ -72,6 +74,17 @@ def create_mock_discord(state: DiscordState) -> FastAPI:
     @app.patch("/webhooks/{app_id}/{token}/messages/@original")
     async def edit(app_id: str, token: str, request: Request):
         state.edits.append({"token": token, "body": await request.json()})
+        return {}
+
+    @app.post("/users/@me/channels")
+    async def open_dm(request: Request):
+        if state.dm_refused:
+            return JSONResponse({"message": "Cannot send messages to this user", "code": 50007}, status_code=403)
+        return {"id": "dm-" + (await request.json())["recipient_id"]}
+
+    @app.post("/channels/{channel_id}/messages")
+    async def send_message(channel_id: str, request: Request):
+        state.dms.append({"to": channel_id.removeprefix("dm-"), "content": (await request.json())["content"]})
         return {}
 
     @app.websocket("/gw/")

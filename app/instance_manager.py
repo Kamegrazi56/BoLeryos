@@ -22,6 +22,7 @@ import tempfile
 import time
 from dataclasses import replace
 from pathlib import Path
+from typing import Awaitable, Callable
 
 from .account import Account
 from .bot import BotSession, State
@@ -64,6 +65,7 @@ class InstanceManager:
         self._lobby: BotSession | None = None
         self._startup_task: asyncio.Task | None = None
         self._auto_scan_task: asyncio.Task | None = None
+        self.report_sink: Callable[[str], Awaitable[bool | None]] | None = None  # envoi des bilans de fin de journée (Discord)
         self._load()
         for info in self._infos:  # les instances qui tournaient au dernier arrêt reprennent (sans lancer le navigateur ici)
             if info["autostart"]:
@@ -164,7 +166,15 @@ class InstanceManager:
     def _make_bot(self, instance_id: str) -> BotSession:
         bot = BotSession(self._settings_for(instance_id), self._host, self._account)
         bot.after_new_page = self.refront
+        bot.on_day_end = lambda text: self._send_day_report(instance_id, text)
         return bot
+
+    async def _send_day_report(self, instance_id: str, text: str) -> bool | None:
+        """Envoie le bilan de fin de journée d'une instance. None : aucun canal d'envoi (Discord coupé), rien à dire."""
+        sink = self.report_sink
+        if sink is None:
+            return None
+        return await sink(f"**{self._info(instance_id)['name']}**\n{text}")
 
     def refront(self) -> None:
         """Une instance vient d'ouvrir sa fenêtre sur l'écran virtuel commun : celles qu'un écran regarde repassent devant."""

@@ -10,7 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
-from .features import FEATURES, FeaturesError
+from . import discord_views as views
+from .discord_pause import MAX_MINUTES, MIN_MINUTES, PauseTimers
+from .discord_scan import scan_all
+from .features import FEATURES, Feature, FeaturesError
 from .instance_manager import InstanceError, InstanceManager
 from .numbers import norm
 
@@ -22,6 +25,9 @@ STATE_TEXT = {"idle": "non connecté", "logging_in": "connexion en cours", "logg
 _INSTANCE_OPT = {"type": 3, "name": "instance", "description": "Nom de l'instance", "autocomplete": True}
 _INSTANCE_REQ = {**_INSTANCE_OPT, "required": True}
 _FEATURE_REQ = {"type": 3, "name": "fonction", "description": "Fonctionnalité du bot", "required": True, "autocomplete": True}
+_REFRESH = {"type": 5, "name": "actualiser", "description": "Relire dans le jeu avant de répondre"}
+_MINUTES = {"type": 4, "name": "minutes", "description": f"Durée de la pause en minutes ({MIN_MINUTES} à {MAX_MINUTES})",
+            "required": True, "min_value": MIN_MINUTES, "max_value": MAX_MINUTES}
 
 
 def _sub(name: str, description: str, *options: dict) -> dict:
@@ -40,11 +46,19 @@ COMMAND_DEFINITIONS: list[dict] = [
         _sub("demarrer", "Démarrer la session d'une instance", _INSTANCE_REQ),
         _sub("arreter", "Arrêter la session d'une instance", _INSTANCE_REQ),
     ]},
-    {"name": "fonction", "description": "Activer ou désactiver une fonctionnalité", "options": [
+    {"name": "fonction", "description": "Voir, activer, désactiver ou lancer une fonctionnalité", "options": [
+        _sub("statut", "Fonctionnalités actives et dernier passage", _INSTANCE_OPT),
         _sub("activer", "Activer une fonctionnalité", _FEATURE_REQ, _INSTANCE_OPT),
         _sub("desactiver", "Désactiver une fonctionnalité", _FEATURE_REQ, _INSTANCE_OPT),
+        _sub("lancer", "Faire passer une fonctionnalité activée tout de suite", _FEATURE_REQ, _INSTANCE_OPT),
     ]},
     {"name": "journal", "description": "Derniers événements du bot", "options": [_INSTANCE_OPT]},
+    {"name": "prochain", "description": "Prochain passage de chaque fonctionnalité", "options": [_INSTANCE_OPT]},
+    {"name": "flottes", "description": "Flottes en vol et retours programmés", "options": [_INSTANCE_OPT, _REFRESH]},
+    {"name": "planetes", "description": "Planètes et leurs stocks", "options": [_INSTANCE_OPT, _REFRESH]},
+    {"name": "pause", "description": "Bot sur OFF pendant une durée, puis de nouveau sur ON", "options": [_MINUTES, _INSTANCE_OPT]},
+    {"name": "connexion", "description": "Relancer la connexion au jeu", "options": [_INSTANCE_OPT]},
+    {"name": "scan", "description": "Relire dans le jeu ce dont les fonctionnalités ont besoin", "options": [_INSTANCE_OPT]},
 ]
 
 
@@ -58,6 +72,7 @@ class CommandRunner:
     def __init__(self, manager: InstanceManager, confirm_enabled: Callable[[], bool]) -> None:
         self._manager = manager
         self._confirm_enabled = confirm_enabled
+        self._pauses = PauseTimers()
         self._handlers: dict[tuple[str, str], Callable[[dict, bool], Awaitable[Reply]]] = {
             ("bot", "statut"): self._bot_status,
             ("bot", "demarrer"): self._bot_on,
@@ -66,9 +81,17 @@ class CommandRunner:
             ("instance", "statut"): self._instance_status,
             ("instance", "demarrer"): self._instance_start,
             ("instance", "arreter"): self._instance_stop,
+            ("fonction", "statut"): self._per_instance(views.features_status),
             ("fonction", "activer"): lambda o, c: self._feature(o, True),
             ("fonction", "desactiver"): lambda o, c: self._feature(o, False),
+            ("fonction", "lancer"): self._feature_launch,
             ("journal", ""): self._journal,
+            ("prochain", ""): self._per_instance(views.next_passes),
+            ("flottes", ""): self._fleets,
+            ("planetes", ""): self._planets,
+            ("pause", ""): self._pause,
+            ("connexion", ""): self._reconnect,
+            ("scan", ""): self._scan,
         }
 
     async def execute(self, path: tuple[str, str], options: dict, confirmed: bool = False) -> Reply:
@@ -127,7 +150,7 @@ class CommandRunner:
         state = STATE_TEXT.get(info["state"], info["state"])
         parts = [state, "dans le jeu" if info["in_game"] else "", f"bot {'ON' if info['bot_on'] else 'OFF'}"]
         if bot is not None:
-            parts.append(_activity(bot.scheduler.activity()))
+            parts.append(views.activity(bot.scheduler.activity()))
         return f"{head} : " + ", ".join(p for p in parts if p)
 
     # ------------------------------------------------------------------ /bot
@@ -139,6 +162,7 @@ class CommandRunner:
         names = []
         for info in self._targets(options):
             bot = self._manager.resolve(info["id"])
+            self._pauses.cancel(info["id"])  # le dernier ordre l'emporte sur une pause en cours
             bot.scheduler.start()
             bot.log("Bot mis sur ON par une commande Discord.", event=True)
             names.append(info["name"])
@@ -150,6 +174,7 @@ class CommandRunner:
             return Reply(f"Mettre le bot sur OFF sur {len(targets)} instance(s) ?", "bot:arreter:")
         for info in targets:
             bot = self._manager.resolve(info["id"])
+            self._pauses.cancel(info["id"])
             bot.stop_with_missions()
             bot.log("Bot mis sur OFF par une commande Discord.", event=True)
         return Reply("Bot sur OFF : " + ", ".join(i["name"] for i in targets) + ". Le passage en cours se termine.")
@@ -188,11 +213,17 @@ class CommandRunner:
         return Reply(f"« {info['name']} » est arrêtée.")
 
     # ------------------------------------------------------------------ /fonction et /journal
+    @staticmethod
+    def _find_feature(wanted: str) -> Feature | None:
+        key = norm(wanted)
+        if not key:
+            return None
+        return next((f for f in FEATURES if f.id == key or norm(f.label) == key), None) \
+            or next((f for f in FEATURES if norm(f.label).startswith(key)), None)
+
     async def _feature(self, options: dict, enabled: bool) -> Reply:
-        wanted = norm(options.get("fonction", ""))
-        feature = next((f for f in FEATURES if f.id == wanted or norm(f.label) == wanted), None) \
-            or next((f for f in FEATURES if norm(f.label).startswith(wanted)), None)
-        if feature is None or not wanted:
+        feature = self._find_feature(options.get("fonction", ""))
+        if feature is None:
             return Reply("Fonctionnalité inconnue : la saisie propose la liste.")
         names = []
         for info in self._targets(options):
@@ -205,6 +236,33 @@ class CommandRunner:
         verb = "activée" if enabled else "désactivée"
         return Reply(f"« {feature.label} » {verb} sur : {', '.join(names)}. (Le bot doit être sur ON pour qu'elle tourne.)")
 
+    async def _feature_launch(self, options: dict, confirmed: bool) -> Reply:
+        """Fait passer la fonctionnalité au prochain tour de l'ordonnanceur, sans attendre son minuteur."""
+        feature = self._find_feature(options.get("fonction", ""))
+        if feature is None:
+            return Reply("Fonctionnalité inconnue : la saisie propose la liste.")
+        lines = []
+        for info in self._targets(options):
+            bot = self._manager.resolve(info["id"])
+            lines.append(f"**{info['name']}** : {self._launch_one(bot, feature)}")
+        return Reply("\n".join(lines))
+
+    @staticmethod
+    def _launch_one(bot, feature: Feature) -> str:
+        item = next(f for f in bot.scheduler.summary()["features"] if f["id"] == feature.id)
+        if not item["enabled"]:
+            return f"« {feature.label} » est désactivée : « /fonction activer » d'abord."
+        if item["running"]:
+            return f"« {feature.label} » est déjà en cours."
+        bot.scheduler.wake(feature.id)
+        bot.log(f"Fonctionnalité « {feature.label} » lancée par une commande Discord.", event=True)
+        if not bot.scheduler.on:
+            return f"« {feature.label} » passera dès que le bot sera sur ON."
+        reason = bot.feature_pause(feature.id)
+        if reason:
+            return f"« {feature.label} » est demandée mais attend : {reason}."
+        return f"« {feature.label} » passe au prochain tour (quelques secondes si le bot est libre)."
+
     async def _journal(self, options: dict, confirmed: bool) -> Reply:
         blocks = []
         for info in self._targets(options):
@@ -214,16 +272,78 @@ class CommandRunner:
         return Reply("\n\n".join(blocks))
 
 
-def _activity(act: dict) -> str:
-    """Ce que fait le bot, en une phrase (même lecture que le bandeau de l'interface)."""
-    state = act.get("state")
-    if state == "running":
-        return f"en cours : {act['feature']['label']}"
-    if state == "stopping":
-        return f"termine : {act['feature']['label']}"
-    if state == "blocked":
-        return f"en attente : {act['reason']}"
-    if state == "idle":
-        nxt = act.get("next")
-        return f"au repos, prochain : {nxt['label']}" if nxt else "au repos, rien de prévu"
-    return ""
+    # ------------------------------------------------------------------ lecture de l'état : /prochain /flottes /planetes
+    def _per_instance(self, render: Callable[[object], str]) -> Callable[[dict, bool], Awaitable[Reply]]:
+        """Commande de lecture : un bloc de texte par instance démarrée visée."""
+        async def handler(options: dict, confirmed: bool) -> Reply:
+            blocks = [f"**{info['name']}**\n{render(self._manager.resolve(info['id']))}" for info in self._targets(options)]
+            return Reply("\n\n".join(blocks))
+        return handler
+
+    @staticmethod
+    def _asked_refresh(options: dict) -> bool:
+        return str(options.get("actualiser", "")).lower() == "true"
+
+    async def _fleets(self, options: dict, confirmed: bool) -> Reply:
+        blocks = []
+        for info in self._targets(options):
+            bot = self._manager.resolve(info["id"])
+            note = ""
+            if self._asked_refresh(options):
+                error = (await bot.fleet.scan("Discord")).get("error")
+                note = f"Relevé impossible ({error}) : dernier relevé gardé.\n" if error else ""
+            blocks.append(f"**{info['name']}**\n{note}{views.fleets_in_flight(bot)}")
+        return Reply("\n\n".join(blocks))
+
+    async def _planets(self, options: dict, confirmed: bool) -> Reply:
+        blocks = []
+        for info in self._targets(options):
+            bot = self._manager.resolve(info["id"])
+            note = ""
+            if self._asked_refresh(options):
+                error = (await bot.supervisor.scan_planets("Discord")).get("error")
+                note = f"Scan impossible ({error}) : dernier relevé gardé.\n" if error else ""
+            blocks.append(f"**{info['name']}**\n{note}{views.planets_stocks(bot)}")
+        return Reply("\n\n".join(blocks))
+
+    # ------------------------------------------------------------------ /pause
+    async def _pause(self, options: dict, confirmed: bool) -> Reply:
+        try:
+            minutes = int(options.get("minutes", ""))
+        except ValueError:
+            return Reply("Durée illisible : indiquez un nombre de minutes.")
+        if not MIN_MINUTES <= minutes <= MAX_MINUTES:
+            return Reply(f"Durée refusée : de {MIN_MINUTES} à {MAX_MINUTES} minutes.")
+        lines = []
+        for info in self._targets(options):
+            bot = self._manager.resolve(info["id"])
+            if not bot.scheduler.on:
+                lines.append(f"**{info['name']}** : le bot est déjà sur OFF, rien à mettre en pause.")
+                continue
+            instance_id = info["id"]
+            back = self._pauses.start(instance_id, bot, minutes, lambda i=instance_id, b=bot: b in self._manager.running_bots())
+            bot.log(f"Bot en pause {minutes} min par une commande Discord.", event=True)
+            lines.append(f"**{info['name']}** : bot sur OFF, il repasse sur ON à {back:%H:%M} (heure française). Le passage en cours se termine.")
+        return Reply("\n".join(lines))
+
+    # ------------------------------------------------------------------ /connexion et /scan
+    async def _reconnect(self, options: dict, confirmed: bool) -> Reply:
+        lines = []
+        for info in self._targets(options):
+            bot = self._manager.resolve(info["id"])
+            if not bot.has_credentials():
+                bot.restore_credentials()  # identifiants enregistrés (après une déconnexion, par exemple)
+            if not bot.has_credentials():
+                lines.append(f"**{info['name']}** : aucun identifiant en mémoire, saisissez-les d'abord dans l'interface.")
+                continue
+            bot.supervisor.reset_connection()
+            bot.supervisor.ensure_keeper()
+            bot.log("Connexion relancée par une commande Discord.", event=True)
+            lines.append(f"**{info['name']}** : connexion relancée (« /instance statut » montre où elle en est).")
+        return Reply("\n".join(lines))
+
+    async def _scan(self, options: dict, confirmed: bool) -> Reply:
+        blocks = []
+        for info in self._targets(options):
+            blocks.append(f"**{info['name']}**\n{await scan_all(self._manager.resolve(info['id']))}")
+        return Reply("\n\n".join(blocks))

@@ -55,6 +55,7 @@ from .miner import MiningPass
 from .minings import MiningStore
 from .missions import MissionClaimer, MissionsState
 from .planning import PlanningStore
+from .day_report import DayReport
 from .excavations import ExcavationStore
 from .excavator import ExcavationPass
 from .hacker import HackingPass
@@ -213,6 +214,8 @@ class BotSession:
         self.missions = MissionClaimer(self, self.mission_state)  # « Récupérer » de l'onglet Missions, 1 fois par jour
         self._missions_task: asyncio.Task | None = None
         self.planning = PlanningStore(settings.data_dir)  # plages horaires actives par jour (heure française)
+        self.day_report = DayReport()  # bilan des passages de la journée (message de fin de journée)
+        self.on_day_end = None  # async (texte) -> bool | None : envoie le bilan (Discord) ; fourni par le gestionnaire d'instances
         self.feature_hours = FeatureHoursStore(settings.data_dir)  # horaires propres au Piratage et à l'Exploration
         self.spying = SpySettings(settings.data_dir)  # espionnage des Errants : planète, minimums, nombre de ressources
         self.spy = SpyCampaign(self, self.spying)  # campagne manuelle : un drone par Errant visible, rapports gardés ou supprimés
@@ -300,9 +303,12 @@ class BotSession:
         enregistrée, puis la page du jeu est fermée (page vide) SANS effacer les cookies : au début de la plage suivante,
         le jeu est rouvert avec la même session (connexion avec les identifiants seulement si le jeu l'a expirée).
         (B) Fin de la dernière plage de la journée : les récompenses des missions sont récupérées juste avant."""
+        last_of_day = self._last_slot_of_day()
         async with self.work:
-            if self._last_slot_of_day() and not self.supervisor.game_blocker():
-                await self.missions.claim_daily("la fin de la dernière plage du planning")
+            if last_of_day and not self.supervisor.game_blocker():
+                claimed = await self.missions.claim_daily("la fin de la dernière plage du planning")
+                if claimed:
+                    self.day_report.record("Missions du jour", True, claimed)
             await self._persist_session()  # avant de quitter l'état « connecté » : n'enregistre que connecté
             async with self._lock:
                 if self._page is not None and not self._page.is_closed():
@@ -312,6 +318,25 @@ class BotSession:
                         self.log(f"Erreur pendant la fermeture du jeu ({type(exc).__name__}).", "error")
                 self._set(State.IDLE, f"Jeu fermé : {reason}.")
         self.log(f"Planning : {reason} ; page du jeu fermée (session gardée).", event=True)
+        if last_of_day:
+            await self._send_day_report()
+
+    async def _send_day_report(self) -> None:
+        """Fin de la dernière plage du jour : envoie le bilan des passages (une fois), s'il y en a eu. Ne lève jamais."""
+        report, sink = self.day_report, self.on_day_end
+        if sink is None or not report.has_activity():
+            return
+        try:
+            sent = await sink(report.text())
+        except Exception as exc:  # noqa: BLE001 - un bilan raté ne doit pas gêner la fermeture du jeu
+            self.log(f"Bilan de fin de journée : envoi impossible ({type(exc).__name__}).", "warn", event=True)
+            return
+        finally:
+            report.reset()
+        if sent:
+            self.log("Bilan de fin de journée envoyé par Discord.", event=True)
+        elif sent is False:
+            self.log("Bilan de fin de journée non envoyé : Discord n'est pas connecté ou refuse les messages privés.", "warn", event=True)
 
     async def resume_session(self) -> None:
         """Début de plage : le jeu est rouvert avec la session gardée (la supervision reconnaît ensuite la partie, le

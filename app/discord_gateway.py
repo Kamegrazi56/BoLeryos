@@ -25,6 +25,7 @@ from .discord_store import DiscordStore
 
 API = "https://discord.com/api/v10"
 EPHEMERAL = 64  # message visible de son seul destinataire
+MAX_MESSAGE = 1900  # Discord refuse plus de 2000 caractères par message
 INTERACTION_COMMAND, INTERACTION_BUTTON, INTERACTION_AUTOCOMPLETE = 2, 3, 4
 INTENT_GUILDS = 1  # non privilégiée : prévient quand le bot est invité sur un serveur
 RECONNECT_MIN, RECONNECT_MAX = 5.0, 120.0
@@ -263,6 +264,22 @@ class DiscordClient:
             body["data"] = payload
         await self._call("POST", f"/interactions/{data['id']}/{data['token']}/callback", json=body)
 
+    # ------------------------------------------------------------------ messages envoyés sans qu'on les ait demandés
+    async def notify_owners(self, text: str) -> bool:
+        """Message privé à chaque propriétaire (bilan de fin de journée). True si au moins un l'a reçu.
+        Faux si le client n'est pas connecté ou si Discord refuse (messages privés fermés)."""
+        if self.state != "connected" or self._http is None or not self._owners:
+            return False
+        sent = False
+        for owner in sorted(self._owners):
+            try:
+                channel = (await self._call("POST", "/users/@me/channels", json={"recipient_id": owner})).json()["id"]
+                await self._call("POST", f"/channels/{channel}/messages", json={"content": text[:MAX_MESSAGE]})
+                sent = True
+            except (httpx.HTTPError, DiscordFatal, KeyError, ValueError):
+                continue  # ce destinataire n'a pas reçu le message ; les autres peuvent encore le recevoir
+        return sent
+
     # ------------------------------------------------------------------ appels REST
     async def _call(self, method: str, path: str, **kwargs) -> httpx.Response:
         assert self._http is not None
@@ -319,6 +336,13 @@ class DiscordService:
         if self._store.ready():
             self._client = DiscordClient(self._store, self._runner)
             self._task = asyncio.create_task(self._client.run())
+
+    async def notify(self, text: str) -> bool | None:
+        """Envoie un message privé aux propriétaires. None : le pilotage est coupé (rien à envoyer), sinon réussi ou non."""
+        client = self._client
+        if client is None:
+            return None
+        return await client.notify_owners(text)
 
     async def shutdown(self) -> None:
         task, self._task = self._task, None

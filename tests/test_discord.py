@@ -229,7 +229,7 @@ def test_client_registers_commands_on_every_invited_server_and_answers(settings,
         await _wait(lambda: fake_discord.edits)
 
     _drive(settings, tmp_path, fake_discord, steps)
-    assert {c["name"] for c in fake_discord.registered} == {"bot", "instance", "fonction", "journal"}
+    assert {c["name"] for c in fake_discord.registered} == {"bot", "instance", "fonction", "journal", "prochain", "flottes", "planetes", "pause", "connexion", "scan"}
     assert fake_discord.registered_on == [GUILD]
     assert fake_discord.identifies[0]["d"]["intents"] == 1 and fake_discord.identifies[0]["d"]["token"] == TOKEN
     assert fake_discord.callbacks[0]["body"] == {"type": 5, "data": {"flags": 64}}  # « en cours », visible de lui seul
