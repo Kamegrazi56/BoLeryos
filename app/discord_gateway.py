@@ -1,11 +1,13 @@
 """Client Discord : reçoit les commandes « slash » du joueur et y répond, sans bibliothèque Discord supplémentaire.
 
-Le bot se connecte à Discord (connexion sortante : aucun port à ouvrir). Aucune « intention » privilégiée n'est demandée :
-les commandes slash arrivent sans elles. Pas à pas :
-  1. lire l'identifiant de l'application et déclarer les commandes sur le serveur choisi (elles apparaissent aussitôt) ;
-  2. ouvrir la passerelle (WebSocket), s'identifier, battre le « cœur » à la cadence demandée ;
-  3. à chaque commande : vérifier que l'auteur est bien le joueur (et le salon, s'il est fixé), répondre « en cours »,
-     exécuter (`CommandRunner`), puis remplacer la réponse par le résultat — visible de lui seul.
+Le bot se connecte à Discord (connexion sortante : aucun port à ouvrir). Seul le jeton est demandé au joueur : le reste se
+lit chez Discord. Aucune « intention » privilégiée (seule « serveurs », libre d'accès, pour voir les invitations à venir).
+Pas à pas :
+  1. lire l'application (identifiant et propriétaire) et les serveurs où le bot est invité ; y déclarer les commandes ;
+  2. ouvrir la passerelle (WebSocket), s'identifier, battre le « cœur » à la cadence demandée ; déclarer aussi les
+     commandes sur tout serveur où le bot est invité plus tard ;
+  3. à chaque commande : vérifier que l'auteur est le propriétaire de l'application (ou membre de son équipe), répondre
+     « en cours », exécuter (`CommandRunner`), puis remplacer la réponse par le résultat — visible de lui seul.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from .discord_store import DiscordStore
 API = "https://discord.com/api/v10"
 EPHEMERAL = 64  # message visible de son seul destinataire
 INTERACTION_COMMAND, INTERACTION_BUTTON, INTERACTION_AUTOCOMPLETE = 2, 3, 4
+INTENT_GUILDS = 1  # non privilégiée : prévient quand le bot est invité sur un serveur
 RECONNECT_MIN, RECONNECT_MAX = 5.0, 120.0
 # Codes de fermeture après lesquels réessayer ne sert à rien (jeton refusé, intentions interdites…).
 FATAL_CLOSE = {4004: "Jeton refusé par Discord.", 4010: "Discord a refusé la connexion.", 4011: "Discord a refusé la connexion.",
@@ -32,6 +35,10 @@ FATAL_CLOSE = {4004: "Jeton refusé par Discord.", 4010: "Discord a refusé la c
 
 class DiscordFatal(Exception):
     """Erreur qui ne se règle pas en réessayant : le joueur doit corriger un réglage."""
+
+
+class DiscordRefused(DiscordFatal):
+    """Discord refuse (403/404) : fatal pour la connexion, mais ne bloque pas les autres serveurs."""
 
 
 def parse_command(data: dict) -> tuple[tuple[str, str], dict]:
@@ -47,6 +54,9 @@ class DiscordClient:
         self._store, self._runner, self._api = store, runner, api
         self._http: httpx.AsyncClient | None = None
         self._app_id = ""
+        self._owners: set[str] = set()  # seuls ces comptes peuvent commander : le propriétaire de l'application
+        self._guilds: set[str] = set()  # serveurs où les commandes sont déclarées
+        self._notice = ""  # remarque à montrer au joueur (ex. bot invité nulle part), sans couper la connexion
         self._seq: int | None = None
         self._session_id = ""
         self._resume_url = ""
@@ -101,9 +111,34 @@ class DiscordClient:
             self._check_close(ws.close_code)
 
     async def _register_commands(self) -> None:
-        self._app_id = (await self._call("GET", "/oauth2/applications/@me")).json()["id"]
-        guild = self._store.get()["guild_id"]
-        await self._call("PUT", f"/applications/{self._app_id}/guilds/{guild}/commands", json=COMMAND_DEFINITIONS)
+        app = (await self._call("GET", "/oauth2/applications/@me")).json()
+        self._app_id, self._owners = app["id"], _owner_ids(app)
+        if not self._owners:
+            raise DiscordFatal("Propriétaire du bot Discord introuvable.")
+        guilds = (await self._call("GET", "/users/@me/guilds")).json()
+        for guild in guilds:
+            await self._register_guild(str(guild["id"]))
+        self._update_notice(bool(guilds))
+
+    async def _register_guild(self, guild_id: str) -> None:
+        """Déclare les commandes sur un serveur ; un refus n'empêche pas les autres serveurs."""
+        if guild_id in self._guilds:
+            return
+        try:
+            await self._call("PUT", f"/applications/{self._app_id}/guilds/{guild_id}/commands", json=COMMAND_DEFINITIONS)
+        except DiscordRefused:
+            self._notice = ("Le bot n'a pas pu installer ses commandes sur un serveur : "
+                            "réinvitez-le avec la portée « applications.commands ».")
+            return
+        self._guilds.add(guild_id)
+        self._update_notice(True)
+
+    def _update_notice(self, invited: bool) -> None:
+        if not invited:
+            self._notice = "Le bot n'est invité sur aucun serveur Discord : invitez-le sur votre serveur privé."
+        elif self._guilds:
+            self._notice = ""
+        self.error = self._notice
 
     # ------------------------------------------------------------------ passerelle
     async def _pump(self, ws) -> None:
@@ -136,7 +171,7 @@ class DiscordClient:
         if self._session_id:
             body = {"op": 6, "d": {"token": self._store.token(), "session_id": self._session_id, "seq": self._seq}}
         else:
-            body = {"op": 2, "d": {"token": self._store.token(), "intents": 0,
+            body = {"op": 2, "d": {"token": self._store.token(), "intents": INTENT_GUILDS,
                                    "properties": {"os": "linux", "browser": "boleryos", "device": "boleryos"}}}
         await ws.send(json.dumps(body))
 
@@ -153,13 +188,18 @@ class DiscordClient:
     def _dispatch(self, event: str | None, data: dict) -> None:
         if event == "READY":
             self._session_id, self._resume_url = data.get("session_id", ""), data.get("resume_gateway_url", "")
-            self.state, self.error = "connected", ""
+            self.state, self.error = "connected", self._notice
         elif event == "RESUMED":
-            self.state, self.error = "connected", ""
+            self.state, self.error = "connected", self._notice
+        elif event == "GUILD_CREATE" and data.get("id"):
+            self._spawn(self._register_guild(str(data["id"])))
         elif event == "INTERACTION_CREATE":
-            task = asyncio.create_task(self._on_interaction(data))
-            self._tasks.add(task)
-            task.add_done_callback(self._tasks.discard)
+            self._spawn(self._on_interaction(data))
+
+    def _spawn(self, job) -> None:
+        task = asyncio.create_task(job)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     async def _shutdown_tasks(self) -> None:
         for task in list(self._tasks):
@@ -168,12 +208,9 @@ class DiscordClient:
 
     # ------------------------------------------------------------------ interactions
     def _allowed(self, data: dict) -> bool:
-        """Seul le joueur choisi, sur le serveur choisi (et le salon, s'il est fixé), peut commander."""
-        cfg = self._store.get()
+        """Seul le propriétaire de l'application Discord peut commander, et seulement depuis un serveur."""
         user = (data.get("member") or {}).get("user") or {}
-        if user.get("id") != cfg["owner_id"] or data.get("guild_id") != cfg["guild_id"]:
-            return False
-        return not cfg["channel_id"] or data.get("channel_id") == cfg["channel_id"]
+        return bool(data.get("guild_id")) and user.get("id") in self._owners
 
     async def _on_interaction(self, data: dict) -> None:
         try:
@@ -241,11 +278,18 @@ class DiscordClient:
     @staticmethod
     def _raise_for(response: httpx.Response) -> None:
         if response.status_code in (401, 403, 404) and "/interactions/" not in str(response.url) and "/webhooks/" not in str(response.url):
-            reasons = {401: "Jeton refusé par Discord.",
-                       403: "Le bot Discord n'a pas le droit d'agir sur ce serveur : invitez-le avec la portée « applications.commands ».",
-                       404: "Serveur Discord introuvable : vérifiez son numéro et que le bot y est invité."}
-            raise DiscordFatal(reasons[response.status_code])
+            if response.status_code == 401:
+                raise DiscordFatal("Jeton refusé par Discord.")
+            raise DiscordRefused("Discord a refusé la demande (droits manquants ou serveur introuvable).")
         response.raise_for_status()
+
+
+def _owner_ids(app: dict) -> set[str]:
+    """Qui possède l'application : son créateur, ou les membres de l'équipe si elle appartient à une équipe."""
+    team = app.get("team") or {}
+    members = {str((m.get("user") or {}).get("id", "")) for m in team.get("members") or []}
+    owner = str((app.get("owner") or {}).get("id", ""))
+    return {i for i in (members or {owner}) if i}
 
 
 def parse_options(data: dict) -> list[dict]:

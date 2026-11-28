@@ -931,8 +931,7 @@ def test_discord_panel_saves_without_ever_showing_the_token(ui):
     token = "T" * 24 + "." + "u" * 6 + "." + "v" * 27
     page.goto(page.base + "/reglages#discord")
     page.fill("#dc-token", token)
-    page.fill("#dc-owner", "222222222222222222")
-    page.fill("#dc-guild", "333333333333333333")
+    assert page.locator("#dc-owner, #dc-guild, #dc-channel").count() == 0  # le jeton suffit
     page.click("#dc-save")
     page.wait_for_function("document.querySelector('#dc-msg').textContent.includes('Enregistré')", timeout=5000)
     assert page.input_value("#dc-token") == "" and "vvvv" in page.get_attribute("#dc-token", "placeholder")

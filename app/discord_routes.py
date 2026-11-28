@@ -24,9 +24,6 @@ class DiscordRequest(BaseModel):
     # Clés absentes : valeurs inchangées. Un jeton absent ou vide garde le jeton actuel.
     enabled: bool | None = None
     token: SecretStr | None = Field(default=None, max_length=200)
-    owner_id: str | None = Field(default=None, max_length=30)
-    guild_id: str | None = Field(default=None, max_length=30)
-    channel_id: str | None = Field(default=None, max_length=30)
     confirm: bool | None = None
 
 

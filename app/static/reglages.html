@@ -512,15 +512,12 @@
       </header>
       <details class="help-box">
         <summary>Comment ça marche ?</summary>
-        <p>Vous créez votre propre bot Discord (portail développeurs de Discord), vous l'invitez sur votre serveur, puis vous collez ici son jeton et vos numéros Discord. Seul <strong>vous</strong> pouvez commander, et vous seul voyez les réponses. Commandes : <code>/bot statut|demarrer|arreter</code>, <code>/instance liste|statut|demarrer|arreter</code>, <code>/fonction activer|desactiver</code>, <code>/journal</code>.</p>
-        <p>Le jeton donne le contrôle de votre bot Discord : il est gardé à part dans le dossier de données, jamais affiché ni exporté. Les numéros se copient dans Discord avec le « mode développeur » (clic droit › Copier l'identifiant).</p>
+        <p>Vous créez votre propre bot Discord (portail développeurs de Discord), vous l'invitez sur votre serveur privé, puis vous collez ici son jeton : rien d'autre à saisir. Seul le <strong>propriétaire du bot Discord</strong> (vous) peut commander, et vous seul voyez les réponses. Commandes : <code>/bot statut|demarrer|arreter</code>, <code>/instance liste|statut|demarrer|arreter</code>, <code>/fonction activer|desactiver</code>, <code>/journal</code>.</p>
+        <p>Le jeton donne le contrôle de votre bot Discord : il est gardé à part dans le dossier de données, jamais affiché ni exporté.</p>
       </details>
       <p id="dc-status" class="status-line" role="status" aria-live="polite">Chargement…</p>
       <div class="fields">
         <label>Jeton du bot Discord <input id="dc-token" type="password" autocomplete="off" aria-label="Jeton du bot Discord"></label>
-        <label>Votre identifiant Discord <input id="dc-owner" type="text" inputmode="numeric" autocomplete="off" aria-label="Votre identifiant Discord"></label>
-        <label>Numéro du serveur Discord <input id="dc-guild" type="text" inputmode="numeric" autocomplete="off" aria-label="Numéro du serveur Discord"></label>
-        <label>Numéro du salon (facultatif) <input id="dc-channel" type="text" inputmode="numeric" autocomplete="off" aria-label="Numéro du salon"></label>
       </div>
       <div class="row">
         <label><input id="dc-confirm" type="checkbox"> Demander une confirmation avant d'arrêter</label>

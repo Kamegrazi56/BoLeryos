@@ -69,11 +69,12 @@ Le bot peut recevoir des ordres depuis Discord, par des commandes « slash ». C
 
 **Mise en place** (une seule fois) :
 1. Portail développeurs de Discord : créer une application, y ajouter un **bot**, copier son **jeton**.
-2. Inviter le bot sur votre serveur Discord avec les portées `bot` et `applications.commands` (aucun droit particulier, aucune « intention » privilégiée).
-3. Dans Discord, activer le **mode développeur** et copier avec un clic droit : votre identifiant, le numéro du serveur et, si vous voulez limiter les commandes à un salon, celui du salon.
-4. Réglages › **Discord** : coller le jeton et les numéros, cocher **Pilotage par Discord activé**, **Enregistrer**. L'état de la connexion s'affiche en haut du panneau.
+2. Inviter le bot sur votre serveur privé avec les portées `bot` et `applications.commands` (aucun droit particulier, aucune « intention » privilégiée).
+3. Réglages › **Discord** : coller le jeton, cocher **Pilotage par Discord activé**, **Enregistrer**. L'état de la connexion s'affiche en haut du panneau. **Le jeton est le seul réglage obligatoire.**
 
-**Qui peut commander** : seulement l'identifiant saisi, sur le serveur saisi (et le salon, s'il est fixé). Toute autre personne reçoit « Commande réservée ». Les réponses ne sont visibles que de la personne qui commande.
+**Ce que le bot lit tout seul chez Discord** : les serveurs où il est invité (les commandes s'y installent, y compris sur un serveur où on l'invite plus tard) et son propriétaire. Si le bot n'est invité nulle part, ou sans la portée `applications.commands`, le panneau le dit.
+
+**Qui peut commander** : seulement le propriétaire de l'application Discord (ou les membres de son équipe, si l'application appartient à une équipe), depuis un serveur. Toute autre personne reçoit « Commande réservée ». Les réponses ne sont visibles que de la personne qui commande.
 
 | Commande | Effet |
 |---|---|

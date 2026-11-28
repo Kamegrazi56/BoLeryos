@@ -20,15 +20,15 @@ from app.discord_store import DiscordSettingsError, DiscordStore
 from app.instance_manager import InstanceManager
 from app.main import create_app
 from tests.conftest import _free_port
-from tests.mock_discord import APP_ID, DiscordState, create_mock_discord
+from tests.mock_discord import GUILD_ID, OWNER_ID, DiscordState, create_mock_discord
 
 TOKEN = "A" * 24 + "." + "b" * 6 + "." + "c" * 27
-OWNER, GUILD, CHANNEL = "222222222222222222", "333333333333333333", "444444444444444444"
+OWNER, GUILD, CHANNEL = OWNER_ID, GUILD_ID, "444444444444444444"
 
 
 def _store(tmp_path, **extra) -> DiscordStore:
     store = DiscordStore(str(tmp_path))
-    store.update({"token": TOKEN, "owner_id": OWNER, "guild_id": GUILD, "enabled": True, **extra})
+    store.update({"token": TOKEN, "enabled": True, **extra})
     return store
 
 
@@ -50,18 +50,24 @@ def test_settings_never_give_the_token_back(tmp_path):
 def test_settings_refuse_bad_values_and_incomplete_activation(tmp_path):
     store = DiscordStore(str(tmp_path))
     with pytest.raises(DiscordSettingsError) as err:
-        store.update({"owner_id": "pas un numéro", "token": "trop court"})
-    assert len(err.value.errors) == 2
+        store.update({"token": "trop court"})
+    assert len(err.value.errors) == 1
     with pytest.raises(DiscordSettingsError) as err:
         store.update({"enabled": True})
     assert any("Jeton" in e for e in err.value.errors)
     assert not store.get()["enabled"] and not store.ready()
 
 
+def test_the_token_is_the_only_required_setting_and_old_numbers_are_dropped(tmp_path):
+    (tmp_path / "discord.json").write_text(json.dumps({"enabled": True, "token": TOKEN, "owner_id": OWNER, "guild_id": GUILD}), encoding="utf8")
+    store = DiscordStore(str(tmp_path))
+    assert store.ready() and {"owner_id", "guild_id", "channel_id"}.isdisjoint(store.get())
+
+
 def test_an_empty_token_keeps_the_current_one_and_forgetting_it_turns_discord_off(tmp_path):
     store = _store(tmp_path)
-    store.update({"token": "", "channel_id": CHANNEL})
-    assert store.token() == TOKEN and store.get()["channel_id"] == CHANNEL
+    store.update({"token": "", "confirm": False})
+    assert store.token() == TOKEN and not store.get()["confirm"]
     after = store.forget_token()
     assert not after["has_token"] and not after["enabled"] and not store.ready()
 
@@ -179,9 +185,9 @@ def fake_discord():
     thread.join(timeout=5)
 
 
-def _interaction(kind, data, user=OWNER, channel=CHANNEL, n=[0]):
+def _interaction(kind, data, user=OWNER, guild=GUILD, n=[0]):
     n[0] += 1
-    return {"type": kind, "id": f"i{n[0]}", "token": f"tok{n[0]}", "guild_id": GUILD, "channel_id": channel,
+    return {"type": kind, "id": f"i{n[0]}", "token": f"tok{n[0]}", "guild_id": guild, "channel_id": CHANNEL,
             "member": {"user": {"id": user}}, "data": data}
 
 
@@ -216,29 +222,64 @@ def _drive(settings, tmp_path, state, steps, **store_extra):
     return asyncio.run(main())
 
 
-def test_client_registers_commands_identifies_without_privileged_intents_and_answers(settings, tmp_path, fake_discord):
+def test_client_registers_commands_on_every_invited_server_and_answers(settings, tmp_path, fake_discord):
     async def steps(manager, client):
         assert client.state == "connected"
         fake_discord.outbox.append(_command("bot", "statut"))
         await _wait(lambda: fake_discord.edits)
 
-    _drive(settings, tmp_path, fake_discord, steps, channel_id=CHANNEL)
+    _drive(settings, tmp_path, fake_discord, steps)
     assert {c["name"] for c in fake_discord.registered} == {"bot", "instance", "fonction", "journal"}
-    assert fake_discord.identifies[0]["d"]["intents"] == 0 and fake_discord.identifies[0]["d"]["token"] == TOKEN
+    assert fake_discord.registered_on == [GUILD]
+    assert fake_discord.identifies[0]["d"]["intents"] == 1 and fake_discord.identifies[0]["d"]["token"] == TOKEN
     assert fake_discord.callbacks[0]["body"] == {"type": 5, "data": {"flags": 64}}  # « en cours », visible de lui seul
     assert "Asterion" in fake_discord.edits[0]["body"]["content"]
 
 
-def test_client_ignores_other_people_and_other_channels(settings, tmp_path, fake_discord):
+def test_client_ignores_other_people_and_private_messages(settings, tmp_path, fake_discord):
     async def steps(manager, client):
         bot = manager.resolve()
         fake_discord.outbox.append(_command("bot", "demarrer") | {"member": {"user": {"id": "999999999999999999"}}})
-        fake_discord.outbox.append(_interaction(2, {"name": "bot", "options": [{"type": 1, "name": "demarrer"}]}, channel="555555555555555555"))
+        fake_discord.outbox.append(_interaction(2, {"name": "bot", "options": [{"type": 1, "name": "demarrer"}]}, guild=None))
         await _wait(lambda: len(fake_discord.callbacks) == 2)
         assert not bot.scheduler.on and not fake_discord.edits
         assert all(c["body"]["type"] == 4 and "réservée" in c["body"]["data"]["content"] for c in fake_discord.callbacks)
 
-    _drive(settings, tmp_path, fake_discord, steps, channel_id=CHANNEL)
+    _drive(settings, tmp_path, fake_discord, steps)
+
+
+def test_client_accepts_every_member_of_the_owning_team(settings, tmp_path, fake_discord):
+    fake_discord.team_members = ["777777777777777777", OWNER]
+
+    async def steps(manager, client):
+        fake_discord.outbox.append(_command("bot", "statut") | {"member": {"user": {"id": "777777777777777777"}}})
+        await _wait(lambda: fake_discord.edits)
+
+    _drive(settings, tmp_path, fake_discord, steps)
+
+
+def test_client_installs_commands_on_a_server_joined_later(settings, tmp_path, fake_discord):
+    async def steps(manager, client):
+        fake_discord.guild_events.append("666666666666666666")
+        await _wait(lambda: len(fake_discord.registered_on) == 2)
+
+    _drive(settings, tmp_path, fake_discord, steps)
+    assert fake_discord.registered_on == [GUILD, "666666666666666666"]
+
+
+def test_client_says_so_when_the_bot_is_invited_nowhere_or_lacks_the_scope(settings, tmp_path, fake_discord):
+    fake_discord.guilds = []
+
+    async def nowhere(manager, client):
+        assert client.state == "connected" and "aucun serveur" in client.error
+
+    _drive(settings, tmp_path, fake_discord, nowhere)
+    fake_discord.guilds, fake_discord.refused_guilds = [GUILD], {GUILD}
+
+    async def refused(manager, client):
+        assert client.state == "connected" and "applications.commands" in client.error, client.error
+
+    _drive(settings, tmp_path, fake_discord, refused)
 
 
 def test_client_confirmation_buttons_then_action(settings, tmp_path, fake_discord):
@@ -307,7 +348,7 @@ def web(settings, tmp_path, monkeypatch):
 
 
 def test_routes_save_settings_hide_the_token_and_start_the_client(web, tmp_path):
-    body = {"token": TOKEN, "owner_id": OWNER, "guild_id": GUILD, "enabled": True}
+    body = {"token": TOKEN, "enabled": True}
     saved = web.put("/api/discord", json=body)
     assert saved.status_code == 200 and TOKEN not in saved.text and saved.json()["settings"]["has_token"]
     assert len(web.started) == 1
@@ -318,6 +359,6 @@ def test_routes_save_settings_hide_the_token_and_start_the_client(web, tmp_path)
 
 def test_routes_refuse_a_foreign_origin_and_bad_values(web):
     assert web.put("/api/discord", json={"confirm": False}, headers={"Origin": "http://evil.example"}).status_code == 403
-    refused = web.put("/api/discord", json={"owner_id": "abc"})
-    assert refused.status_code == 422 and "identifiant" in refused.json()["detail"][0].lower()
+    refused = web.put("/api/discord", json={"token": "abc"})
+    assert refused.status_code == 422 and "jeton" in refused.json()["detail"][0].lower()
     assert web.put("/api/discord", json={"enabled": True}).status_code == 422
