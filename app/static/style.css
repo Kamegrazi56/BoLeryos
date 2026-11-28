@@ -159,6 +159,11 @@ table.res-levels .group-toggle:focus-visible { outline: 2px solid var(--accent);
 .activity.running { color: var(--accent); border-color: var(--accent); background: rgba(79, 216, 255, 0.1); }
 .activity.blocked { color: var(--warn); border-color: rgba(251, 191, 36, 0.55); background: rgba(251, 191, 36, 0.08); }
 .activity.idle { color: var(--ok); border-color: rgba(52, 211, 153, 0.4); }
+/* Pause (barre du haut) : bouton + durée en minutes, à côté du bouton ON/OFF */
+.pause-btn { padding: 6px 14px; }
+.pause-form { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.pause-form input.inline { width: 72px; margin: 0; }
+.pause-form[hidden] { display: none; }
 button.power.big { margin: 0; padding: 20px 42px; font-size: 22px; border-width: 2px; }
 
 /* Bandeau de mode (Simulation / Réel) */

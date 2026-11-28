@@ -42,6 +42,8 @@ def activity(act: dict) -> str:
         return f"termine : {act['feature']['label']}"
     if state == "blocked":
         return f"en attente : {act['reason']}"
+    if state == "paused":
+        return f"en pause jusqu'à {act['until']}"
     if state == "idle":
         nxt = act.get("next")
         return f"au repos, prochain : {nxt['label']}" if nxt else "au repos, rien de prévu"

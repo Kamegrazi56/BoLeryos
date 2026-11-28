@@ -56,6 +56,7 @@ from .hackings import HackingError
 from .feature_hours import FEATURES as FEATURE_HOURS
 from .feature_hours import FeatureHoursError
 from .planning import DAY_LABELS as PLANNING_DAY_LABELS
+from .pause import MAX_MINUTES, MIN_MINUTES, PauseError
 from .planning import PlanningError
 from .planning import describe as planning_describe
 from .planning import state as planning_state
@@ -100,6 +101,10 @@ class FeatureRequest(BaseModel):
     min_minutes: float | None = None
     max_minutes: float | None = None
     ignore_planning: bool | None = None  # « Fonctionner hors planning » : ignore le planning général
+
+
+class PauseRequest(BaseModel):
+    minutes: int = Field(ge=MIN_MINUTES, le=MAX_MINUTES)
 
 
 class ConstructionLine(BaseModel):
@@ -586,6 +591,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def api_bot_stop(request: Request):
         _check_origin(request)
         bot.stop_with_missions()  # OFF, puis récompenses des missions du jour (1 fois par jour)
+        return JSONResponse(bot.scheduler.summary(), headers=NO_STORE)
+
+    @app.post("/api/bot/pause")
+    async def api_bot_pause(body: PauseRequest, request: Request):
+        """Bot sur OFF pendant `minutes`, puis de nouveau sur ON tout seul (annulée par un ordre ON ou OFF)."""
+        _check_origin(request)
+        try:
+            bot.scheduler.pause.start(body.minutes)
+        except PauseError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        bot.log(f"Bot en pause {body.minutes} min (interface).", event=True)
         return JSONResponse(bot.scheduler.summary(), headers=NO_STORE)
 
     # --- Constructions : liste d'objectifs (bâtiment + niveau cible) et choix des planètes ----------

@@ -11,11 +11,11 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 from . import discord_views as views
-from .discord_pause import MAX_MINUTES, MIN_MINUTES, PauseTimers
 from .discord_scan import scan_all
 from .features import FEATURES, Feature, FeaturesError
 from .instance_manager import InstanceError, InstanceManager
 from .numbers import norm
+from .pause import MAX_MINUTES, MIN_MINUTES, PauseError
 
 MAX_REPLY = 1900  # Discord refuse plus de 2000 caractères par message
 JOURNAL_LINES = 8
@@ -72,7 +72,6 @@ class CommandRunner:
     def __init__(self, manager: InstanceManager, confirm_enabled: Callable[[], bool]) -> None:
         self._manager = manager
         self._confirm_enabled = confirm_enabled
-        self._pauses = PauseTimers()
         self._handlers: dict[tuple[str, str], Callable[[dict, bool], Awaitable[Reply]]] = {
             ("bot", "statut"): self._bot_status,
             ("bot", "demarrer"): self._bot_on,
@@ -166,7 +165,6 @@ class CommandRunner:
         names = []
         for info in self._targets(options):
             bot = self._manager.resolve(info["id"])
-            self._pauses.cancel(info["id"])  # le dernier ordre l'emporte sur une pause en cours
             bot.scheduler.start()
             bot.log("Bot mis sur ON par une commande Discord.", event=True)
             names.append(info["name"])
@@ -178,7 +176,6 @@ class CommandRunner:
             return Reply(f"Mettre le bot sur OFF sur {len(targets)} instance(s) ?", "bot:arreter:")
         for info in targets:
             bot = self._manager.resolve(info["id"])
-            self._pauses.cancel(info["id"])
             bot.stop_with_missions()
             bot.log("Bot mis sur OFF par une commande Discord.", event=True)
         return Reply("Bot sur OFF : " + ", ".join(i["name"] for i in targets) + ". Le passage en cours se termine.")
@@ -321,11 +318,11 @@ class CommandRunner:
         lines = []
         for info in self._targets(options):
             bot = self._manager.resolve(info["id"])
-            if not bot.scheduler.on:
+            try:
+                back = bot.scheduler.pause.start(minutes)
+            except PauseError:  # seul cas possible ici : durée déjà vérifiée, bot sur OFF
                 lines.append(f"**{info['name']}** : le bot est déjà sur OFF, rien à mettre en pause.")
                 continue
-            instance_id = info["id"]
-            back = self._pauses.start(instance_id, bot, minutes, lambda i=instance_id, b=bot: b in self._manager.running_bots())
             bot.log(f"Bot en pause {minutes} min par une commande Discord.", event=True)
             lines.append(f"**{info['name']}** : bot sur OFF, il repasse sur ON à {back:%H:%M} (heure française). Le passage en cours se termine.")
         return Reply("\n".join(lines))

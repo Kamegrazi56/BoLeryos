@@ -269,6 +269,30 @@ def test_features_page_sets_the_timer_enables_reorders_and_the_switch_starts_the
     assert errors == []
 
 
+def test_the_pause_button_puts_the_bot_off_for_a_duration_and_the_power_button_cancels_it(ui):
+    page, errors, app = ui
+    assert page.locator("#pause-btn").is_disabled()  # bot sur OFF : rien à mettre en pause
+    page.click("#power")
+    page.wait_for_function("document.querySelector('#power').textContent === 'Bot : ON'", timeout=5000)
+    page.wait_for_function("!document.querySelector('#pause-btn').disabled", timeout=5000)
+    page.click("#pause-btn")
+    assert page.locator("#pause-form").is_visible()
+    page.fill("#pause-minutes", "0")
+    page.click("#pause-form button[type=submit]")
+    assert "720" in page.locator("#pause-msg").text_content()  # durée refusée avant tout envoi
+    page.fill("#pause-minutes", "45")
+    page.click("#pause-form button[type=submit]")
+    page.wait_for_function("document.querySelector('#activity').textContent.startsWith('En pause')", timeout=5000)
+    assert page.locator("#power").text_content() == "Bot : OFF" and not app.state.bot.scheduler.on
+    assert app.state.bot.scheduler.pause.active
+    page.click("#power")  # un ordre ON annule la pause
+    page.wait_for_function("document.querySelector('#power').textContent === 'Bot : ON'", timeout=5000)
+    assert not app.state.bot.scheduler.pause.active
+    page.click("#power")
+    page.wait_for_function("document.querySelector('#power').textContent === 'Bot : OFF'", timeout=5000)
+    assert errors == []
+
+
 def test_constructions_panel_raises_targets_from_the_levels_table(ui, game):
     page, errors, app = ui
     game.reset(levels={"0": {"Caserne": 10}, "1": {"Caserne": 12}})  # niveaux différents selon la planète

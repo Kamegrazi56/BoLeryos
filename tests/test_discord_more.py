@@ -12,7 +12,7 @@ from app.bot import BotSession
 from app.day_report import DayReport
 from app.discord_commands import COMMAND_DEFINITIONS, CommandRunner
 from app.discord_gateway import DiscordClient, DiscordService, parse_command
-from app.discord_pause import PauseTimers
+from app.pause import BotPause
 from app.discord_scan import Reading, scan_all
 from app.discord_views import amount, span
 from app.features import FEATURES
@@ -153,16 +153,16 @@ def test_pause_turns_the_bot_off_then_back_on_by_itself(settings, tmp_path):
         assert seconds == 90 * 60
         await gate.wait()
 
-    runner._pauses = PauseTimers(fake_sleep)
+    bot.scheduler.pause = BotPause(bot.scheduler, fake_sleep)
 
     async def scenario():
         assert "déjà sur OFF" in (await runner.execute(("pause", ""), {"minutes": "5"})).text
         bot.scheduler.start()
         text = (await runner.execute(("pause", ""), {"minutes": "90"})).text
-        assert not bot.scheduler.on and "repasse sur ON à" in text and runner._pauses.active("asterion")
+        assert not bot.scheduler.on and "repasse sur ON à" in text and bot.scheduler.pause.active
         gate.set()
         await _wait_async(lambda: bot.scheduler.on)
-        assert not runner._pauses.active("asterion")
+        assert not bot.scheduler.pause.active
 
     asyncio.run(scenario())
     assert any("Fin de la pause" in e["msg"] for e in bot.events(10))
@@ -178,14 +178,14 @@ async def _wait_async(condition, timeout=2.0):
 def test_a_later_order_cancels_the_pause_and_bad_durations_are_refused(settings, tmp_path):
     manager, runner = _runner(settings, tmp_path, confirm=False)
     bot = manager.resolve()
-    runner._pauses = PauseTimers(lambda s: asyncio.sleep(3600))
+    bot.scheduler.pause = BotPause(bot.scheduler, lambda s: asyncio.sleep(3600))
 
     async def scenario():
         bot.scheduler.start()
         await runner.execute(("pause", ""), {"minutes": "30", "instance": "asterion"})
-        assert runner._pauses.active("asterion")
+        assert bot.scheduler.pause.active
         await runner.execute(("bot", "demarrer"), {"instance": "asterion"})  # le dernier ordre l'emporte
-        assert not runner._pauses.active("asterion") and bot.scheduler.on
+        assert not bot.scheduler.pause.active and bot.scheduler.on
         for bad, word in (("0", "refusée"), ("721", "refusée"), ("abc", "illisible"), ("", "illisible")):
             assert word in (await runner.execute(("pause", ""), {"minutes": bad})).text
 
@@ -196,7 +196,7 @@ def test_the_pause_does_not_restart_a_bot_whose_instance_was_stopped(settings, t
     manager, runner = _runner(settings, tmp_path)
     bot = manager.resolve()
     gate = asyncio.Event()
-    runner._pauses = PauseTimers(lambda s: gate.wait())
+    bot.scheduler.pause = BotPause(bot.scheduler, lambda s: gate.wait())
 
     async def scenario():
         bot.scheduler.start()

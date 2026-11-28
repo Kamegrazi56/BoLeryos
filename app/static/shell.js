@@ -59,7 +59,7 @@
     b.setAttribute("aria-pressed", String(on));
     b.title = on
       ? (waiting ? `En attente : ${waiting}` : "Les fonctionnalités activées tournent. Cliquer pour arrêter (le passage en cours se termine).")
-      : "Le bot est sur OFF : aucune fonctionnalité ne tourne. Cliquer pour démarrer.";
+      : "Le bot est sur OFF : aucune fonctionnalité ne tourne. Cliquer pour démarrer (annule aussi une pause en cours).";
   }
   // ---------------------------------------------- activité du bot (à côté du bouton ON/OFF)
   let activity = { state: "off" };
@@ -70,6 +70,7 @@
       case "running": return { cls: "running", text: `En cours : ${act.feature.label}` };
       case "stopping": return { cls: "running", text: `Termine : ${act.feature.label}` };
       case "blocked": return { cls: "blocked", text: `En attente : ${act.reason}` };
+      case "paused": return { cls: "idle", text: `En pause · reprise à ${act.until} (dans ${window.ui.dur(Math.max(0, nextAt - now))})` };
       case "idle": {
         if (!act.next) return { cls: "idle", text: "Au repos · aucun passage prévu" };
         const left = Math.max(0, nextAt - now);
@@ -90,7 +91,8 @@
   }
   function setActivity(act) {
     activity = act || { state: "off" };
-    nextAt = activity.state === "idle" && activity.next ? Date.now() / 1000 + activity.next.in_s : null;
+    nextAt = activity.state === "idle" && activity.next ? Date.now() / 1000 + activity.next.in_s
+      : activity.state === "paused" ? Date.now() / 1000 + activity.left_s : null;
     paintActivity();
   }
   setInterval(paintActivity, 1000);
@@ -108,8 +110,40 @@
       poll();
     }
   });
+  // --------------------------------------------- pause : OFF pendant X minutes, puis ON tout seul
+  const pauseBtn = () => document.getElementById("pause-btn");
+  const pauseForm = () => document.getElementById("pause-form");
+  const pauseMsg = () => document.getElementById("pause-msg");
+  function buildPause() {
+    const anchor = power();
+    if (!anchor) return;
+    const minutes = el("input", { id: "pause-minutes", type: "number", min: 1, max: 720, step: 1, value: 30, className: "inline" });
+    minutes.setAttribute("aria-label", "Durée de la pause en minutes");
+    const form = el("form", { id: "pause-form", className: "pause-form", hidden: true, noValidate: true },
+      "Pause de ", minutes, " min ", el("button", { type: "submit", textContent: "Lancer" }), el("span", { id: "pause-msg", className: "hint", role: "status" }));
+    const btn = el("button", { id: "pause-btn", type: "button", className: "pause-btn", textContent: "Pause", title: "Met le bot sur OFF pendant une durée choisie, puis le remet sur ON tout seul." });
+    btn.setAttribute("aria-expanded", "false");
+    btn.addEventListener("click", () => { form.hidden = !form.hidden; btn.setAttribute("aria-expanded", String(!form.hidden)); pauseMsg().textContent = ""; });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const value = Number(minutes.value);
+      if (!Number.isInteger(value) || value < 1 || value > 720) { pauseMsg().textContent = "De 1 à 720 minutes."; return; }
+      const res = await fetch("/api/bot/pause", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ minutes: value }) });
+      if (res.ok) { form.hidden = true; btn.setAttribute("aria-expanded", "false"); poll(); return; }
+      const body = await res.json().catch(() => ({}));
+      pauseMsg().textContent = typeof body.detail === "string" ? body.detail : "Pause refusée.";
+    });
+    anchor.after(btn, form);
+  }
+  buildPause();
+  function paintPause(on) {
+    const btn = pauseBtn();
+    if (!btn) return;
+    btn.disabled = !on; // une pause n'a de sens que bot sur ON
+    if (!on && !pauseForm().hidden) { pauseForm().hidden = true; btn.setAttribute("aria-expanded", "false"); }
+  }
   function paint(status) {
-    if (status.scheduler && !toggling) paintPower(status.scheduler.on, status.scheduler.waiting);
+    if (status.scheduler && !toggling) { paintPower(status.scheduler.on, status.scheduler.waiting); paintPause(status.scheduler.on); }
     if (status.scheduler) setActivity(status.scheduler.activity);
     const badge = document.getElementById("badge");
     if (badge && !document.getElementById("screen")) { // la page Écran met le badge à jour en direct

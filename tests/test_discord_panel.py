@@ -243,7 +243,7 @@ def test_pause_offers_durations_then_starts_the_pause(settings, tmp_path, fake_d
         fake_discord.outbox.append(_click(menu["custom_id"], values=["30"], private=True))
         await _wait(lambda: len(fake_discord.edits) == 2)
         assert not manager.resolve().scheduler.on  # en pause : sur OFF le temps de la pause
-        client._runner._pauses.cancel("asterion")
+        manager.resolve().scheduler.pause.cancel()
 
     _drive(settings, tmp_path, fake_discord, steps, panel_channel=PANEL)
     assert "repasse sur ON" in fake_discord.edits[1]["body"]["content"]

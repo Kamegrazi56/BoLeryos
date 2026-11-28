@@ -11,8 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .discord_commands import CommandRunner, Reply
-from .discord_pause import MAX_MINUTES, MIN_MINUTES
 from .features import FEATURES
+from .pause import MAX_MINUTES, MIN_MINUTES
 
 PREFIX = "pn:"
 ALL = "*"  # valeur du menu « Toutes les instances » (une option ne peut pas être vide)

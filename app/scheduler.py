@@ -19,6 +19,7 @@ from typing import Callable
 
 from .engine import describe_unsupported
 from .features import Feature, FeatureStore
+from .pause import BotPause
 
 TICK_SECONDS = 1.0  # fréquence à laquelle l'ordonnanceur regarde si une fonctionnalité est due
 SELF_TIMED_MIN_SECONDS = 60.0  # relance automatique : jamais deux passages à moins d'une minute
@@ -63,6 +64,7 @@ class Scheduler:
         self._on = False
         self._task: asyncio.Task | None = None
         self.waiting = ""  # pourquoi aucun passage n'a lieu alors qu'un est dû
+        self.pause = BotPause(self)  # OFF pour une durée, puis ON tout seul
 
     # ------------------------------------------------------------------ interrupteur général
     @property
@@ -70,6 +72,7 @@ class Scheduler:
         return self._on
 
     def start(self) -> None:
+        self.pause.cancel()  # le dernier ordre l'emporte sur une pause en cours
         if not self._on:
             self._on = True
             self.bot.log("Bot : ON.", event=True)
@@ -82,12 +85,14 @@ class Scheduler:
 
     def stop(self) -> None:
         """OFF : le passage en cours se termine, puis plus rien ne tourne."""
+        self.pause.cancel()
         if self._on:
             self._on = False
             self.waiting = ""
             self.bot.log("Bot : OFF (le passage en cours se termine).", event=True)
 
     async def shutdown(self) -> None:
+        self.pause.cancel()  # instance arrêtée : la pause ne doit pas la relancer
         self._on = False
         task, self._task = self._task, None
         if task is not None and task is not asyncio.current_task():
@@ -260,13 +265,15 @@ class Scheduler:
         - « stopping » : bot sur OFF, mais le passage en cours se termine ;
         - « blocked » : un passage est dû mais ne peut pas démarrer (`reason`) ;
         - « idle » : rien en cours, en attente du minuteur de la prochaine fonctionnalité (`next`, ou None) ;
+        - « paused » : bot sur OFF pour une durée, reprise à `until` (heure française), dans `left_s` secondes ;
         - « off » : bot sur OFF, rien ne tourne."""
         running = next((fid for fid in self.store.order if self._runtime[fid].running), None)
         if running is not None:
             f = self._features[running]
             return {"state": "running" if self._on else "stopping", "feature": {"id": f.id, "label": f.label}}
         if not self._on:
-            return {"state": "off"}
+            pause = self.pause.info()
+            return {"state": "paused", **pause} if pause else {"state": "off"}
         if self.waiting:
             return {"state": "blocked", "reason": self.waiting}
         return {"state": "idle", "next": self._next_timer()}
